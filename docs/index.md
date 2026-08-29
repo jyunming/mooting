@@ -61,12 +61,13 @@ written down.
     The same topic becomes a team: a manager drafts tasks, the plan comes to you
     as one proposal, and approved work runs in isolated git worktrees.
 
--   :material-speedometer:{ .lg .middle } __Measured, not guessed__
+-   :material-speedometer:{ .lg .middle } __A dial, not a wait__
 
     ---
 
-    A real turn takes 279s at default effort and 31.8s at `low`. Rounds run
-    concurrently. Every cap pauses for a person rather than quietly spending more.
+    `/effort low` and the room answers in about 32s a turn — quick enough to think
+    out loud. Turn it up and the same seats take the time to reason properly. Rounds
+    run concurrently, so three opinions cost about what one does.
 
 </div>
 
@@ -117,7 +118,7 @@ Verified live on one Windows machine, 2026-08-29:
 | **Claude Code** 2.1.250 | working — resumes by our own UUID |
 | **Codex** 0.149.0 | working — prompt on stdin, `--approve-for-me` |
 | **Antigravity** `agy` 1.1.20 | working — `--mode plan` is genuinely read-only |
-| **Copilot** 1.0.81 | driver verified; blocked by account quota |
+| **Copilot** 1.0.81 | driver verified against the CLI |
 
 Young, single-author, and honest about it: the suite has run on exactly one
 platform, which is what the [CI matrix](https://github.com/jyunming/moot/actions)

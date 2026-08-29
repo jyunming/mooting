@@ -73,11 +73,14 @@ class Caps:
     max_turns_per_seat: int = 6
     max_wakes_per_agent_per_hour: int = 30
     #: Reasoning effort for every seat unless the topic or the seat overrides it.
-    #: `medium` is the default because the endpoints were measured: on a real
-    #: council prompt `low` ran 8.8x faster than default effort, but the argument
-    #: quality is the thing being traded away. Use `low` for routine rounds,
-    #: `high` when the ruling turns on catching a flaw.
-    effort: str = "medium"
+    #: `low` is the default because that is what most sessions are: a question, a
+    #: few readings, keep moving. Measured on a real council prompt it ran 8.8x
+    #: faster than default effort (31.8s a turn against 279s), which is the
+    #: difference between a conversation and a wait. Depth is one command away --
+    #: `/effort high` when the ruling turns on catching a flaw -- and the trade is
+    #: real in that direction: what `low` spends less of is argument quality.
+    #: It is also the one value every driver takes; agy has no `medium`.
+    effort: str = "low"
     #: A real task runs for many minutes. The deliberation ceiling would kill
     #: legitimate work part-way through and leave a half-finished worktree.
     work_timeout_s: float = 1800.0

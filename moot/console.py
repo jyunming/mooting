@@ -199,8 +199,8 @@ class Console:
 
     def effort(self) -> str:
         if self.topic_id is None:
-            return "medium"
-        return self.store.topic(self.topic_id)["effort"] or "medium"
+            return "low"
+        return self.store.topic(self.topic_id)["effort"] or "low"
 
     def _require_topic(self) -> bool:
         if self.topic_id is None:

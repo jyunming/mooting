@@ -1,15 +1,32 @@
-name: docs
+name: site
 
-# Manual only, and Pages must be enabled in repo settings first. Publishing is
-# one-way — a page can be cloned and indexed the moment it is public — so this
-# does not fire on push.
+# The landing page at the root, the documentation underneath it -- assembled by
+# tools/build_site.py, which fails the build rather than shipping a dead link.
+#
+# This fires on push to main now that the site is public. It was manual-only while
+# publishing was still a decision to make; once a page is live, a site that updates
+# only when somebody remembers to click is a site that quietly goes stale.
 on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "marketing/**"
+      - "mkdocs.yml"
+      - "tools/build_site.py"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
   pages: write
   id-token: write
+
+# A queued run waits for the one in flight rather than racing it, and never
+# cancels it: a half-deployed site is worse than a slightly late one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -20,7 +37,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install mkdocs-material
-      - run: mkdocs build --strict
+      - run: python tools/build_site.py
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

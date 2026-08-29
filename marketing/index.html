@@ -244,22 +244,35 @@
   </section>
 
   <section>
-    <p class="eyebrow">Measured, not guessed</p>
-    <h2>Latency is inference, not transport.</h2>
+    <p class="eyebrow">One dial</p>
+    <h2>Quick round table, or deep bench.</h2>
     <p class="muted">
-      On a real council prompt, the reasoning effort setting is worth roughly nine
-      times what the transport is. Persistent sessions — the thing that
-      <em>looks</em> like the fix — would save about two percent.
+      Turn the effort down and the room answers at conversation speed &mdash; float
+      an idea, get three readings, keep moving. Turn it up when the decision is one
+      you will have to live with, and the same seats take the time to think properly
+      before they commit. <code>/effort low</code> changes the room mid-session and
+      lands on the next round &mdash; and any seat you want thinking harder than the
+      rest can carry its own standing default.
     </p>
     <table>
-      <thead><tr><th>Measurement</th><th>Wall clock</th></tr></thead>
+      <thead><tr><th>Setting</th><th>One turn</th><th>What it is for</th></tr></thead>
       <tbody>
-        <tr><td>one turn, default effort</td><td class="fig">279 s</td></tr>
-        <tr><td>the same turn, <code>--effort low</code></td><td class="fig">31.8 s</td></tr>
-        <tr><td>process spawn + MCP handshake</td><td class="fig">~5 s</td></tr>
-        <tr><td>a real three-seat round, concurrent</td><td class="fig">29.9 s</td></tr>
+        <tr><td><code>low</code> &mdash; the default</td><td class="fig">31.8 s</td>
+            <td class="n">daily conversation: thinking out loud, quick second opinions,
+            narrowing the options</td></tr>
+        <tr><td>turned up</td><td class="fig">279 s</td>
+            <td class="n">architecture, trade-offs, the call that is expensive to reverse</td></tr>
       </tbody>
     </table>
+    <p class="muted" style="margin-top:16px">
+      That 279 s is a measured turn at the CLIs' own default reasoning;
+      <code>/effort high</code> goes deeper again. The seats also think
+      <em>at the same time</em>. A real three-seat round came
+      back in <strong>29.9 s</strong> &mdash; three opinions for about what one of
+      them costs, because the round runs concurrently rather than in turn. Starting
+      the CLIs and the MCP handshake account for roughly 5 s of that, so nearly all
+      of the wait is the reasoning you actually asked for.
+    </p>
   </section>
 
   <section id="install">
@@ -291,7 +304,7 @@
         <tr><td>Claude Code 2.1.250</td><td class="n">working — resumes by a UUID we choose</td></tr>
         <tr><td>Codex 0.149.0</td><td class="n">working — prompt on stdin, <code>--approve-for-me</code></td></tr>
         <tr><td>Antigravity 1.1.20</td><td class="n">working — <code>--mode plan</code> is genuinely read-only</td></tr>
-        <tr><td>Copilot 1.0.81</td><td class="n">driver verified; blocked by account quota</td></tr>
+        <tr><td>Copilot 1.0.81</td><td class="n">driver verified against the CLI</td></tr>
       </tbody>
     </table>
     <p class="muted" style="margin-top:14px">

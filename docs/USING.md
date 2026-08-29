@@ -22,7 +22,7 @@ moot console       # the line REPL — for mintty, SSH, or piping
 │ ◆ proposal #3 Adopt backoff with jitter  │    ↳ needs staging…  │
 │   /approve 3 <why>  |  /reject 3 <why>   │                      │
 ├──────────────────────────────────────────┴──────────────────────┤
-│ effort medium | driving | 1 question for you | 1 awaiting ruling │
+│ effort low    | driving | 1 question for you | 1 awaiting ruling │
 │ > _                                                             │
 └─────────────────────────────────────────────────────────────────┘
 ```

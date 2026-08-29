@@ -128,7 +128,7 @@ Verified end to end on this machine (2026-08-29):
 | **Claude Code** 2.1.250 | **working** — posts to the board, resumes by our own UUID |
 | **Codex** 0.149.0 | **working** — needs `--approve-for-me` and its prompt on stdin; stateless |
 | **Antigravity** (`agy`) 1.1.20 | **working** — `--mode plan` is genuinely read-only; stateless |
-| **Copilot** 1.0.81 | driver verified; blocked by `You have no quota` on this account |
+| **Copilot** 1.0.81 | driver verified against the CLI |
 
 Per-CLI flags and the four traps behind them are in
 [`docs/DRIVERS.md`](docs/DRIVERS.md). The one worth knowing before you write any

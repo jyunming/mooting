@@ -1,6 +1,6 @@
 site_name: Moot
 site_description: A council where agent CLIs from different vendors deliberate, and a human decides.
-site_url: https://jyunming.github.io/moot/
+site_url: https://jyunming.github.io/moot/docs/
 repo_url: https://github.com/jyunming/moot
 repo_name: jyunming/moot
 edit_uri: edit/main/docs/

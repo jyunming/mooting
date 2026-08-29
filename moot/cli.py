@@ -350,7 +350,7 @@ def cmd_run(args) -> int:
                           (args.rounds, int(t["id"])))
 
     caps = Caps(max_turns_per_seat=args.max_turns, max_wakes_per_agent_per_hour=args.max_wakes,
-                effort=args.effort or "medium")
+                effort=args.effort or "low")
     sup = Supervisor(board, _drivers(board), caps,
                      turn_taking="sequential" if args.sequential else "concurrent")
     reason = asyncio.run(sup.run_topic(int(t["id"])))
@@ -567,7 +567,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-wakes", type=int, default=30, dest="max_wakes",
                    help="per agent per hour; a failed wake still counts")
     p.add_argument("--effort", choices=["low", "medium", "high"],
-                   help="council-wide effort for this run (default medium)")
+                   help="council-wide effort for this run (default low)")
     p.add_argument("--sequential", action="store_true",
                    help="one seat at a time so each sees the last; slower by ~N x")
     p.set_defaults(fn=cmd_run)

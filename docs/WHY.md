@@ -45,9 +45,12 @@ Two conclusions, both counter-intuitive:
 
 Effort is set per council (`moot run --effort`), per seat
 (`moot agents add --effort`), or per topic (`moot topic new --effort`), resolving
-topic → seat → council. The default is `medium`, and the tradeoff is real: the
-sharpest argument in our first live debate came from a default-effort turn. Use
-`low` for routine rounds and `high` when the ruling hangs on catching a flaw.
+topic → seat → council. The default is `low`, because that is what most sessions
+are — a question, a few readings, keep moving — and at 31.8s a turn against 279s
+it is the difference between a conversation and a wait. The tradeoff is real in
+the other direction: the sharpest argument in our first live debate came from a
+default-effort turn. Raise it with `/effort high` when the ruling hangs on
+catching a flaw.
 
 ## Debate or discussion
 
