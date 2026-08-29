@@ -1,0 +1,32 @@
+name: tests
+
+# Everything here has only ever been run on one Windows machine with one Python.
+# CI is what turns "127 tests pass" from something you have to take on trust into
+# something a reader can check, and it is the only way this project will find out
+# it is accidentally Windows-only.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        python: ["3.10", "3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      # No agent CLI is installed here, and none is needed: the suite drives a
+      # FakeDriver that posts to the board exactly as a real seat does, so
+      # turn-taking, the caps and the human gate are all exercised without a
+      # single token being spent.
+      - run: python -X utf8 -m pytest tests -q
