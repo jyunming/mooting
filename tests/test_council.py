@@ -488,3 +488,17 @@ def test_a_derived_slug_is_always_acceptable_to_open_topic(board):
         slug = slugify(title, [t["slug"] for t in board.topics()])
         board.open_topic(slug, title, "b", "human", seats=("claude",))
     assert len(board.topics()) == 5
+
+
+def test_removing_a_seat_keeps_what_it_said(board):
+    """Tidying the roster must not rewrite the record -- what was said was said."""
+    topic = open_debate(board)
+    board.post(topic, "codex", "an argument that still counts")
+
+    counts = board.delete_agent("codex")
+
+    assert counts["seats"] == 1 and counts["messages"] == 1
+    assert board.seat(topic, "codex") is None
+    assert any(m["author"] == "codex" for m in board.transcript(topic))
+    with pytest.raises(StoreError):
+        board.agent("codex")

@@ -80,6 +80,23 @@ def cmd_agents_ls(args) -> int:
     return 0
 
 
+def cmd_agents_rm(args) -> int:
+    board = _board(args)
+    a = board.agent(args.name)
+    counts = {"seats": len(board.q("SELECT 1 FROM seats WHERE agent = ?", (args.name,))),
+              "messages": len(board.q("SELECT 1 FROM messages WHERE author = ?", (args.name,)))}
+    if not args.yes:
+        print(f"would remove seat `{a['name']}` ({a['kind']})")
+        print(f"  sits on {counts['seats']} topic(s); "
+              f"{counts['messages']} message(s) it wrote stay on the board")
+        print("re-run with --yes")
+        return 1
+    got = board.delete_agent(args.name)
+    print(f"removed `{args.name}` (was on {got['seats']} topic(s); "
+          f"{got['messages']} message(s) kept)")
+    return 0
+
+
 def cmd_topic_new(args) -> int:
     board = _board(args)
     brief = args.brief
@@ -397,6 +414,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="extra argv passed to this CLI every wake (repeatable)")
     p.set_defaults(fn=cmd_agents_add)
     ag.add_parser("ls").set_defaults(fn=cmd_agents_ls)
+    p = ag.add_parser("rm", help="remove a seat from the registry")
+    p.add_argument("name")
+    p.add_argument("--yes", action="store_true", help="actually do it")
+    p.set_defaults(fn=cmd_agents_rm)
 
     tp = sub.add_parser("topic", help="manage topics").add_subparsers(dest="sub", required=True)
     p = tp.add_parser("new")

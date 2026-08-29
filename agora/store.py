@@ -261,6 +261,25 @@ class Store:
     def agents(self) -> list[sqlite3.Row]:
         return self.q("SELECT * FROM agents ORDER BY name")
 
+    def delete_agent(self, name: str) -> dict[str, int]:
+        """Remove a seat from the registry.
+
+        Its seats go with it, because `seats.agent` has a foreign key. Its past
+        messages stay: `messages.author` is plain text, and silently rewriting the
+        record to tidy the roster would be the wrong trade -- what was said was
+        still said.
+        """
+        counts = {
+            "seats": self.q1("SELECT COUNT(*) c FROM seats WHERE agent = ?",
+                             (name,))["c"],
+            "messages": self.q1("SELECT COUNT(*) c FROM messages WHERE author = ?",
+                                (name,))["c"],
+        }
+        with self.tx() as c:
+            c.execute("DELETE FROM seats WHERE agent = ?", (name,))
+            c.execute("DELETE FROM agents WHERE name = ?", (name,))
+        return counts
+
     def is_human(self, name: str) -> bool:
         row = self.q1("SELECT kind FROM agents WHERE name = ?", (name,))
         return bool(row) and row["kind"] in HUMAN_KINDS
