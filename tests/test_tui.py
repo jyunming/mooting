@@ -955,3 +955,75 @@ async def test_seats_keeps_its_verb_and_corrects_you_in_one_read(tmp_path, board
         app.board.handle("/seats add Santa claude")
         assert board.agent("Santa")["kind"] == "claude"
         assert board.seat(app.board.topic_id, "Santa") is not None
+
+
+@pytest.mark.asyncio
+async def test_arrows_walk_what_you_typed_before(tmp_path, board):
+    """With no list open, the arrows should mean what they mean in every other
+    prompt."""
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        box = app.query_one("#say", Input)
+        await type_line(pilot, app, "first thing")
+        await type_line(pilot, app, "second thing")
+
+        await pilot.press("up")
+        await pilot.pause()
+        assert box.value == "second thing"
+        await pilot.press("up")
+        await pilot.pause()
+        assert box.value == "first thing"
+        await pilot.press("down")
+        await pilot.pause()
+        assert box.value == "second thing"
+        await pilot.press("down")
+        await pilot.pause()
+        assert box.value == "", "stepping past the newest returns to a blank line"
+
+
+@pytest.mark.asyncio
+async def test_clicking_a_proposal_row_opens_it(tmp_path, board):
+    """Clicking a row should open that thing, not make you retype an id you can
+    already see."""
+    app = app_for(tmp_path, board)
+    pid = board.propose(app.board.topic_id, "claude", "Book direct",
+                        "the whole reasoning")
+
+    said: list[str] = []
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.write_line = lambda item: said.append(str(item))
+        app.board.emit = app.write_line
+        app._open_work_row(str(pid))
+
+    text = " ".join(said)
+    assert "the whole reasoning" in text and f"/approve {pid}" in text
+
+
+@pytest.mark.asyncio
+async def test_choosing_a_model_sticks_to_the_seat(tmp_path, board):
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._pick_model("codex")
+        await pilot.pause()
+        # The picker is a modal; answering it is what the callback does.
+        app.screen.dismiss("gpt-5.6-sol")
+        await pilot.pause()
+
+    import json
+    cfg = json.loads(board.agent("codex")["driver_cfg"])
+    assert cfg["model"] == "gpt-5.6-sol"
+
+
+def test_model_lists_fall_back_to_known_names_when_a_cli_cannot_be_asked():
+    """Only agy enumerates its models. A picker that only offered a guessed list
+    would be wrong the week a new model shipped, hence the text box."""
+    import asyncio as aio
+
+    from agora.models import KNOWN, LISTERS, available
+
+    assert "agy" in LISTERS and "codex" not in LISTERS
+    assert aio.run(available("codex")) == list(KNOWN["codex"])
+    assert aio.run(available("nosuchcli")) == []

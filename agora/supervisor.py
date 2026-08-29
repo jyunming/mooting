@@ -224,6 +224,13 @@ class Supervisor:
             result = await asyncio.wait_for(driver.wake(seat, prompt), timeout=driver.timeout_s)
         except asyncio.TimeoutError:
             result = WakeResult.failure(f"timed out after {driver.timeout_s}s")
+        except asyncio.CancelledError:
+            # Cancellation is a BaseException, so `except Exception` missed it and
+            # the wake was never closed. Three seats were left reading "thinking"
+            # for twenty minutes after the user stopped the council.
+            self.store.finish_wake(wake_id, "cancelled", "stopped mid-turn")
+            self.store.set_seat_state(topic_id, agent, "idle")
+            raise
         except Exception as exc:  # an adapter bug must not take the topic down
             log.exception("driver %s raised for %s", driver.kind, agent)
             result = WakeResult.failure(f"{type(exc).__name__}: {exc}")

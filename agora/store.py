@@ -868,6 +868,22 @@ class Store:
                 (outcome, detail[:2000], wake_id),
             )
 
+    def sweep_stale_wakes(self, older_than_s: int = 1800) -> int:
+        """Close wakes that nothing is going to close.
+
+        A killed process leaves its wake `pending` forever, and the seat panel
+        reads pending as "thinking" -- so a council that was stopped an hour ago
+        still looks busy. Anything older than the longest a turn could legitimately
+        take is not running.
+        """
+        with self.tx() as c:
+            cur = c.execute(
+                "UPDATE wakes SET outcome = 'abandoned', ended_at = datetime('now'), "
+                "detail = 'no result recorded; process gone' "
+                "WHERE outcome = 'pending' "
+                "AND started_at < datetime('now', ?)", (f"-{older_than_s} seconds",))
+            return cur.rowcount
+
     def active_wakes(self, topic_id: int) -> list[sqlite3.Row]:
         """Seats currently mid-turn, for a live status line. Reads the same ledger
         the cost caps use, so it cannot disagree with what actually ran."""

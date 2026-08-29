@@ -31,6 +31,7 @@ That last point is only safe because no `tx()` block ever awaits. See `Store.tx`
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from rich.markdown import Markdown
@@ -42,8 +43,10 @@ from textual.color import Color
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import (DataTable, Footer, Header, Input, OptionList, RichLog,
-                             Static)
+from textual.containers import Vertical as _V  # noqa: F401  (re-exported below)
+from textual.screen import ModalScreen
+from textual.widgets import (Button, DataTable, Footer, Header, Input, Label,
+                             OptionList, RichLog, Static)
 from textual.widgets.option_list import Option
 
 from .console import Console
@@ -142,6 +145,61 @@ class Board(Console):
         self.app_ref.rebind_topic()
 
 
+
+class ModelPicker(ModalScreen):
+    """Pick the model a seat runs on.
+
+    Only agy can enumerate its own models; the rest take `--model <name>` and
+    offer no way to ask. So the list is a convenience and the text box is the
+    contract -- a picker that only offered a guessed list would be wrong the week
+    a new model shipped.
+    """
+
+    BINDINGS = [("escape", "dismiss_picker", "Cancel")]
+    CSS = """
+    ModelPicker { align: center middle; }
+    #picker { width: 60; height: auto; max-height: 24; padding: 1 2;
+              background: $panel; border: round $accent; }
+    #picker Label { padding: 0 0 1 0; }
+    #models { height: auto; max-height: 12; }
+    """
+
+    def __init__(self, seat: str, kind: str, current: str | None) -> None:
+        super().__init__()
+        self.seat, self.kind, self.current = seat, kind, current
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="picker"):
+            yield Label(Text.assemble(
+                (self.seat, "bold"), (f"  runs {self.kind}", "dim"),
+                (f"\nmodel: {self.current or 'whatever the CLI defaults to'}", "dim")))
+            yield OptionList(Option("(loading models…)", id="__wait__"), id="models")
+            yield Input(placeholder="…or type a model name and press Enter",
+                        id="model_name")
+
+    def on_mount(self) -> None:
+        self.load_models()
+
+    @work
+    async def load_models(self) -> None:
+        from .models import available
+        found = await available(self.kind)
+        lst = self.query_one("#models", OptionList)
+        lst.clear_options()
+        lst.add_options([Option("default — let the CLI choose", id="")]
+                        + [Option(m, id=m) for m in found])
+        lst.highlighted = 0
+
+    def on_option_list_option_selected(self, event) -> None:
+        self.dismiss(event.option.id or "")
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value.strip())
+
+    def action_dismiss_picker(self) -> None:
+        self.dismiss(None)          # None means "changed nothing"
+
+
 class AgoraApp(App):
     CSS = """
     Screen { layout: vertical; }
@@ -191,6 +249,9 @@ class AgoraApp(App):
         self._waiting: str | None = None
         self._palette: dict[str, str] = {}
         self._tints: dict[str, str] = {}
+        #: What you have typed, newest last, walked with ↑/↓ when no hint is open.
+        self._history: list[str] = []
+        self._history_at: int | None = None
 
     # ------------------------------------------------------------------ layout
 
@@ -199,8 +260,10 @@ class AgoraApp(App):
         with Horizontal(id="body"):
             yield RichLog(id="transcript", wrap=True, markup=True, highlight=False)
             with Vertical(id="side"):
-                yield DataTable(id="seats", cursor_type="none", zebra_stripes=True)
-                yield DataTable(id="work", cursor_type="none", zebra_stripes=True)
+                # Rows are clickable: a seat opens its model picker, a proposal
+                # or task opens itself in the transcript.
+                yield DataTable(id="seats", cursor_type="row", zebra_stripes=True)
+                yield DataTable(id="work", cursor_type="row", zebra_stripes=True)
         yield OptionList(id="hint")
         yield Static("", id="status")
         yield Input(placeholder="type to speak · @agent to ask one seat · /help",
@@ -218,8 +281,15 @@ class AgoraApp(App):
         # Paint once now, not only on the first tick -- otherwise every pane sits
         # empty for a second on open, which reads as "nothing here" exactly when
         # someone is looking to see what state the council is in.
+        # A previous session may have been killed mid-round; do not inherit its
+        # ghosts and show three seats thinking forever.
+        freed = self.board.store.sweep_stale_wakes()
+        if freed:
+            self.write_line(f"[dim]cleared {freed} wake(s) left running by an "
+                            f"earlier session[/dim]")
         self.refresh_board()
         self.set_interval(1.0, self.refresh_board)
+        self.set_interval(300.0, lambda: self.board.store.sweep_stale_wakes())
         self.query_one("#say", Input).focus()
 
     # ------------------------------------------------------------- rendering
@@ -573,6 +643,53 @@ class AgoraApp(App):
                     rows.append((f"@{name}", "ask this seat directly"))
         return rows
 
+    def on_data_table_row_selected(self, event) -> None:
+        """A panel row is a thing, so clicking it should open that thing."""
+        table_id = event.data_table.id
+        try:
+            cell = str(event.data_table.get_cell_at((event.cursor_row, 0)))
+        except Exception:
+            return
+        if table_id == "seats":
+            self._pick_model(cell)
+        elif table_id == "work":
+            self._open_work_row(cell)
+
+    def _pick_model(self, seat: str) -> None:
+        if not seat or seat == self.board.me:
+            return
+        try:
+            meta = self.board.store.agent(seat)
+        except StoreError:
+            return
+        cfg = json.loads(meta["driver_cfg"])
+
+        def chosen(value) -> None:
+            if value is None:          # escaped
+                return
+            cfg2 = json.loads(self.board.store.agent(seat)["driver_cfg"])
+            if value:
+                cfg2["model"] = value
+            else:
+                cfg2.pop("model", None)
+            self.board.store.add_agent(seat, meta["kind"], display=meta["display"],
+                                       driver=meta["driver"], driver_cfg=cfg2)
+            self.write_line(f"[dim]{seat} → model "
+                            f"{value or 'default'}; from its next turn[/dim]")
+
+        self.push_screen(ModelPicker(seat, meta["kind"], cfg.get("model")), chosen)
+
+    def _open_work_row(self, first_cell: str) -> None:
+        """Bring the thing itself into the transcript, rather than making someone
+        retype an id they can already see."""
+        ref = first_cell.strip().lstrip("#")
+        if not ref.isdigit():
+            return
+        if self.board.store.topic(self.board.topic_id)["mode"] == "work":
+            self.board.handle(f"/tasks")
+        else:
+            self.board.handle(f"/proposals {ref}")
+
     def on_input_changed(self, event: Input.Changed) -> None:
         """Offer what the half-typed thing could become, arrow-navigable.
 
@@ -593,6 +710,16 @@ class AgoraApp(App):
         ])
         hint.highlighted = 0
         hint.add_class("showing")
+
+    def _walk_history(self, step: int) -> None:
+        box = self.query_one("#say", Input)
+        if self._history_at is None:
+            # Stepping back from a fresh line starts at the newest entry.
+            self._history_at = len(self._history) if step < 0 else len(self._history)
+        pos = max(0, min(len(self._history), self._history_at + step))
+        self._history_at = pos
+        box.value = "" if pos >= len(self._history) else self._history[pos]
+        box.cursor_position = len(box.value)
 
     def _highlighted_command(self) -> str:
         hint = self.query_one("#hint", OptionList)
@@ -622,6 +749,12 @@ class AgoraApp(App):
         """
         hint = self.query_one("#hint", OptionList)
         if not hint.has_class("showing"):
+            # No list open, so the arrows mean what they mean in every other
+            # prompt: walk what you typed before.
+            if event.key in ("up", "down") and self._history:
+                self._walk_history(-1 if event.key == "up" else 1)
+                event.prevent_default()
+                event.stop()
             return
         if event.key in ("down", "up"):
             count = hint.option_count
@@ -654,6 +787,9 @@ class AgoraApp(App):
         line = event.value.strip()
         event.input.value = ""
         self.query_one("#hint", OptionList).remove_class("showing")
+        if line and (not self._history or self._history[-1] != line):
+            self._history.append(line)
+        self._history_at = None
         if not line:
             return
         if line.startswith("/") or line.startswith("@"):
