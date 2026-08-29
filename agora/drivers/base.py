@@ -26,6 +26,8 @@ from __future__ import annotations
 import abc
 import asyncio
 import os
+import subprocess
+import sys
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -153,10 +155,19 @@ class Driver(abc.ABC):
         keeps a stray byte from raising instead of degrading.
         """
         env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+        # Without this, every wake flashes a console window on Windows -- and a
+        # council of four seats running concurrently flashes four. The child's
+        # stdio is piped either way, so it has no use for a console of its own;
+        # the window was only ever an artefact of how Windows starts a console
+        # program, most visibly through the .CMD shims.
+        extra = {}
+        if sys.platform == "win32":
+            extra["creationflags"] = subprocess.CREATE_NO_WINDOW
         proc = await asyncio.create_subprocess_exec(
             *argv,
             cwd=cwd,
             env=env,
+            **extra,
             stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
