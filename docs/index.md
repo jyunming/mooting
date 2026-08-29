@@ -110,7 +110,7 @@ wrote retries-minutes.md — 1 decision
 
 ## Where it stands
 
-Verified live on one Windows machine, 2026-08-30:
+Verified live on one Windows machine, 2026-08-29:
 
 | Seat | |
 |---|---|

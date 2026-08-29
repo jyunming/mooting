@@ -115,8 +115,8 @@ evidence beats the claim. No commits and no report reads as blocked, not done.
 | `moot/schema.sql` | the protocol |
 | `moot/store.py` | the board, and the fences |
 | `moot/supervisor.py` | turn-taking, caps, worktrees, the work loop |
-| `moot/drivers/` | five adapters, three transport styles, and a fake |
-| `moot/mcp_server.py` | the eight tools a seat sees |
+| `moot/drivers/` | five adapters over one transport (spawn), and a fake |
+| `moot/mcp_server.py` | the eleven tools a seat sees |
 | `moot/tui.py` | the full-screen session |
 | `moot/console.py` | the REPL, and the command dispatch both surfaces share |
 | `moot/cli.py` | the shell surface |

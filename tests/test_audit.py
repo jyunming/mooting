@@ -9,6 +9,7 @@ as the bug.
 from __future__ import annotations
 
 import asyncio
+import pathlib
 
 import pytest
 
@@ -174,3 +175,48 @@ def test_setup_stops_when_no_cli_is_installed(tmp_path, monkeypatch):
     monkeypatch.setattr(setup_mod, "_ask", lambda *a, **k: (a[1] if len(a) > 1 else ""))
 
     assert setup_mod.run(tmp_path / "board.db", assume_yes=True) == 1
+
+
+# ------------------------------------------------------------- doc drift
+
+#: Numbers spelled out in prose rot silently -- the sentence still reads fine
+#: with the wrong word in it, so review never catches it. An audit found
+#: ARCHITECTURE.md claiming eight MCP tools when there were eleven. Counting
+#: the real thing is the only check that can go red.
+NUMBER_WORDS = {
+    1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six",
+    7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven",
+    12: "twelve", 13: "thirteen", 14: "fourteen", 15: "fifteen",
+}
+
+
+def _repo_root():
+    return pathlib.Path(__file__).resolve().parent.parent
+
+
+def test_architecture_states_the_real_mcp_tool_count():
+    server = (_repo_root() / "moot" / "mcp_server.py").read_text(encoding="utf-8")
+    actual = server.count("@mcp.tool()")
+    assert actual, "no MCP tools found -- the counting method broke, not the doc"
+
+    arch = (_repo_root() / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    row = [ln for ln in arch.splitlines() if "mcp_server.py" in ln and "|" in ln]
+    assert row, "the file map no longer has an mcp_server.py row"
+    assert NUMBER_WORDS[actual] in row[0], (
+        f"ARCHITECTURE.md says {row[0].strip()!r} but there are {actual} tools"
+    )
+
+
+def test_no_doc_promises_a_transport_no_driver_implements():
+    """`stdio_json` and `acp` are accepted strings with no class behind them.
+    Prose may say they are planned; a file map may not say they exist."""
+    from moot.drivers.registry import DRIVER_CLASSES
+
+    real = {d.kind for d in DRIVER_CLASSES.values()}
+    arch = (_repo_root() / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    row = [ln for ln in arch.splitlines() if "`moot/drivers/`" in ln]
+    assert row, "the file map no longer has a drivers row"
+    assert NUMBER_WORDS[len(real)] in row[0], (
+        f"{len(real)} transport(s) implemented ({sorted(real)}), "
+        f"but the file map says {row[0].strip()!r}"
+    )

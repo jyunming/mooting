@@ -1,9 +1,13 @@
 # Every command
 
 Two surfaces, one dispatch. `moot <command>` runs from the shell; `/command` runs
-inside `moot tui` or `moot console`. Anything a session can do to a board, the
-shell can do too — the session exists so you do not have to leave it, not because
-it is the only way in.
+inside `moot tui` or `moot console`.
+
+They are not equivalent. Everything needed to open a topic, run rounds, rule on a
+proposal and export minutes exists in both. Retuning a topic once it is open is
+session-only: `/mode`, `/manager`, `/seats`, `/capability`, `/effort`, `/rounds`,
+`/stop`, `/reopen` and `/me` change the board and have no shell name yet. Scripts
+that need those should drive `moot console` on stdin.
 
 ---
 
