@@ -936,24 +936,22 @@ async def test_enter_takes_the_highlighted_hint(tmp_path, board):
 
 
 @pytest.mark.asyncio
-async def test_seats_accepts_the_form_people_actually_type(tmp_path, board):
-    """`/seats Santa claude` is what a person writes. Insisting on the word "add"
-    when the meaning is unambiguous is a rule for the parser, not the reader."""
+async def test_seats_keeps_its_verb_and_corrects_you_in_one_read(tmp_path, board):
+    """Guessing that `/seats Santa claude` means add would make the command mean
+    different things depending on whether a word happens to be a CLI name. A
+    command that quietly reinterprets you is worse than one that says what it
+    expected -- so the message has to be enough to fix it in one read."""
     app = app_for(tmp_path, board)
+    said: list[str] = []
     async with app.run_test() as pilot:
-        await type_line(pilot, app, "/seats Santa claude")
-        assert board.agent("Santa")["kind"] == "claude"
-        assert board.seat(app.board.topic_id, "Santa") is not None
-
-        # A bare name still means "seat one that already exists".
-        board.add_agent("rudolph", "codex", driver="spawn")
-        await type_line(pilot, app, "/seats rudolph")
-        assert board.seat(app.board.topic_id, "rudolph") is not None
-
-        # And something genuinely ambiguous says what the forms are.
-        said: list[str] = []
         app.write_line = lambda item: said.append(str(item))
         app.board.emit = app.write_line
-        app.board.handle("/seats Santa notacli")
+
+        app.board.handle("/seats Santa claude")
         text = " ".join(said)
-        assert "not sure what you meant" in text and "<name> <cli>" in text
+        assert "expected add or rm first" in text
+        assert "/seats add Santa claude" in text, "it should name the exact fix"
+
+        app.board.handle("/seats add Santa claude")
+        assert board.agent("Santa")["kind"] == "claude"
+        assert board.seat(app.board.topic_id, "Santa") is not None

@@ -476,21 +476,21 @@ class Console:
         if words and words[0] in {"add", "rm", "remove"}:
             return self._seat_change(words[0], words[1] if len(words) > 1 else "",
                                      words[2] if len(words) > 2 else "")
-        # `/seats Santa claude` is what people actually type. Insisting on the
-        # word "add" when the meaning is unambiguous is a rule for the parser's
-        # benefit, not the reader's.
-        if len(words) == 2 and words[1] in AGENT_KINDS:
-            return self._seat_change("add", words[0], words[1])
-        if len(words) == 1 and words[0] not in {"add", "rm", "remove"}:
-            return self._seat_change("add", words[0], "")
+        # The verb stays required. Guessing that `/seats Santa claude` means add
+        # would make the command mean different things depending on whether a
+        # word happens to be a CLI name, and a command that quietly reinterprets
+        # you is worse than one that says what it expected. The mistake is cheap
+        # to make, so the message is written to correct it in one read.
         if words:
-            self.emit(f"{RED}not sure what you meant by /seats {rest}{RESET}")
-            self.emit(f"{DIM}/seats                       who is here{RESET}")
-            self.emit(f"{DIM}/seats <name> <cli>          add a new seat "
+            self.emit(f"{RED}/seats {rest} — expected add or rm first{RESET}")
+            if len(words) >= 2 and words[1] in AGENT_KINDS:
+                self.emit(f"{DIM}you probably want:  /seats add "
+                          f"{words[0]} {words[1]}{RESET}")
+            self.emit(f"{DIM}/seats                     who is here{RESET}")
+            self.emit(f"{DIM}/seats add <name> <cli>    a new seat "
                       f"({', '.join(sorted(AGENT_KINDS))}){RESET}")
-            self.emit(f"{DIM}/seats add <agent>           seat one already "
-                      f"registered{RESET}")
-            self.emit(f"{DIM}/seats rm <agent>            remove one{RESET}")
+            self.emit(f"{DIM}/seats add <agent>         one already registered{RESET}")
+            self.emit(f"{DIM}/seats rm <agent>          remove one{RESET}")
             return
         for s in self.store.seats(self.topic_id):
             owed = len(self.store.open_mentions(self.topic_id, s["agent"]))
