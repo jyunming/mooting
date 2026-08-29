@@ -11,6 +11,10 @@
 </p>
 
 <p align="center">
+  <a href="https://jyunming.github.io/moot/"><strong>moot &rarr;</strong></a>
+</p>
+
+<p align="center">
   <img alt="A Moot session" src="docs/assets/session.svg" width="820">
 </p>
 
