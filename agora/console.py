@@ -67,7 +67,8 @@ COMMANDS = {
     "/nudge": "wake one seat by hand",
     "/approve": "<id> <why> -- rule on a proposal (only you can)",
     "/reject": "<id> <why>",
-    "/proposals": "what is waiting on you",
+    "/proposals": "what is waiting on you; /proposals <id> for the whole thing",
+    "/show": "<id> -- a message in full, however far back it scrolled",
     "/tasks": "the work plan and where each task has got to",
     "/quote": "reply to the last message; or /quote <seat> | <id>",
     "/me": "<name> -- what the council calls you",
@@ -291,7 +292,7 @@ class Console:
             "tasks": self._tasks, "new": self._new, "mode": self._mode,
             "manager": self._manager, "rm": self._rm, "reset": self._reset,
             "quote": self._quote, "rounds": self._rounds, "me": self._me,
-            "minutes": self._minutes,
+            "minutes": self._minutes, "show": self._show,
         }.get(cmd)
         if cmd in {"approve", "reject"}:
             self._decide(cmd, rest)
@@ -379,6 +380,8 @@ class Console:
             ("/approve <id> <why>", "accept a proposal"),
             ("/reject <id> <why>", "refuse it"),
             ("/proposals", "what is waiting on your ruling"),
+            ("/proposals <id>", "the whole proposal: body, votes, objections"),
+            ("/show <id>", "one message in full, however far back it scrolled"),
             ("/asks", "questions waiting on your answer"),
         ]),
         ("Topics", [
@@ -642,12 +645,81 @@ class Console:
             self.emit(f"{DIM}{agent} left — what it already said stays{note}{RESET}")
         self.on_topic_change()
 
-    def _proposals(self, _: str) -> None:
+    def _proposals(self, rest: str = "") -> None:
         if not self._require_topic():
             return
-        for p in self.store.proposals(self.topic_id):
-            votes = ", ".join(f"{v['agent']}:{v['stance']}" for v in self.store.votes(p["id"]))
+        ref = rest.strip().lstrip("#")
+        if ref.isdigit():
+            return self._proposal_detail(int(ref))
+        rows = self.store.proposals(self.topic_id)
+        if not rows:
+            self.emit(f"{DIM}nothing proposed yet{RESET}")
+            return
+        for p in rows:
+            votes = ", ".join(f"{v['agent']}:{v['stance']}"
+                              for v in self.store.votes(p["id"]))
             self.emit(f"  #{p['id']} [{p['status']}] {p['title']}  {DIM}{votes}{RESET}")
+        self.emit(f"{DIM}/proposals <id> for the whole thing{RESET}")
+
+    def _proposal_detail(self, pid: int) -> None:
+        """Everything behind a one-line summary.
+
+        A ruling is the one thing here that cannot be undone, so the body, the
+        objections and the reasons for them have to be readable at the moment you
+        are deciding -- not a scroll back through the transcript.
+        """
+        try:
+            p = self.store.proposal(pid)
+        except StoreError as exc:
+            self.emit(f"{RED}{exc}{RESET}")
+            return
+        self.emit("")
+        self.emit(f"{BOLD}#{p['id']} {p['title']}{RESET}  {DIM}[{p['status']}] "
+                  f"by {p['author']}{RESET}")
+        if p["decided_by"]:
+            self.emit(f"{DIM}ruled {p['status']} by {p['decided_by']} "
+                      f"{p['decided_at'] or ''}{RESET}")
+            if p["rationale"]:
+                self.emit(f"{DIM}  “{p['rationale'].strip()}”{RESET}")
+        self.emit("")
+        self.emit(p["body"].strip())
+        votes = self.store.votes(pid)
+        if votes:
+            self.emit("")
+            for v in votes:
+                mark = {"support": "+", "object": "!", "abstain": "~"}.get(v["stance"], "?")
+                self.emit(f"  {mark} {BOLD}{v['agent']}{RESET} {v['stance']}")
+                if v["rationale"]:
+                    self.emit(f"    {DIM}{v['rationale'].strip()}{RESET}")
+        if p["status"] == "open":
+            self.emit("")
+            self.emit(f"{DIM}/approve {pid} <why>   |   /reject {pid} <why>{RESET}")
+
+    def _show(self, rest: str) -> None:
+        """One message in full, however far back it scrolled."""
+        if not self._require_topic():
+            return
+        ref = rest.strip().lstrip("#")
+        if not ref.isdigit():
+            self.emit(f"{RED}usage: /show <id>{RESET}   "
+                      f"{DIM}ids are the dim #n beside each message{RESET}")
+            return
+        row = self.store.q1("SELECT * FROM messages WHERE id = ? AND topic_id = ?",
+                            (int(ref), self.topic_id))
+        if row is None:
+            self.emit(f"{RED}no message #{ref} on this topic{RESET}")
+            return
+        self.emit("")
+        self.emit(f"{BOLD}{row['author']}{RESET} {DIM}#{row['id']} · {row['kind']} · "
+                  f"{row['created_at']}{RESET}")
+        if row["reply_to"]:
+            ref_row = self.store.quoted(int(row["reply_to"]))
+            if ref_row is not None:
+                preview = " ".join(ref_row["body"].split())[:90]
+                self.emit(f"{DIM}  | replying to #{ref_row['id']} "
+                          f"{ref_row['author']}: {preview}…{RESET}")
+        self.emit("")
+        self.emit(row["body"].strip())
 
     def _rm(self, rest: str) -> bool:
         """Delete a topic. Two steps, because one keystroke should not be able to

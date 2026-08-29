@@ -672,3 +672,44 @@ async def test_quoting_does_not_require_hunting_for_an_id(tmp_path, board):
 
         await type_line(pilot, app, "/quote 0")          # and off again
         assert app.board._quoting is None
+
+
+@pytest.mark.asyncio
+async def test_a_proposal_can_be_read_in_full_before_ruling_on_it(tmp_path, board):
+    """A ruling is the one thing here that cannot be undone, so the body and the
+    objections have to be readable at the moment you decide."""
+    app = app_for(tmp_path, board)
+    pid = board.propose(app.board.topic_id, "claude", "Adopt backoff",
+                        "Exponential, capped at 6 attempts, with jitter.")
+    board.vote(pid, "codex", "object", "stampede risk is overstated")
+
+    said: list[str] = []
+    async with app.run_test() as pilot:
+        app.write_line = lambda item: said.append(str(item))
+        app.board.emit = app.write_line
+        app.board.handle(f"/proposals {pid}")
+
+    text = " ".join(said)
+    assert "capped at 6 attempts" in text          # the body, not just the title
+    assert "codex" in text and "object" in text
+    assert "stampede risk is overstated" in text   # and why they objected
+    assert f"/approve {pid}" in text               # what to do about it
+
+
+@pytest.mark.asyncio
+async def test_a_message_can_be_read_in_full_after_it_scrolls_away(tmp_path, board):
+    app = app_for(tmp_path, board)
+    mid = board.post(app.board.topic_id, "claude", "a long argument " * 40,
+                     count_turn=False)
+    reply = board.post(app.board.topic_id, "codex", "I disagree", count_turn=False,
+                       reply_to=mid)
+
+    said: list[str] = []
+    async with app.run_test() as pilot:
+        app.write_line = lambda item: said.append(str(item))
+        app.board.emit = app.write_line
+        app.board.handle(f"/show {reply}")
+
+    text = " ".join(said)
+    assert "I disagree" in text
+    assert f"replying to #{mid}" in text and "claude" in text
