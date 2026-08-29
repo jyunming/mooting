@@ -220,3 +220,74 @@ def test_no_doc_promises_a_transport_no_driver_implements():
         f"{len(real)} transport(s) implemented ({sorted(real)}), "
         f"but the file map says {row[0].strip()!r}"
     )
+
+
+# ------------------------------------------------- codex containment
+
+def test_codex_deliberation_never_runs_in_the_real_workspace(tmp_path):
+    """Codex has no read-only MCP mode. The *only* thing keeping a deliberating
+    codex seat away from the repo is `working_dir()` handing it an empty scratch
+    directory instead of the real cwd -- so an inverted `seat.executing` check
+    would silently give a meeting seat write access to the user's tree, and
+    nothing else in the system would notice. This test is that check."""
+    from moot.drivers.base import Seat
+    from moot.drivers.spawn import CodexDriver
+
+    repo = tmp_path / "the-real-repo"
+    repo.mkdir()
+    (repo / "secrets.txt").write_text("do not touch", encoding="utf-8")
+    driver = CodexDriver(tmp_path / "board.db")
+
+    def seat_for(executing):
+        return Seat(topic_id=1, topic_slug="t", agent="codex", kind="codex",
+                    cli_session=None, cfg={"cwd": str(repo)}, executing=executing)
+
+    deliberating = pathlib.Path(driver.working_dir(seat_for(False)))
+    assert deliberating != repo, "a deliberating codex seat was pointed at the repo"
+    assert repo not in deliberating.parents, "the scratch dir is inside the repo"
+    assert list(deliberating.iterdir()) == [], "the scratch dir is not empty"
+
+    # ...and the second key does turn the lock.
+    assert pathlib.Path(driver.working_dir(seat_for(True))) == repo
+
+
+def test_agy_plan_mode_and_codex_approval_flags_survive(tmp_path):
+    """Two argv flags carry safety meaning and nothing exercised them: codex
+    needs --approve-for-me (without it the run blocks on a prompt nobody can
+    answer), and agy's read-only guarantee is `--mode plan`."""
+    from moot.drivers.base import Seat
+    from moot.drivers.spawn import AgyDriver, CodexDriver
+
+    seat = Seat(topic_id=1, topic_slug="t", agent="x", kind="codex",
+                cli_session=None, cfg={"cwd": str(tmp_path)})
+
+    codex = CodexDriver(tmp_path / "board.db").argv(seat, "prompt", None)
+    assert "--approve-for-me" in codex, f"codex would block on approval: {codex}"
+    assert "-" in codex, "codex takes the prompt on stdin, not in argv"
+
+    agy = AgyDriver(tmp_path / "board.db").argv(seat, "prompt", None)
+    assert "plan" in agy, f"agy lost its read-only mode: {agy}"
+
+
+# ------------------------------------------------------- model listing
+
+def test_model_list_parsing_survives_real_cli_output():
+    """`agy` is the one CLI that enumerates its own models, and `_parse` is what
+    reads it -- untested, so a change to the output format would have broken the
+    model picker silently for the only CLI it serves."""
+    from moot.models import _parse
+
+    got = _parse(
+        "Fetching models...\n"
+        "gemini-3.1-pro\tGemini 3.1 Pro\n"
+        "gemini-3.7-flash\tGemini 3.7 Flash\n"
+        "\n"
+        "  claude-opus-5   Claude Opus 5 (preview)  \n"
+        "gemini-3.1-pro\tduplicate, should collapse\n"
+    )
+    assert got == ["gemini-3.1-pro", "gemini-3.7-flash", "claude-opus-5"], got
+
+    # noise must not become a model name in the picker
+    assert _parse("error: not logged in") == []
+    assert _parse("Usage: agy models [options]") == []
+    assert _parse("") == []

@@ -9,6 +9,7 @@ checked the guard clause exists would pass while the guard was bypassed elsewher
 from __future__ import annotations
 
 import asyncio
+import pathlib
 
 import pytest
 
@@ -215,3 +216,67 @@ def test_a_worker_that_finishes_without_reporting_is_not_left_stranded(team, tmp
     task = team.task(tid)
     assert task["status"] == "blocked", f"silent no-op should not read as done: {task['status']}"
     assert "nothing committed" in task["result"]
+
+
+# ------------------------------------------------- the worktree, for real
+
+def _git(*args, cwd):
+    import subprocess
+    return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True,
+                          text=True, encoding="utf-8", errors="replace")
+
+
+@pytest.fixture()
+def real_repo(tmp_path):
+    """A genuine git repo.
+
+    Every other test here hands the supervisor a plain `tmp_path`, so
+    `git rev-parse --git-dir` fails and `_ensure_workspace` takes its fallback
+    branch every single time -- meaning the `git worktree add` that work mode's
+    whole isolation story rests on had never once run in a test. It runs here.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    if _git("init", "-q", cwd=repo).returncode != 0:
+        pytest.skip("git unavailable")
+    _git("config", "user.email", "t@example.com", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    _git("config", "commit.gpgsign", "false", cwd=repo)
+    (repo / "gateway.py").write_text("RETRY_SECONDS = 30\n", encoding="utf-8")
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-q", "-m", "initial", cwd=repo)
+    return repo
+
+
+def test_a_task_gets_its_own_branch_and_checkout(tmp_path, real_repo):
+    board = connect(tmp_path / "board.db", init=True)
+    board.add_agent("human", "human")
+    board.add_agent("boss", "claude", driver="spawn", driver_cfg={"cwd": str(real_repo)})
+    board.add_agent("hand", "codex", driver="spawn",
+                    driver_cfg={"cwd": str(real_repo), "capability": "execute"})
+    topic = board.open_topic("ship-it", "T", "B", "human",
+                             seats=("boss", "hand", "human"), mode="work", manager="boss")
+    tid = board.draft_task(topic, "boss", "hand", "Add backoff", acceptance="tests pass")
+
+    sup = Supervisor(board, {})
+    sup._ensure_workspace(topic, board.task(tid))
+    task = board.task(tid)
+
+    assert task["branch"] == f"moot/task-{tid}", \
+        f"no branch was cut -- fell back? branch={task['branch']!r}"
+    tree = pathlib.Path(task["worktree"])
+    assert tree.is_dir() and (tree / "gateway.py").exists(), "the checkout is not real"
+    assert task["base_sha"] == _git("rev-parse", "HEAD", cwd=real_repo).stdout.strip()
+
+    # the branch exists in the repo, and it is NOT the branch the user is on
+    branches = _git("branch", "--list", cwd=real_repo).stdout
+    assert f"moot/task-{tid}" in branches
+    assert "* moot/" not in branches, "the user's own checkout was moved onto the task branch"
+
+    # and commits made in the worktree are what _commits_on counts
+    assert sup._commits_on(task) == 0
+    (tree / "gateway.py").write_text("RETRY_SECONDS = 1\n", encoding="utf-8")
+    _git("add", "-A", cwd=tree)
+    _git("commit", "-q", "-m", "backoff", cwd=tree)
+    assert sup._commits_on(board.task(tid)) == 1, "work in the worktree was not counted"
+    board.close()

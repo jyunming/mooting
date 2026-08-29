@@ -643,3 +643,49 @@ def test_the_refusal_names_the_fix(board):
         assert "moot install Gravity" in str(exc)
     else:
         raise AssertionError("the post should have been refused")
+
+
+# ------------------------------------------- bookkeeping failures are visible
+
+def test_a_store_failure_mid_wake_does_not_strand_the_seat(board, monkeypatch, caplog):
+    """The driver guard only ever covered `driver.wake`. A board call around it
+    -- finishing the wake row, advancing the cursor -- could raise, and the
+    exception went straight into `gather(return_exceptions=True)` and was
+    dropped. The seat stayed at "waking", which the TUI draws as a seat
+    thinking, forever, with nothing anywhere saying why."""
+    topic = open_debate(board, max_rounds=1)
+    driver = FakeDriver(board)
+
+    def explode(*a, **k):
+        raise RuntimeError("database is locked")
+    monkeypatch.setattr(board, "advance_cursor", explode)
+
+    sup = Supervisor(board, {"claude": driver}, Caps(max_rounds=1))
+    with caplog.at_level("ERROR"):
+        with pytest.raises(RuntimeError):
+            asyncio.run(sup.wake_seat(topic, "claude"))
+
+    state = board.seat(topic, "claude")["state"]
+    assert state != "waking", "the seat was left mid-wake with no way out"
+    assert state == "failed", f"expected a terminal state, got {state!r}"
+
+
+def test_a_concurrent_round_says_so_when_a_seat_blows_up(board, monkeypatch, caplog):
+    """`gather` hands the exceptions back; both call sites used to discard the
+    list. Silence is the bug -- the round must not swallow it."""
+    topic = open_debate(board, max_rounds=1)
+    driver = FakeDriver(board)
+
+    def explode(*a, **k):
+        raise RuntimeError("database is locked")
+    monkeypatch.setattr(board, "advance_cursor", explode)
+
+    sup = Supervisor(board, {n: driver for n in ("claude", "codex", "gemini")},
+                     Caps(max_rounds=1))
+    with caplog.at_level("ERROR"):
+        asyncio.run(sup.run_topic(topic))
+
+    assert any("database is locked" in r.getMessage() or
+               (r.exc_info and "database is locked" in str(r.exc_info[1]))
+               for r in caplog.records), \
+        "the round finished without a word about the seat that failed"

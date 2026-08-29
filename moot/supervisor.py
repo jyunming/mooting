@@ -144,9 +144,9 @@ class Supervisor:
                 # flight; they finish, and _blocking_reason catches it at the top
                 # of the next iteration. Per-seat caps bound the overrun.
                 head = self.store.head()
-                await asyncio.gather(
-                    *(self.wake_seat(topic_id, a, head=head) for a in speakers),
-                    return_exceptions=True,
+                await self._gather(
+                    (self.wake_seat(topic_id, a, head=head) for a in speakers),
+                    what=f"concurrent round on topic {topic_id}",
                 )
                 # A concurrent round IS a round. Without this the counter only
                 # advanced in the "nobody left to speak" branch, which concurrency
@@ -192,6 +192,19 @@ class Supervisor:
             topic_effort = None
         return topic_effort or cfg.get("effort") or self.caps.effort
 
+    async def _gather(self, coros, *, what: str) -> None:
+        """`gather(..., return_exceptions=True)` hands the exceptions back in a
+        list. Both call sites used to drop that list on the floor, so a store
+        call that raised anywhere in `wake_seat` outside the driver guard
+        vanished completely -- no log line, no board message -- and left the
+        seat's state at "waking", which the TUI renders as a seat thinking
+        forever. Whatever else happens, the failure gets said out loud."""
+        for outcome in await asyncio.gather(*coros, return_exceptions=True):
+            if isinstance(outcome, asyncio.CancelledError):
+                log.debug("%s: cancelled", what)
+            elif isinstance(outcome, BaseException):
+                log.error("%s: %r", what, outcome, exc_info=outcome)
+
     async def wake_seat(self, topic_id: int, agent: str, *, head: int | None = None) -> WakeResult:
         row = self.store.seat(topic_id, agent)
         if row is None:
@@ -221,53 +234,72 @@ class Supervisor:
             "SELECT COUNT(*) c FROM messages WHERE topic_id = ? AND author = ?",
             (topic_id, agent))["c"]
         try:
-            result = await asyncio.wait_for(driver.wake(seat, prompt), timeout=driver.timeout_s)
-        except asyncio.TimeoutError:
-            result = WakeResult.failure(f"timed out after {driver.timeout_s}s")
+            try:
+                result = await asyncio.wait_for(driver.wake(seat, prompt), timeout=driver.timeout_s)
+            except asyncio.TimeoutError:
+                result = WakeResult.failure(f"timed out after {driver.timeout_s}s")
+            except asyncio.CancelledError:
+                # Cancellation is a BaseException, so `except Exception` missed it and
+                # the wake was never closed. Three seats were left reading "thinking"
+                # for twenty minutes after the user stopped the council.
+                self.store.finish_wake(wake_id, "cancelled", "stopped mid-turn")
+                self.store.set_seat_state(topic_id, agent, "idle")
+                raise
+            except Exception as exc:  # an adapter bug must not take the topic down
+                log.exception("driver %s raised for %s", driver.kind, agent)
+                result = WakeResult.failure(f"{type(exc).__name__}: {exc}")
+
+            self.store.finish_wake(wake_id, "ok" if result.ok else "error", result.detail)
+
+            spoke = self.store.q1(
+                "SELECT COUNT(*) c FROM messages WHERE topic_id = ? AND author = ?",
+                (topic_id, agent))["c"] > before
+
+            if result.ok and not spoke:
+                # The CLI ran and exited clean while the seat said nothing. That is
+                # not the same as an answer, and reporting it as a successful wake
+                # left a question apparently ignored with nothing on the board to
+                # explain it. Say so: the turn was spent either way.
+                self.store.post(
+                    topic_id, "moot",
+                    f"{agent} was woken and said nothing — its turn produced no post. "
+                    f"Anything still asked of it stays open; /nudge {agent} to try again.",
+                    kind="system", count_turn=False)
+
+            if result.ok:
+                if result.cli_session and result.cli_session != row["cli_session"]:
+                    self.store.set_cli_session(topic_id, agent, result.cli_session)
+                # Only advance the cursor on success. A failed wake leaves it alone so
+                # the agent still sees everything it missed whenever it next speaks.
+                self.store.advance_cursor(topic_id, agent, cursor)
+                self.store.set_seat_state(topic_id, agent, "idle")
+            else:
+                self.store.set_seat_state(topic_id, agent, "failed")
+                self.store.post(
+                    topic_id, "moot",
+                    f"wake failed for {agent}: {result.detail}. "
+                    f"Its cursor is unchanged -- it will catch up when next woken.",
+                    kind="system", count_turn=False,
+                )
+            return result
         except asyncio.CancelledError:
-            # Cancellation is a BaseException, so `except Exception` missed it and
-            # the wake was never closed. Three seats were left reading "thinking"
-            # for twenty minutes after the user stopped the council.
-            self.store.finish_wake(wake_id, "cancelled", "stopped mid-turn")
-            self.store.set_seat_state(topic_id, agent, "idle")
             raise
-        except Exception as exc:  # an adapter bug must not take the topic down
-            log.exception("driver %s raised for %s", driver.kind, agent)
-            result = WakeResult.failure(f"{type(exc).__name__}: {exc}")
-
-        self.store.finish_wake(wake_id, "ok" if result.ok else "error", result.detail)
-
-        spoke = self.store.q1(
-            "SELECT COUNT(*) c FROM messages WHERE topic_id = ? AND author = ?",
-            (topic_id, agent))["c"] > before
-
-        if result.ok and not spoke:
-            # The CLI ran and exited clean while the seat said nothing. That is
-            # not the same as an answer, and reporting it as a successful wake
-            # left a question apparently ignored with nothing on the board to
-            # explain it. Say so: the turn was spent either way.
-            self.store.post(
-                topic_id, "moot",
-                f"{agent} was woken and said nothing — its turn produced no post. "
-                f"Anything still asked of it stays open; /nudge {agent} to try again.",
-                kind="system", count_turn=False)
-
-        if result.ok:
-            if result.cli_session and result.cli_session != row["cli_session"]:
-                self.store.set_cli_session(topic_id, agent, result.cli_session)
-            # Only advance the cursor on success. A failed wake leaves it alone so
-            # the agent still sees everything it missed whenever it next speaks.
-            self.store.advance_cursor(topic_id, agent, cursor)
-            self.store.set_seat_state(topic_id, agent, "idle")
-        else:
-            self.store.set_seat_state(topic_id, agent, "failed")
-            self.store.post(
-                topic_id, "moot",
-                f"wake failed for {agent}: {result.detail}. "
-                f"Its cursor is unchanged -- it will catch up when next woken.",
-                kind="system", count_turn=False,
-            )
-        return result
+        except Exception:
+            # The driver guard above only covers `driver.wake`. Everything
+            # around it -- finishing the wake row, counting posts, advancing the
+            # cursor -- talks to the board too, and a board can be locked or
+            # surprise us. When one of those raised, the exception went into
+            # `gather(return_exceptions=True)` and was discarded, leaving the
+            # seat at "waking" with nothing anywhere to explain it. Put the seat
+            # somewhere terminal, then re-raise so `_gather` logs it.
+            log.exception("bookkeeping failed for %s on topic %s", agent, topic_id)
+            for repair in (lambda: self.store.finish_wake(wake_id, "error", "bookkeeping failed"),
+                           lambda: self.store.set_seat_state(topic_id, agent, "failed")):
+                try:
+                    repair()
+                except Exception:      # the board may be the thing that is broken
+                    pass
+            raise
 
 
     # ------------------------------------------------------------------- work
@@ -297,10 +329,10 @@ class Supervisor:
             if runnable:
                 for task in runnable:            # sequential: git index is not concurrent
                     self._ensure_workspace(topic_id, task)
-                await asyncio.gather(
-                    *(self._wake_for_task(topic_id, self.store.task(int(t["id"])))
-                      for t in runnable),
-                    return_exceptions=True,
+                await self._gather(
+                    (self._wake_for_task(topic_id, self.store.task(int(t["id"])))
+                     for t in runnable),
+                    what=f"parallel tasks on topic {topic_id}",
                 )
                 continue
 
