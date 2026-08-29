@@ -32,6 +32,7 @@ That last point is only safe because no `tx()` block ever awaits. See `Store.tx`
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from rich.markdown import Markdown
@@ -51,6 +52,8 @@ from textual.widgets.option_list import Option
 
 from .console import Console
 from .store import StoreError, connect
+
+log = logging.getLogger("agora.tui")
 
 
 #: One colour per seat, picked from its name so it is the same in every session
@@ -90,6 +93,12 @@ def tint_for(colour: str, base: Color) -> str:
         return ""
 
 
+def mk(markup: str) -> Text:
+    """A styled line of the TUI's own. Explicit, because a plain string handed to
+    `write_line` is now treated as literal text -- see the note there."""
+    return Text.from_markup(markup)
+
+
 def field(row, key, default=None):
     """Read a column that may not be there.
 
@@ -126,6 +135,10 @@ class Board(Console):
 
     # Long-running work becomes a Textual worker rather than a thread.
     def _run(self, _: str = "") -> None:
+        # The base class guards; overriding it dropped the guard, so /run with no
+        # topic started a worker that failed instead of simply saying so.
+        if not self._require_topic():
+            return
         if self.driving.is_set():
             self.emit("[dim]already driving[/dim]")
             return
@@ -134,6 +147,8 @@ class Board(Console):
         self.emit(f"[dim]· council thinking at effort {self.effort()}[/dim]")
 
     def _nudge(self, agent: str) -> None:
+        if not self._require_topic():
+            return
         if not agent:
             self.emit("[red]usage: /nudge <agent>[/red]")
             return
@@ -290,8 +305,8 @@ class AgoraApp(App):
         # ghosts and show three seats thinking forever.
         freed = self.board.store.sweep_stale_wakes()
         if freed:
-            self.write_line(f"[dim]cleared {freed} wake(s) left running by an "
-                            f"earlier session[/dim]")
+            self.write_line(mk(f"[dim]cleared {freed} wake(s) left running by "
+                               f"an earlier session[/dim]"))
         self.refresh_board()
         self.set_interval(1.0, self.refresh_board)
         self.set_interval(300.0, lambda: self.board.store.sweep_stale_wakes())
@@ -309,10 +324,21 @@ class AgoraApp(App):
         decoded; anything else is treated as Rich markup, which is what the TUI's
         own strings use.
         """
-        log = self.query_one("#transcript", RichLog)
+        try:
+            log = self.query_one("#transcript", RichLog)
+        except Exception:
+            # Something wrote while a modal was up. Losing a line is better than
+            # taking the app down for it.
+            return
         for part in (item if isinstance(item, list) else [item]):
-            if isinstance(part, str) and "\x1b" in part:
-                part = Text.from_ansi(part)
+            if isinstance(part, str):
+                # A plain string is never Rich markup here. RichLog parses one as
+                # markup, and board content is agent-written: a message containing
+                # `[/INST]` raised MarkupError and killed the app, while `[draft]`
+                # in the task list was silently deleted from the screen. Anything
+                # the TUI itself wants styled is built with mk() or as a Rich
+                # object, so this only ever converts genuine text.
+                part = Text.from_ansi(part) if "\x1b" in part else Text(part)
             log.write(part)
 
     def notify_turn(self, why: str) -> None:
@@ -446,6 +472,11 @@ class AgoraApp(App):
 
     def refresh_board(self) -> None:
         """One tick: drain new events into the log, then repaint state."""
+        if len(self.screen_stack) > 1:
+            # A modal is on top, and query_one searches the *active* screen --
+            # which has none of these widgets. The timer kept firing behind the
+            # model picker and raised NoMatches a second after it opened.
+            return
         store = self.board.store
         if self.board.topic_id is None:
             self.query_one("#seats", DataTable).clear()
@@ -463,7 +494,7 @@ class AgoraApp(App):
             self._paint_work()
             self._paint_status()
         except Exception as exc:                    # a redraw must never kill the app
-            self.write_line(f"[red]refresh: {escape(str(exc))}[/red]")
+            self.write_line(mk(f"[red]refresh: {escape(str(exc))}[/red]"))
 
     def _render_event(self, store, ev) -> str | None:
         if ev.kind == "message":
@@ -480,16 +511,18 @@ class AgoraApp(App):
             self.notify_turn(f"proposal #{pid} needs your ruling")
             try:
                 return self._render_proposal(store.proposal(pid))
-            except Exception:
-                return None
+            except Exception as exc:
+                log.warning("could not render proposal %s: %s", pid, exc)
+                return mk(f"[yellow]◆ proposal #{pid} — /proposals {pid}[/yellow]")
         if ev.kind == "decision":
-            return (f"\n[green]✓ proposal #{ev.payload['proposal_id']} "
-                    f"{ev.payload['status']} by {escape(ev.actor)}[/green]")
+            return mk(f"\n[green]✓ proposal #{ev.payload['proposal_id']} "
+                      f"{ev.payload['status']} by {escape(ev.actor)}[/green]")
         if ev.kind == "task":
-            return (f"[dim]· task #{ev.payload.get('task_id')} "
-                    f"{ev.payload.get('action')} ({escape(ev.actor)})[/dim]")
+            return mk(f"[dim]· task #{ev.payload.get('task_id')} "
+                      f"{ev.payload.get('action')} ({escape(ev.actor)})[/dim]")
         if ev.kind == "topic" and ev.payload.get("action") == "paused":
-            return f"\n[dim]— paused: {escape(str(ev.payload.get('note', '')))}[/dim]"
+            return mk(f"\n[dim]— paused: "
+                      f"{escape(str(ev.payload.get('note', '')))}[/dim]")
         return None
 
     def _paint_seats(self) -> None:
@@ -590,17 +623,17 @@ class AgoraApp(App):
         if self.board.topic_id is None:
             self.title = "Agora"
             self.sub_title = "no topic"
-            log.write("[dim]Nothing on the board yet.[/dim]")
+            log.write(mk("[dim]Nothing on the board yet.[/dim]"))
             log.write("")
-            log.write("[bold]Start one[/bold] — just say what you want to discuss:")
-            log.write("  [cyan]/new the workflow optimization in agentic AI development"
-                      "[/cyan]")
+            log.write(mk("[bold]Start one[/bold] — just say what you want to discuss:"))
+            log.write(mk("  [cyan]/new the workflow optimization in agentic AI development"
+                      "[/cyan]"))
             log.write("")
-            log.write("[dim]Then type any detail the council needs, and [/dim]"
-                      "[cyan]/run[/cyan][dim].[/dim]")
-            log.write("[dim]Answering is just typing. [/dim][cyan]@agent <question>"
+            log.write(mk("[dim]Then type any detail the council needs, and [/dim]"
+                      "[cyan]/run[/cyan][dim].[/dim]"))
+            log.write(mk("[dim]Answering is just typing. [/dim][cyan]@agent <question>"
                       "[/cyan][dim] asks one seat. [/dim][cyan]/help[/cyan]"
-                      "[dim] for the rest.[/dim]")
+                      "[dim] for the rest.[/dim]"))
             self.cursor = self.board.store.head()
             self.refresh_board()
             return
@@ -657,7 +690,8 @@ class AgoraApp(App):
         table_id = event.data_table.id
         try:
             cell = str(event.data_table.get_cell_at((event.cursor_row, 0)))
-        except Exception:
+        except Exception as exc:
+            log.warning("row click ignored: %s", exc)
             return
         if table_id == "seats":
             self._pick_model(cell)
@@ -683,8 +717,8 @@ class AgoraApp(App):
                 cfg2.pop("model", None)
             self.board.store.add_agent(seat, meta["kind"], display=meta["display"],
                                        driver=meta["driver"], driver_cfg=cfg2)
-            self.write_line(f"[dim]{seat} → model "
-                            f"{value or 'default'}; from its next turn[/dim]")
+            self.write_line(mk(f"[dim]{seat} → model "
+                               f"{value or 'default'}; from its next turn[/dim]"))
 
         self.push_screen(ModelPicker(seat, meta["kind"], cfg.get("model")), chosen)
 
@@ -783,6 +817,8 @@ class AgoraApp(App):
         Handled here rather than by focusing the list: the Input owns the cursor,
         and handing focus away mid-sentence loses your place.
         """
+        if len(self.screen_stack) > 1:
+            return          # keys belong to the modal while one is open
         hint = self.query_one("#hint", OptionList)
         if not hint.has_class("showing"):
             # No list open, so the arrows mean what they mean in every other
@@ -830,12 +866,12 @@ class AgoraApp(App):
         if not line:
             return
         if line.startswith("/") or line.startswith("@"):
-            self.write_line(f"[dim]> {escape(line)}[/dim]")
+            self.write_line(mk(f"[dim]> {escape(line)}[/dim]"))
         try:
             if not self.board.handle(line):
                 self.exit()
         except StoreError as exc:
-            self.write_line(f"[red]{escape(str(exc))}[/red]")
+            self.write_line(mk(f"[red]{escape(str(exc))}[/red]"))
         self.refresh_board()
 
     @work(exclusive=True, group="supervisor")
@@ -855,9 +891,9 @@ class AgoraApp(App):
                                        "resumed from the tui")
             sup = Supervisor(store, build_drivers(store), Caps(effort=self.board.effort()))
             reason = await sup.run_topic(self.board.topic_id)
-            self.write_line(f"\n[dim]— council stopped: {escape(reason)}[/dim]")
+            self.write_line(mk(f"\n[dim]— council stopped: {escape(reason)}[/dim]"))
         except Exception as exc:
-            self.write_line(f"\n[red]— council failed: {escape(str(exc))}[/red]")
+            self.write_line(mk(f"\n[red]— council failed: {escape(str(exc))}[/red]"))
         finally:
             self.board.driving.clear()
 
@@ -867,10 +903,16 @@ class AgoraApp(App):
         from .supervisor import Supervisor
 
         store = self.drive_store
-        sup = Supervisor(store, build_drivers(store, [agent]))
-        r = await sup.wake_seat(self.board.topic_id, agent)
-        if not r.ok:
-            self.write_line(f"[red]{escape(agent)}: {escape(r.detail)}[/red]")
+        try:
+            sup = Supervisor(store, build_drivers(store, [agent]))
+            r = await sup.wake_seat(self.board.topic_id, agent)
+            if not r.ok:
+                self.write_line(mk(f"[red]{escape(agent)}: {escape(r.detail)}[/red]"))
+        except Exception as exc:
+            # A Textual worker exits the app on an unhandled exception, and a bad
+            # seat name should not end the session.
+            self.write_line(mk(f"[red]could not wake {escape(agent)}: "
+                               f"{escape(str(exc))}[/red]"))
 
     # ---------------------------------------------------------------- actions
 
@@ -881,6 +923,12 @@ class AgoraApp(App):
         self.board.handle("/stop")
 
     def action_tasks(self) -> None:
+        # A key binding must guard exactly like a typed command. Textual exits the
+        # app on an exception from an action handler, so an unguarded topic lookup
+        # here took the whole session down on an empty board.
+        if self.board.topic_id is None:
+            self.board.handle("/tasks")          # answers "no topic yet"
+            return
         self.board.handle("/tasks" if
                           self.board.store.topic(self.board.topic_id)["mode"] == "work"
                           else "/proposals")

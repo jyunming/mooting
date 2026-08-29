@@ -238,6 +238,12 @@ class Store:
         driver: str | None = None,
         driver_cfg: dict[str, Any] | None = None,
     ) -> None:
+        cap = (driver_cfg or {}).get("capability")
+        if cap is not None and cap not in CAPABILITIES:
+            # A typo used to be accepted and only surfaced later as a confusing
+            # "not registered with execute capability" refusal.
+            raise StoreError(
+                f"unknown capability {cap!r}; expected one of {sorted(CAPABILITIES)}")
         driver = driver or ("none" if kind in HUMAN_KINDS or kind == "external" else "spawn")
         if driver not in DRIVER_KINDS:
             raise StoreError(f"unknown driver {driver!r}; expected one of {sorted(DRIVER_KINDS)}")
@@ -309,6 +315,17 @@ class Store:
             "messages": self.q1("SELECT COUNT(*) c FROM messages WHERE author = ?",
                                 (name,))["c"],
         }
+        # tasks.assignee is a NOT NULL foreign key onto agents(name), so deleting
+        # a seat that was ever assigned work raised a raw IntegrityError from
+        # sqlite instead of anything a caller could act on. Refusing is right:
+        # the alternative is deleting somebody's work log to tidy a roster.
+        owns = self.q("SELECT id, title FROM tasks WHERE assignee = ? OR created_by = ?",
+                      (name, name))
+        if owns:
+            raise StoreError(
+                f"{name!r} is on {len(owns)} task(s) (#{owns[0]['id']} "
+                f"{owns[0]['title']!r}...). Delete those topics first, or leave the "
+                f"seat registered -- its work log refers to it.")
         with self.tx() as c:
             c.execute("DELETE FROM seats WHERE agent = ?", (name,))
             c.execute("DELETE FROM agents WHERE name = ?", (name,))
@@ -665,7 +682,11 @@ class Store:
             )
             c.execute(
                 "INSERT INTO messages (topic_id, author, kind, body, proposal_id) VALUES (?,?,?,?,?)",
-                (p["topic_id"], agent, "object" if stance == "object" else "support", rationale, pid),
+                # An abstention used to be written down as support, which is the
+                # opposite of what the seat said.
+                (p["topic_id"], agent,
+                 {"object": "object", "abstain": "system"}.get(stance, "support"),
+                 rationale, pid),
             )
             self._emit(c, p["topic_id"], "proposal", agent,
                        {"proposal_id": pid, "action": "vote", "stance": stance})
@@ -702,15 +723,20 @@ class Store:
             )
             self._emit(c, p["topic_id"], "decision", decider,
                        {"proposal_id": pid, "status": status, "rationale": rationale})
-        if approve:
-            # The single point where drafted work becomes runnable. Nothing else
-            # in the codebase moves a task out of 'draft', which is what makes
-            # "no execution before a human approves the plan" checkable.
-            released = self.release_plan(pid)
-            if released:
-                self.post(int(p["topic_id"]), "agora",
-                          f"plan approved - {released} task(s) assigned",
-                          kind="system", count_turn=False)
+            if approve:
+                # In the same transaction as the ruling. Split across two, a crash
+                # in between left a proposal approved with its tasks stuck as
+                # drafts -- which the work loop would then put up as a second,
+                # disconnected plan.
+                released = c.execute(
+                    "UPDATE tasks SET status = 'assigned', updated_at = datetime('now') "
+                    "WHERE proposal_id = ? AND status = 'draft'", (pid,)).rowcount
+            else:
+                released = 0
+        if released:
+            self.post(int(p["topic_id"]), "agora",
+                      f"plan approved - {released} task(s) assigned",
+                      kind="system", count_turn=False)
 
     def delete_topic(self, topic_id: int) -> dict[str, int]:
         """Remove a topic and everything hanging off it.
@@ -913,6 +939,14 @@ def connect(path: Path | str | None = None, *, init: bool = False) -> Store:
     to schema.sql, every existing board keeps working without it, and the failure
     surfaces later as `table topics has no column named ...`.
     """
+    target = Path(path) if path else default_db_path()
+    if not init and not target.exists():
+        # Silently creating a board turned a wrong --db or a wrong working
+        # directory into "nothing set up yet", which reads like a fresh install
+        # rather than a mistake.
+        raise StoreError(
+            f"no board at {target}. Run `agora init` here, or point --db / "
+            f"$AGORA_DB at an existing one.")
     store = Store(path)
     store.init_schema()
     return store

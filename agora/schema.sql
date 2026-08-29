@@ -91,6 +91,9 @@ CREATE TABLE IF NOT EXISTS proposals (
     decided_at  TEXT
 );
 
+-- Read on every loop of the supervisor, to answer "is a decision pending".
+CREATE INDEX IF NOT EXISTS idx_proposals_topic ON proposals(topic_id, status);
+
 CREATE TABLE IF NOT EXISTS votes (
     proposal_id INTEGER NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
     agent       TEXT    NOT NULL,

@@ -509,7 +509,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("question", help="'-' reads stdin")
     p.set_defaults(fn=cmd_ask)
 
-    p = sub.add_parser("install", help="register the MCP server with codex/gemini (one-time)")
+    p = sub.add_parser("install", help="register the MCP server with codex/gemini/agy (one-time)")
     p.add_argument("agents", nargs="?", help="comma-separated; default all seats")
     p.add_argument("--dry-run", action="store_true", help="print the command instead of running it")
     p.set_defaults(fn=cmd_install)

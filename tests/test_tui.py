@@ -1133,3 +1133,25 @@ async def test_execute_can_be_granted_in_session_but_stays_two_keys(tmp_path, bo
         await Supervisor(board, {"codex": driver}).wake_seat(app.board.topic_id,
                                                              "codex")
         assert got == [False], "a meeting wake must never be an executing wake"
+
+
+@pytest.mark.asyncio
+async def test_the_refresh_timer_survives_a_modal(tmp_path, board):
+    """query_one searches the *active* screen. With the model picker open the
+    timer kept firing against a screen that has none of these widgets, and raised
+    NoMatches a second later."""
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._pick_model("codex")
+        await pilot.pause()
+        assert len(app.screen_stack) > 1, "the picker should be on top"
+
+        app.refresh_board()          # must not raise
+        app.write_line("something arriving while the picker is open")
+
+        app.screen.dismiss(None)
+        await pilot.pause()
+        app.refresh_board()          # and works again afterwards
+        assert "seat" in str(app.query_one("#seats", DataTable).columns[
+            list(app.query_one("#seats", DataTable).columns)[0]].label)

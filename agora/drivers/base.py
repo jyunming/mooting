@@ -177,7 +177,13 @@ class Driver(abc.ABC):
             out, err = await asyncio.wait_for(
                 proc.communicate(payload), timeout=timeout or self.timeout_s
             )
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            # CancelledError matters as much as TimeoutError here. The supervisor
+            # wraps this call in its own wait_for with the *same* deadline, and
+            # its timer is armed first, so in practice the outer one always wins
+            # and arrives as a cancellation. Catching only TimeoutError meant the
+            # child was never killed: the council moved on and left a CLI running,
+            # burning quota, for every timed-out turn.
             proc.kill()
             await proc.wait()
             raise
