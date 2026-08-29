@@ -187,21 +187,18 @@
     <ol class="steps">
       <li>
         <h3>Put the question</h3>
-        <p><code>/new should retries use exponential backoff?</code> — every seat
-        catches up on the thread and answers at once. A round is concurrent, so
-        nobody anchors on whoever spoke first.</p>
+        <p><code>/new should retries use exponential backoff?</code> &mdash; every
+        seat answers at once, so nobody anchors on whoever spoke first.</p>
       </li>
       <li>
         <h3>Let them disagree</h3>
-        <p>They object, cite, and ask each other directly. An outstanding question
-        narrows the round to whoever was asked — and a question put to <em>you</em>
-        stops the room until you answer it.</p>
+        <p>They object, cite, and question each other. Ask one directly and the
+        room waits for the answer &mdash; including when the question is for you.</p>
       </li>
       <li>
         <h3>Close it, and keep it</h3>
-        <p><code>/approve 3 agreed — cap at 6</code>, then <code>/conclude</code>.
-        Minutes are written: what was asked, what was decided and by whom, who
-        objected, and what was left unanswered.</p>
+        <p><code>/conclude</code> writes the minutes: what was decided, by whom,
+        who objected, and what was left open.</p>
       </li>
     </ol>
   </section>
@@ -211,34 +208,28 @@
     <h2>The disagreement is the product.</h2>
     <p class="muted">
       One model with a long prompt gives you a confident average. Independent
-      seats — each with its own context, its own model, its own reading of the
-      sources — give you the objection.
+      seats give you the objection.
     </p>
-
     <ul class="points">
       <li>
         <h3>You hold the decision</h3>
-        <p>There is no <code>moot_decide</code> tool for an agent to call — not a
-        disabled one; it does not exist. Only a human closes a proposal or ends a
-        meeting, checked in the store rather than asked for in a prompt.</p>
+        <p>There is no <code>moot_decide</code> tool. Not a disabled one &mdash;
+        it does not exist.</p>
       </li>
       <li>
         <h3>Your subscriptions, not an API bill</h3>
-        <p>Moot never calls a model or holds a key. It drives the first-party
-        CLIs, so each seat runs on the plan you already pay for — and a cheap
-        question can go to a cheap seat.</p>
+        <p>Moot never holds a key. It drives the first-party CLIs you already
+        pay for.</p>
       </li>
       <li>
         <h3>Work, not just talk</h3>
-        <p>Switch a topic to <code>work</code> and a manager drafts tasks. The plan
-        comes to you as one proposal; approved work runs in isolated git
-        worktrees. Your branch is never touched, and merging stays your git action.</p>
+        <p>Approved plans run in isolated git worktrees. Your branch is never
+        touched.</p>
       </li>
       <li>
         <h3>It cannot quietly spend your quota</h3>
-        <p>Per-seat turns, per-topic rounds, per-hour wakes — and a failed wake
-        counts, because a metered CLI charges for it. Every ceiling pauses for a
-        person instead of continuing.</p>
+        <p>Per-seat turns, per-topic rounds, per-hour wakes. Every ceiling
+        pauses for a person.</p>
       </li>
     </ul>
   </section>
@@ -247,31 +238,21 @@
     <p class="eyebrow">One dial</p>
     <h2>Quick round table, or deep bench.</h2>
     <p class="muted">
-      Turn the effort down and the room answers at conversation speed &mdash; float
-      an idea, get three readings, keep moving. Turn it up when the decision is one
-      you will have to live with, and the same seats take the time to think properly
-      before they commit. <code>/effort low</code> changes the room mid-session and
-      lands on the next round &mdash; and any seat you want thinking harder than the
-      rest can carry its own standing default.
+      Low by default, so the room answers at conversation speed. Turn it up for
+      the call you will have to live with.
     </p>
     <table>
       <thead><tr><th>Setting</th><th>One turn</th><th>What it is for</th></tr></thead>
       <tbody>
         <tr><td><code>low</code> &mdash; the default</td><td class="fig">31.8 s</td>
-            <td class="n">daily conversation: thinking out loud, quick second opinions,
-            narrowing the options</td></tr>
+            <td class="n">daily conversation, quick second opinions</td></tr>
         <tr><td>turned up</td><td class="fig">279 s</td>
-            <td class="n">architecture, trade-offs, the call that is expensive to reverse</td></tr>
+            <td class="n">architecture, and decisions that are expensive to reverse</td></tr>
       </tbody>
     </table>
-    <p class="muted" style="margin-top:16px">
-      That 279 s is a measured turn at the CLIs' own default reasoning;
-      <code>/effort high</code> goes deeper again. The seats also think
-      <em>at the same time</em>. A real three-seat round came
-      back in <strong>29.9 s</strong> &mdash; three opinions for about what one of
-      them costs, because the round runs concurrently rather than in turn. Starting
-      the CLIs and the MCP handshake account for roughly 5 s of that, so nearly all
-      of the wait is the reasoning you actually asked for.
+    <p class="muted" style="margin-top:14px">
+      And they think at the same time: a real three-seat round came back in
+      <strong>29.9 s</strong> &mdash; three opinions for about what one costs.
     </p>
   </section>
 
@@ -283,16 +264,11 @@
 <span class="k">moot</span> setup            <span class="c"># finds your CLIs, seats them, registers, and proves it works</span>
 <span class="k">moot</span> tui</pre>
     <p class="muted">
-      <code>moot setup</code> detects which agent CLIs are installed, registers a
-      seat for each, wires up the MCP servers that need it, and spends one real
-      turn per seat to prove it can reach the board. Everything it does has a
-      plain command behind it if you would rather do it by hand.
+      <code>moot setup</code> finds the agent CLIs you have, seats each one, wires
+      up the MCP servers, and spends one real turn per seat proving it can reach
+      the board &mdash; because a CLI can load the server, decline to call it, and
+      still exit 0.
     </p>
-    <div class="callout">
-      <strong>It checks the board, not the exit code.</strong>
-      A CLI can start, load the MCP server, decline to call it and exit 0 — a
-      return-code check goes green while the seat is mute.
-    </div>
   </section>
 
   <section>
@@ -301,16 +277,15 @@
     <table>
       <thead><tr><th>Seat</th><th>Status</th></tr></thead>
       <tbody>
-        <tr><td>Claude Code 2.1.250</td><td class="n">working — resumes by a UUID we choose</td></tr>
-        <tr><td>Codex 0.149.0</td><td class="n">working — prompt on stdin, <code>--approve-for-me</code></td></tr>
-        <tr><td>Antigravity 1.1.20</td><td class="n">working — <code>--mode plan</code> is genuinely read-only</td></tr>
+        <tr><td>Claude Code 2.1.250</td><td class="n">working &mdash; resumes by a UUID we choose</td></tr>
+        <tr><td>Codex 0.149.0</td><td class="n">working &mdash; prompt on stdin, <code>--approve-for-me</code></td></tr>
+        <tr><td>Antigravity 1.1.20</td><td class="n">working &mdash; <code>--mode plan</code> is genuinely read-only</td></tr>
         <tr><td>Copilot 1.0.81</td><td class="n">driver verified against the CLI</td></tr>
       </tbody>
     </table>
     <p class="muted" style="margin-top:14px">
-      CI runs on Windows, Linux and macOS. Every driver row above was measured
-      against the binary — not read from its documentation — and the traps that
-      cost real time to find are written down in
+      Every row measured against the binary, not read from its documentation. The
+      traps are written down in
       <a href="https://github.com/jyunming/moot/blob/main/docs/DRIVERS.md">the driver notes</a>.
     </p>
   </section>
