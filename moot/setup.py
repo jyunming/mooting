@@ -21,8 +21,10 @@ from .drivers.spawn import DRIVER_CLASSES
 from .install import NEEDS_REGISTRATION, install_seat
 from .store import Store, StoreError, connect
 
-#: Offered in the order most people would want them seated.
-CANDIDATES = ("claude", "codex", "copilot", "agy", "gemini")
+#: Offered in the order most people would want them seated. Gemini's driver
+#: works and `moot agents add <name> gemini` still seats it -- it is left out
+#: here because it is not being recommended yet, not because it is broken.
+CANDIDATES = ("claude", "codex", "copilot", "agy")
 
 
 def _found() -> list[tuple[str, str]]:

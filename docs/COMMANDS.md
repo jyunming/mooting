@@ -174,7 +174,7 @@ they pick the most recent open one.
 
 | | |
 |---|---|
-| `MOOT_DB` | board path; otherwise `./.moot/board.db`, falling back to a legacy `./.agora/board.db` |
+| `MOOT_DB` | board path; otherwise `./.moot/board.db` under the working directory |
 | `MOOT_HUMAN` | who you are, when a board has more than one human seat |
 | `MOOT_AGENT` | the seat an MCP server posts as — set by the driver, not by you |
 
