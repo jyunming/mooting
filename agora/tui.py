@@ -250,8 +250,12 @@ class AgoraApp(App):
         self._palette: dict[str, str] = {}
         self._tints: dict[str, str] = {}
         #: What you have typed, newest last, walked with ↑/↓ when no hint is open.
+        #: Loaded from disk, because a history that starts empty every time you
+        #: open the app is not a history -- pressing up in a fresh session did
+        #: nothing, which is indistinguishable from the keys not working.
         self._history: list[str] = []
         self._history_at: int | None = None
+        self._history_file = Path(self.board.store.path).parent / "input-history"
 
     # ------------------------------------------------------------------ layout
 
@@ -281,6 +285,7 @@ class AgoraApp(App):
         # Paint once now, not only on the first tick -- otherwise every pane sits
         # empty for a second on open, which reads as "nothing here" exactly when
         # someone is looking to see what state the council is in.
+        self._load_history()
         # A previous session may have been killed mid-round; do not inherit its
         # ghosts and show three seats thinking forever.
         freed = self.board.store.sweep_stale_wakes()
@@ -641,6 +646,10 @@ class AgoraApp(App):
             for name in self.board.seat_names():
                 if name.startswith(text[1:]):
                     rows.append((f"@{name}", "ask this seat directly"))
+        # Alphabetical. Grouping by purpose is right for /help, where you are
+        # reading; here you are looking for one known name, and a list you have to
+        # scan for it is slower than one you can jump down.
+        rows.sort(key=lambda r: r[0])
         return rows
 
     def on_data_table_row_selected(self, event) -> None:
@@ -710,6 +719,33 @@ class AgoraApp(App):
         ])
         hint.highlighted = 0
         hint.add_class("showing")
+
+    #: Enough to reach for something said a while ago; small enough to stay a file
+    #: you could read.
+    HISTORY_MAX = 300
+
+    def _load_history(self) -> None:
+        try:
+            lines = self._history_file.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+        if not lines and self.board.topic_id is not None:
+            # Nothing saved yet, but the board remembers what you said here, and
+            # that is the more useful thing to reach for on a first run.
+            lines = [m["body"] for m in self.board.store.transcript(self.board.topic_id)
+                     if m["author"] == self.board.me and m["kind"] != "system"]
+        self._history = [ln for ln in lines if ln.strip()][-self.HISTORY_MAX:]
+
+    def _save_history(self) -> None:
+        # One entry per line, so anything containing a newline is skipped rather
+        # than silently reappearing later as several separate entries.
+        self._history = [h for h in self._history if chr(10) not in h]
+        try:
+            self._history_file.parent.mkdir(parents=True, exist_ok=True)
+            self._history_file.write_text(
+                chr(10).join(self._history[-self.HISTORY_MAX:]), encoding="utf-8")
+        except OSError:
+            pass          # a history that cannot be written is not worth a crash
 
     def _walk_history(self, step: int) -> None:
         box = self.query_one("#say", Input)
@@ -789,6 +825,7 @@ class AgoraApp(App):
         self.query_one("#hint", OptionList).remove_class("showing")
         if line and (not self._history or self._history[-1] != line):
             self._history.append(line)
+            self._save_history()
         self._history_at = None
         if not line:
             return

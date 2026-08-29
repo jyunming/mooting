@@ -1050,3 +1050,50 @@ async def test_an_agent_to_agent_question_does_not_veto_the_chair(tmp_path, boar
     text = (tmp_path / "t-minutes.md").read_text(encoding="utf-8")
     assert "Questions left unanswered" in text, "it should still be on the record"
     assert "does that hold?" in text
+
+
+@pytest.mark.asyncio
+async def test_history_survives_closing_the_session(tmp_path, board):
+    """A history that starts empty every time you open the app is not a history:
+    pressing up in a fresh session did nothing, which is indistinguishable from
+    the keys not working."""
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await type_line(pilot, app, "something I said earlier")
+
+    again = AgoraApp(tmp_path / "board.db", "t", "me")
+    again.board.auto = False
+    async with again.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("up")
+        await pilot.pause()
+        assert again.query_one("#say", Input).value == "something I said earlier"
+
+
+@pytest.mark.asyncio
+async def test_a_first_run_reaches_for_what_you_said_on_the_board(tmp_path, board):
+    """Nothing saved yet, but the board remembers what you said here."""
+    app = app_for(tmp_path, board)
+    board.post(app.board.topic_id, "me", "an earlier remark", count_turn=False)
+
+    fresh = AgoraApp(tmp_path / "board.db", "t", "me")
+    fresh.board.auto = False
+    async with fresh.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("up")
+        await pilot.pause()
+        assert fresh.query_one("#say", Input).value == "an earlier remark"
+
+
+@pytest.mark.asyncio
+async def test_the_hints_are_in_letter_order(tmp_path, board):
+    """Grouping by purpose is right for /help, where you are reading. Here you are
+    looking for one known name, and a list you must scan is slower than one you
+    can jump down."""
+    app = app_for(tmp_path, board)
+    rows = [cmd for cmd, _why in app._hint_rows("/")]
+    assert rows == sorted(rows), f"not alphabetical: {rows[:6]}"
+    assert len(rows) > 10
+
+    at = [cmd for cmd, _why in app._hint_rows("@")]
+    assert at == sorted(at)
