@@ -256,6 +256,36 @@ class AgoraApp(App):
     def colour_for(self, name: str) -> str:
         return self._palette.get(name, "cyan")
 
+    def _render_proposal(self, pr) -> list:
+        """A proposal is the one thing only you can close, so it is announced as
+        something to act on -- and it carries its own body.
+
+        The banner used to be the title alone, which reads as a notification that
+        a decision exists somewhere else. You cannot rule on a title.
+        """
+        head = Text.assemble(("◆ proposal ", "bold yellow"),
+                             (f"#{pr['id']} ", "bold yellow"),
+                             (pr["title"], "yellow"),
+                             (f"   by {pr['author']}", "dim"))
+        act = Text(f"   /approve {pr['id']} <why>  ·  /reject {pr['id']} <why>"
+                   f"  ·  /proposals {pr['id']} to re-read",
+                   "bold yellow")
+        body = pr["body"].strip()
+        out = ["", head]
+        if body:
+            out.append(Markdown(body))
+        votes = self.board.store.votes(pr["id"])
+        if votes:
+            for v in votes:
+                mark = {"support": "+", "object": "!", "abstain": "~"}.get(v["stance"], "?")
+                why = " ".join(v["rationale"].split())[:140]
+                out.append(Text.assemble(
+                    (f"   {mark} {v['agent']} {v['stance']}",
+                     f"bold {self.colour_for(v['agent'])}"),
+                    (f" — {why}" if why else "", "dim")))
+        out.append(act)
+        return out
+
     def _quoted_line(self, m):
         """A one-line echo of what this message is replying to.
 
@@ -319,6 +349,11 @@ class AgoraApp(App):
         if quoted is not None:
             pieces.append(Padding(quoted, (0, 1), style=bg))
         rendered = Markdown(body) if body else Text("")
+        pid = field(m, "proposal_id")
+        if m["kind"] == "propose" and pid:
+            pieces.append(Padding(
+                Text(f"◆ proposal #{pid} — /approve {pid} <why> to rule on it",
+                     "bold yellow"), (0, 1), style=bg))
         # Padding, not a bare style: it extends the band across the full width, so
         # a reply is one block rather than a ragged right edge following the text.
         return ["", Padding(header, (0, 1), style=bg), *pieces,
@@ -368,9 +403,10 @@ class AgoraApp(App):
         if ev.kind == "proposal" and ev.payload.get("action") == "opened":
             pid = ev.payload["proposal_id"]
             self.notify_turn(f"proposal #{pid} needs your ruling")
-            return (f"\n[yellow bold]◆ proposal #{pid}[/yellow bold] "
-                    f"[yellow]{escape(ev.payload['title'])}[/yellow]\n"
-                    f"[dim]  /approve {pid} <why>   |   /reject {pid} <why>[/dim]")
+            try:
+                return self._render_proposal(store.proposal(pid))
+            except Exception:
+                return None
         if ev.kind == "decision":
             return (f"\n[green]✓ proposal #{ev.payload['proposal_id']} "
                     f"{ev.payload['status']} by {escape(ev.actor)}[/green]")
@@ -490,6 +526,10 @@ class AgoraApp(App):
             self.write_line(self._render_message(m))
         for a in self.board.pending_asks():
             self.write_line(self._render_ask(a["asker"], a["question"]))
+        # A proposal raised before you opened the topic was waiting on you
+        # invisibly: only live arrivals were ever announced.
+        for pr in self.board.store.proposals(self.board.topic_id, status="open"):
+            self.write_line(self._render_proposal(pr))
         # Fresh cursor, or the first tick would replay the new topic's history.
         self.cursor = self.board.store.head()
         self.refresh_board()

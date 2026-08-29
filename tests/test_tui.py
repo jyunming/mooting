@@ -757,3 +757,50 @@ async def test_minutes_can_be_written_decisions_only(tmp_path, board, monkeypatc
     assert "Adopt backoff" in brief and "agreed" in brief
     assert "SOME-LONG-ARGUMENT" not in brief, "the transcript should be omitted"
     assert "SOME-LONG-ARGUMENT" in full, "the full minutes should keep it"
+
+
+@pytest.mark.asyncio
+async def test_an_open_proposal_is_visible_when_you_open_the_topic(tmp_path, board):
+    """A proposal raised before you opened the topic was waiting on you
+    invisibly: only live arrivals were announced."""
+    app = app_for(tmp_path, board)
+    pid = board.propose(app.board.topic_id, "claude", "Book direct", "body")
+
+    written: list = []
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.write_line = lambda item: written.extend(
+            item if isinstance(item, list) else [item])
+        app.rebind_topic()
+        await pilot.pause()
+
+        text = " ".join(str(w) for w in written)
+        assert f"proposal #{pid}" in text
+        assert f"/approve {pid}" in text, "it must say how to rule on it"
+
+        # And the status bar and input both say something is waiting.
+        app.refresh_board()
+        assert "awaiting your ruling" in str(app.query_one("#status", Static).content)
+        assert "/approve" in app.query_one("#say", Input).placeholder
+
+
+@pytest.mark.asyncio
+async def test_a_proposal_banner_carries_the_proposal(tmp_path, board):
+    """You cannot rule on a title. The banner was the title alone, which reads as
+    a notification that a decision exists somewhere else."""
+    from rich.markdown import Markdown
+
+    app = app_for(tmp_path, board)
+    pid = board.propose(app.board.topic_id, "claude", "Book direct",
+                        "1. Use aggregators to search.\n2. Book with the airline.")
+    board.vote(pid, "codex", "object", "OTAs are cheaper")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        parts = app._render_proposal(board.proposal(pid))
+
+    text = " ".join(str(p) for p in parts)
+    md = [p for p in parts if isinstance(p, Markdown)]
+    assert md and "Book with the airline" in md[0].markup, "the body must be there"
+    assert "codex object" in text and "OTAs are cheaper" in text
+    assert f"/approve {pid}" in text
