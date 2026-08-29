@@ -310,3 +310,70 @@ async def test_the_status_bar_shouts_when_it_is_your_turn(tmp_path, board):
         app.board.handle("ops/gateway.yaml")     # answering clears it
         app.refresh_board()
         assert "YOUR TURN" not in str(app.query_one("#status", Static).content)
+
+
+@pytest.mark.asyncio
+async def test_the_panes_do_not_fight_for_width(tmp_path, board):
+    """A screenshot showed the transcript overrunning the sidebar and the two
+    painting over each other, because only one of them had a width."""
+    app = app_for(tmp_path, board)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        side = app.query_one("#side").size.width
+        transcript = app.query_one("#transcript").size.width
+
+    assert side == 42, f"sidebar lost its width: {side}"
+    assert transcript > 60, f"transcript squeezed to {transcript}"
+    assert side + transcript <= 120, "panes overlap"
+
+
+@pytest.mark.asyncio
+async def test_help_text_is_not_eaten_by_markup(tmp_path, board):
+    """`[slug]` is a Rich style tag, so /rm rendered with a blank description."""
+    from agora.console import COMMANDS
+
+    for cmd, why in COMMANDS.items():
+        assert "[" not in why, f"{cmd} description would be swallowed as markup: {why}"
+
+
+@pytest.mark.asyncio
+async def test_help_is_grouped_and_says_you_can_just_type(tmp_path, board):
+    app = app_for(tmp_path, board)
+    written: list[str] = []
+    async with app.run_test() as pilot:
+        app.write_line = lambda item: written.append(str(item))
+        app.board.emit = app.write_line
+        app.board.handle("/help")
+
+    text = "\n".join(written)
+    assert "Talking" in text and "Deciding" in text and "Clearing up" in text
+    # The thing people actually need first, which a flat command list never says.
+    assert "post it" in text and "@agent" in text
+    assert "<slug>" not in text.split("Topics")[0], "help still demands a slug"
+
+
+@pytest.mark.asyncio
+async def test_history_never_hands_richlog_a_list(tmp_path, board):
+    """A message renders as several pieces. Passing the list straight to
+    RichLog.write() reprs it, which put
+
+        <rich.markdown.Markdown object at 0x...>
+
+    into a real transcript. RichLog must receive the pieces, never the list."""
+    app = app_for(tmp_path, board)
+    board.post(app.board.topic_id, "claude", "## Finding" + chr(10) * 2 + "it holds",
+               count_turn=False)
+
+    got: list = []
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        log = app.query_one("#transcript", RichLog)
+        original = log.write
+        log.write = lambda item, *a, **k: (got.append(item), original(item, *a, **k))[1]
+        app.rebind_topic()
+        await pilot.pause()
+
+    assert got, "history was not replayed"
+    assert not any(isinstance(item, list) for item in got),         "a list of renderables reached RichLog and would be printed as a repr"
+    from rich.markdown import Markdown
+    assert any(isinstance(item, Markdown) for item in got),         "the body should arrive as rendered markdown"

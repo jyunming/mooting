@@ -61,8 +61,8 @@ COMMANDS = {
     "/asks": "questions waiting on you",
     "/auto": "on | off -- whether posting wakes the council (default on)",
     "/nudge": "wake one seat by hand",
-    "/approve": "<id> [why] -- rule on a proposal (only you can)",
-    "/reject": "<id> [why]",
+    "/approve": "<id> <why> -- rule on a proposal (only you can)",
+    "/reject": "<id> <why>",
     "/proposals": "what is waiting on you",
     "/tasks": "the work plan and where each task has got to",
     "/seats": "who has budget left, who owes an answer",
@@ -70,7 +70,7 @@ COMMANDS = {
     "/new": "<what you want to discuss> -- opens a topic, same seats",
     "/mode": "debate | discuss | work <agent> -- what kind of topic this is",
     "/manager": "<agent> -- reassign the manager (work topics only)",
-    "/rm": "[slug] -- delete a topic; add `yes` to confirm",
+    "/rm": "<slug> -- delete a topic; /rm yes for this one",
     "/reset": "clear every topic; add `yes` to confirm",
     "/help": "this list",
     "/quit": "leave (the board keeps everything)",
@@ -189,7 +189,7 @@ class Console:
 
     def _require_topic(self) -> bool:
         if self.topic_id is None:
-            self.emit(f"{DIM}no topic yet — /new <slug> <title> to start one"
+            self.emit(f"{DIM}no topic yet — /new <what you want to discuss>"
                       f"{', or /topic <slug>' if self.store.topics() else ''}{RESET}")
             return False
         return True
@@ -319,9 +319,50 @@ class Console:
             self.emit(f"{DIM}council idle — /run when you want them to pick it up{RESET}")
         return True
 
+    #: Grouped, because a flat alphabetical list of eighteen commands answers
+    #: "what exists" and not "what do I do now" -- and the answer to the second is
+    #: usually "just type", which a command list never says.
+    HELP = [
+        ("Talking", [
+            ("<anything>", "post it — and it clears any question waiting on you"),
+            ("@agent <question>", "ask one seat; the others wait for their answer"),
+        ]),
+        ("Running the council", [
+            ("/run", "start it (posting starts it too, unless /auto off)"),
+            ("/stop", "pause after the turn in flight"),
+            ("/effort low|medium|high", "how hard everyone thinks — low is ~9x faster"),
+            ("/nudge <agent>", "wake one seat by hand"),
+            ("/auto on|off", "whether posting wakes the council"),
+        ]),
+        ("Deciding — only you can", [
+            ("/approve <id> <why>", "accept a proposal"),
+            ("/reject <id> <why>", "refuse it"),
+            ("/proposals", "what is waiting on your ruling"),
+            ("/asks", "questions waiting on your answer"),
+        ]),
+        ("Topics", [
+            ("/new <what to discuss>", "opens one here; the handle is derived"),
+            ("/topic <slug>", "switch to another"),
+            ("/mode debate|discuss", "argue to find the flaw / build together"),
+            ("/mode work <agent>", "team mode; that seat plans and reviews"),
+            ("/seats", "who is here, budget left, who owes an answer"),
+            ("/tasks", "the work plan and where each task has got to"),
+        ]),
+        ("Clearing up", [
+            ("/rm [slug] yes", "delete a topic (omit slug for this one)"),
+            ("/reset yes", "clear every topic; seats are kept"),
+            ("/quit", "leave — the board keeps everything"),
+        ]),
+    ]
+
     def _help(self, _: str) -> None:
-        for cmd, why in COMMANDS.items():
-            self.emit(f"  {CYAN}{cmd:<11}{RESET} {why}")
+        for heading, rows in self.HELP:
+            self.emit("")
+            self.emit(f"{BOLD}{heading}{RESET}")
+            for cmd, why in rows:
+                self.emit(f"  {CYAN}{cmd:<24}{RESET} {DIM}{why}{RESET}")
+        self.emit("")
+        self.emit(f"{DIM}Ctrl+R run · Ctrl+S stop · Ctrl+T tasks · Ctrl+Q quit{RESET}")
 
     def _run(self, _: str) -> None:
         if not self._require_topic():
@@ -465,7 +506,7 @@ class Console:
             self._switch(rest[0]["slug"])
             return True
         self.topic, self.topic_id = None, None
-        self.emit(f"{DIM}board is empty — /new <slug> <title> to start one{RESET}")
+        self.emit(f"{DIM}board is empty — /new <what you want to discuss>{RESET}")
         self.on_topic_change()
         return True
 

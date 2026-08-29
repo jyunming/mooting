@@ -78,9 +78,22 @@ class AgoraApp(App):
     CSS = """
     Screen { layout: vertical; }
     #body { height: 1fr; }
-    #side { width: 40; }
-    #transcript { border: round $primary; padding: 0 1; }
-    #seats, #work { border: round $secondary; height: 1fr; }
+    /* Both panes need an explicit width. Without one the transcript sizes to its
+       content, overruns the sidebar, and the two paint over each other. */
+    #transcript { width: 1fr; border: round $primary; padding: 0 1; }
+    #side { width: 42; }
+    #seats { height: 45%; }
+    #work { height: 1fr; }
+    #seats, #work { border: round $secondary; }
+    /* Thin, muted scrollbars: the defaults are wide and bright enough to read as
+       a UI element in their own right. */
+    #transcript, #seats, #work {
+        scrollbar-size-vertical: 1;
+        scrollbar-size-horizontal: 0;
+        scrollbar-background: $surface;
+        scrollbar-color: $panel;
+        scrollbar-color-hover: $secondary;
+    }
     #status { height: 1; background: $boost; color: $text; padding: 0 1; }
     Input { border: round $accent; }
     """
@@ -111,7 +124,8 @@ class AgoraApp(App):
                 yield DataTable(id="seats", cursor_type="none", zebra_stripes=True)
                 yield DataTable(id="work", cursor_type="none", zebra_stripes=True)
         yield Static("", id="status")
-        yield Input(placeholder="say something, @agent a question, or /help", id="say")
+        yield Input(placeholder="type to speak · @agent to ask one seat · /help",
+                    id="say")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -184,7 +198,7 @@ class AgoraApp(App):
             self.query_one("#seats", DataTable).clear()
             self.query_one("#work", DataTable).clear()
             self.query_one("#status", Static).update(
-                "no topic  |  /new <slug> <title> to start one")
+                "no topic  |  /new <what you want to discuss>  |  /help")
             return
         try:
             for ev in store.events_since(self.cursor, self.board.topic_id):
@@ -290,12 +304,15 @@ class AgoraApp(App):
             self.sub_title = "no topic"
             log.write("[dim]Nothing on the board yet.[/dim]")
             log.write("")
-            log.write("Start one:  [cyan]/new <slug> <title>[/cyan]")
-            log.write("[dim]e.g.  /new retries Should webhook retries back off?[/dim]")
+            log.write("[bold]Start one[/bold] — just say what you want to discuss:")
+            log.write("  [cyan]/new the workflow optimization in agentic AI development"
+                      "[/cyan]")
             log.write("")
-            log.write("[dim]Then type the detail the council needs, then /run.[/dim]")
-            log.write("[dim]/help lists everything.[/dim]")
-            log.write("[dim]Then type any detail the council needs, and /run.[/dim]")
+            log.write("[dim]Then type any detail the council needs, and [/dim]"
+                      "[cyan]/run[/cyan][dim].[/dim]")
+            log.write("[dim]Answering is just typing. [/dim][cyan]@agent <question>"
+                      "[/cyan][dim] asks one seat. [/dim][cyan]/help[/cyan]"
+                      "[dim] for the rest.[/dim]")
             self.cursor = self.board.store.head()
             self.refresh_board()
             return
@@ -303,9 +320,9 @@ class AgoraApp(App):
         self.title = t["title"]
         self.sub_title = f"{t['slug']} · {t['mode']}"
         for m in self.board.store.transcript(self.board.topic_id)[-40:]:
-            log.write(self._render_message(m))
+            self.write_line(self._render_message(m))
         for a in self.board.pending_asks():
-            log.write(self._render_ask(a["asker"], a["question"]))
+            self.write_line(self._render_ask(a["asker"], a["question"]))
         # Fresh cursor, or the first tick would replay the new topic's history.
         self.cursor = self.board.store.head()
         self.refresh_board()
