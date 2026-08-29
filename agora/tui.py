@@ -33,7 +33,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from rich.markdown import Markdown
 from rich.markup import escape
+from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -96,6 +98,8 @@ class AgoraApp(App):
         #: Separate connection for the supervisor; see the module docstring.
         self.drive_store = connect(db)
         self.cursor = 0
+        #: Set when the council is blocked on you; cleared when you answer.
+        self._waiting: str | None = None
 
     # ------------------------------------------------------------------ layout
 
@@ -127,24 +131,51 @@ class AgoraApp(App):
 
     # ------------------------------------------------------------- rendering
 
-    def write_line(self, text: str) -> None:
-        """Console.emit target. Accepts Rich markup; plain text is safe too."""
-        self.query_one("#transcript", RichLog).write(text)
+    def write_line(self, item) -> None:
+        """Console.emit target. Takes a markup string or any Rich renderable, and
+        a list of either -- messages render as several pieces."""
+        log = self.query_one("#transcript", RichLog)
+        for part in (item if isinstance(item, list) else [item]):
+            log.write(part)
+
+    def notify_turn(self, why: str) -> None:
+        """Ring the terminal and flag the status bar when the council needs you.
+
+        A council that waits silently is a council you have to sit and watch. The
+        bell is what most terminals turn into a taskbar flash, which is the point
+        -- you should be able to look away.
+        """
+        self._waiting = why
+        try:
+            self.bell()
+        except Exception:
+            pass
 
     @staticmethod
-    def _render_message(m) -> str:
+    def _render_message(m) -> list:
+        """Header line plus the body as markdown.
+
+        Agents write markdown -- headings, bold, lists, fenced code -- and showing
+        the source characters wastes the structure they went to the trouble of
+        producing. Rendering it is also why the body must not go through Rich
+        *markup*: an agent writing `[balance.json]` means the filename, not a
+        style tag.
+        """
         colour = {"system": "dim", "ruling": "green", "object": "yellow",
                   "propose": "yellow"}.get(m["kind"], "cyan")
-        tag = "" if m["kind"] == "say" else f" [dim]\\[{m['kind']}][/dim]"
-        # Bodies are agent-written and routinely contain [brackets]; unescaped they
-        # would be swallowed as Rich markup.
-        return f"\n[{colour} bold]{escape(m['author'])}[/{colour} bold]{tag}\n{escape(m['body'].strip())}"
+        tag = "" if m["kind"] == "say" else f"  [{m['kind']}]"
+        header = Text.assemble((m["author"], f"bold {colour}"), (tag, "dim"))
+        body = m["body"].strip()
+        return ["", header, Markdown(body) if body else Text("")]
 
     @staticmethod
-    def _render_ask(asker: str, question: str) -> str:
-        return (f"\n[magenta bold]❓ {escape(asker)} is asking you[/magenta bold]\n"
-                f"[magenta]{escape(question.strip())}[/magenta]\n"
-                f"[dim]   type an answer — it posts as you and clears the question[/dim]")
+    def _render_ask(asker: str, question: str) -> list:
+        return ["",
+                Text.assemble(("❓ ", "magenta"),
+                              (f"{asker} is asking you", "bold magenta")),
+                Markdown(question.strip()),
+                Text("   Type your answer below — it clears the question and the "
+                     "council resumes.", "dim")]
 
     def refresh_board(self) -> None:
         """One tick: drain new events into the log, then repaint state."""
@@ -174,10 +205,12 @@ class AgoraApp(App):
             if row is None or (row["author"] == self.board.me and row["kind"] != "ruling"):
                 return None
             if self.board.me in (ev.payload.get("mentions") or []):
+                self.notify_turn(f"{row['author']} asked you a question")
                 return self._render_ask(row["author"], row["body"])
             return self._render_message(row)
         if ev.kind == "proposal" and ev.payload.get("action") == "opened":
             pid = ev.payload["proposal_id"]
+            self.notify_turn(f"proposal #{pid} needs your ruling")
             return (f"\n[yellow bold]◆ proposal #{pid}[/yellow bold] "
                     f"[yellow]{escape(ev.payload['title'])}[/yellow]\n"
                     f"[dim]  /approve {pid} <why>   |   /reject {pid} <why>[/dim]")
@@ -229,6 +262,8 @@ class AgoraApp(App):
         b = self.board
         asks = len(b.pending_asks())
         props = len(b.store.proposals(b.topic_id, status="open"))
+        if not asks and not props:
+            self._waiting = None
         bits = [f"effort {b.effort()}",
                 "driving" if b.driving.is_set() else "idle",
                 f"auto {'on' if b.auto else 'off'}"]
@@ -236,7 +271,14 @@ class AgoraApp(App):
             bits.append(f"[magenta]{asks} question(s) for you[/magenta]")
         if props:
             bits.append(f"[yellow]{props} awaiting your ruling[/yellow]")
-        self.query_one("#status", Static).update("  |  ".join(bits))
+        line = "  |  ".join(bits)
+        status = self.query_one("#status", Static)
+        if self._waiting:
+            # Loud on purpose: the council has stopped and is waiting on you.
+            status.update(f"[black on bright_magenta] ▶ YOUR TURN — {self._waiting} "
+                          f"[/black on bright_magenta]  {line}")
+        else:
+            status.update(line)
 
     def rebind_topic(self) -> None:
         """Repoint every pane at whatever topic the board is now on -- including

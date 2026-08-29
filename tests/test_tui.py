@@ -15,7 +15,7 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.widgets import DataTable, Input, RichLog   # noqa: E402
+from textual.widgets import DataTable, Input, RichLog, Static  # noqa: E402
 
 from agora.store import connect                          # noqa: E402
 from agora.tui import AgoraApp                           # noqa: E402
@@ -35,7 +35,12 @@ def board(tmp_path):
 def app_for(tmp_path, board, slug="t", **kw):
     board.open_topic(slug, "A topic", "the brief", "me",
                      seats=("claude", "codex", "me"), **kw)
-    return AgoraApp(tmp_path / "board.db", slug, "me")
+    app = AgoraApp(tmp_path / "board.db", slug, "me")
+    # auto-wake off for every test, without exception: posting would otherwise
+    # start a real supervisor and spawn real CLIs. A test suite that quietly
+    # spends subscription quota is a trap, and it caught me once already.
+    app.board.auto = False
+    return app
 
 
 async def type_line(pilot, app, text: str) -> None:
@@ -132,13 +137,19 @@ async def test_effort_is_retunable_from_the_tui(tmp_path, board):
 
 
 @pytest.mark.asyncio
-async def test_bracketed_agent_text_is_not_eaten_as_markup(tmp_path, board):
-    """Agent bodies routinely contain [brackets]; unescaped, Rich would swallow
-    them and the transcript would silently lose content."""
-    app = app_for(tmp_path, board)
-    rendered = AgoraApp._render_message(
-        {"author": "claude", "kind": "say", "body": "see [balance.json] line [12]"})
-    assert "[balance.json]" in rendered.replace("\\[", "[")
+async def test_agent_bodies_render_as_markdown_not_as_markup(tmp_path, board):
+    """Agents write markdown, so it is rendered. Which is also why the body must
+    not go through Rich *markup*: `[balance.json]` means the filename."""
+    from rich.markdown import Markdown
+
+    parts = AgoraApp._render_message(
+        {"author": "claude", "kind": "say",
+         "body": "## Finding" + chr(10) * 2 + "see [balance.json] line 12"
+                 + chr(10) * 2 + "- one" + chr(10) + "- two"})
+    body = [p for p in parts if isinstance(p, Markdown)]
+    assert body, "the body should be a rendered Markdown, not a plain string"
+    assert "[balance.json]" in body[0].markup
+    assert "## Finding" in body[0].markup
 
 
 @pytest.mark.asyncio
@@ -173,17 +184,27 @@ async def test_switching_topic_does_not_leave_the_old_transcript_behind(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_mode_and_manager_can_be_set_in_session(tmp_path, board):
+async def test_a_role_only_exists_on_a_work_topic(tmp_path, board):
+    """In discussion everyone argues on equal footing, so there is no manager to
+    be. The role is granted when the topic becomes work and taken back when it
+    stops being work, rather than lingering as a title nobody uses."""
     app = app_for(tmp_path, board)
     async with app.run_test() as pilot:
         app.board.auto = False
-        await type_line(pilot, app, "/mode work")          # refused: no manager yet
-        assert board.topic("t")["mode"] == "debate"
-        await type_line(pilot, app, "/manager claude")
-        await type_line(pilot, app, "/mode work")
 
-    assert board.topic("t")["mode"] == "work"
-    assert board.is_manager(app.board.topic_id, "claude")
+        await type_line(pilot, app, "/manager claude")     # refused: not a work topic
+        assert not board.is_manager(app.board.topic_id, "claude")
+
+        await type_line(pilot, app, "/mode work")          # refused: names nobody
+        assert board.topic("t")["mode"] == "debate"
+
+        await type_line(pilot, app, "/mode work claude")   # sets both at once
+        assert board.topic("t")["mode"] == "work"
+        assert board.is_manager(app.board.topic_id, "claude")
+
+        await type_line(pilot, app, "/mode discuss")       # and the role goes back
+        assert board.topic("t")["mode"] == "discuss"
+        assert not board.is_manager(app.board.topic_id, "claude")
 
 
 @pytest.mark.asyncio
@@ -195,7 +216,6 @@ async def test_deleting_a_topic_needs_confirming(tmp_path, board):
         app.board.auto = False
         await type_line(pilot, app, "/rm t")
         assert board.topic("t"), "a bare /rm must not delete anything"
-
         await type_line(pilot, app, "/rm t yes")
         await pilot.pause()
 
@@ -209,7 +229,7 @@ async def test_deleting_the_topic_you_are_on_lands_you_somewhere(tmp_path, board
     board.open_topic("keeper", "Another", "b", "me", seats=("claude", "me"))
     async with app.run_test() as pilot:
         app.board.auto = False
-        await type_line(pilot, app, "/rm yes")          # deletes the current topic
+        await type_line(pilot, app, "/rm yes")
         await pilot.pause()
         assert app.board.topic["slug"] == "keeper"
         assert "keeper" in str(app.sub_title), "the view did not follow"
@@ -233,7 +253,7 @@ async def test_reset_needs_confirming_and_keeps_the_seats(tmp_path, board):
 async def test_the_session_opens_on_an_empty_board(tmp_path, board):
     """You must be able to start from inside. Being told to go back to the shell
     first is the exact break this session exists to remove."""
-    app = AgoraApp(tmp_path / "board.db", None, "me")     # no topic at all
+    app = AgoraApp(tmp_path / "board.db", None, "me")
     async with app.run_test() as pilot:
         await pilot.pause()
         assert app.board.topic_id is None
@@ -243,7 +263,6 @@ async def test_the_session_opens_on_an_empty_board(tmp_path, board):
         await pilot.pause()
 
         assert app.board.topic["slug"] == "should-retries-back-off"
-        # A first topic seats everyone registered -- there was nothing to carry over.
         seats = {s["agent"] for s in board.seats(app.board.topic_id)}
         assert {"claude", "codex", "me"} <= seats
 
@@ -257,8 +276,7 @@ async def test_clearing_the_board_leaves_you_inside_it(tmp_path, board):
         app.board.auto = False
         await type_line(pilot, app, "/reset yes")
         await pilot.pause()
-
-        assert app.board.topic_id is None, "should still be running, with no topic"
+        assert app.board.topic_id is None
         assert "no topic" in str(app.sub_title)
 
         await type_line(pilot, app, "/new A brand new question")
@@ -272,5 +290,23 @@ async def test_topic_bound_commands_say_so_rather_than_crashing(tmp_path, board)
     async with app.run_test() as pilot:
         await pilot.pause()
         for line in ("hello", "/run", "/seats", "/tasks", "/effort high", "@codex hi"):
-            await type_line(pilot, app, line)       # must not raise
+            await type_line(pilot, app, line)
         assert app.board.topic_id is None
+
+
+@pytest.mark.asyncio
+async def test_the_status_bar_shouts_when_it_is_your_turn(tmp_path, board):
+    """A council that waits silently is one you have to sit and watch."""
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        board.ask(app.board.topic_id, "claude", "me", "Where is the config?")
+        app.refresh_board()
+        await pilot.pause()
+
+        status = str(app.query_one("#status", Static).content)
+        assert "YOUR TURN" in status
+
+        app.board.handle("ops/gateway.yaml")     # answering clears it
+        app.refresh_board()
+        assert "YOUR TURN" not in str(app.query_one("#status", Static).content)

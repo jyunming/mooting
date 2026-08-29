@@ -68,8 +68,8 @@ COMMANDS = {
     "/seats": "who has budget left, who owes an answer",
     "/topic": "<slug> -- switch to another topic",
     "/new": "<what you want to discuss> -- opens a topic, same seats",
-    "/mode": "debate | discuss | work -- what kind of topic this is",
-    "/manager": "<agent> -- who plans and reviews on a work topic",
+    "/mode": "debate | discuss | work <agent> -- what kind of topic this is",
+    "/manager": "<agent> -- reassign the manager (work topics only)",
     "/rm": "[slug] -- delete a topic; add `yes` to confirm",
     "/reset": "clear every topic; add `yes` to confirm",
     "/help": "this list",
@@ -525,21 +525,48 @@ class Console:
     def _mode(self, rest: str) -> None:
         if not self._require_topic():
             return
-        if rest not in {"debate", "discuss", "work"}:
+        words = rest.split()
+        mode = words[0] if words else ""
+        if mode not in {"debate", "discuss", "work"}:
             self.emit(f"  mode is {BOLD}{self.store.topic(self.topic_id)['mode']}{RESET}   "
-                      f"{DIM}/mode debate|discuss|work{RESET}")
+                      f"{DIM}/mode debate | discuss | work <manager>{RESET}")
             return
-        if rest == "work" and not any(s["role"] == "manager"
-                                      for s in self.store.seats(self.topic_id)):
-            self.emit(f"{RED}work needs a manager: /manager <agent> first{RESET}")
-            return
-        with self.store.tx() as c:
-            c.execute("UPDATE topics SET mode = ? WHERE id = ?", (rest, self.topic_id))
-        self.emit(f"{DIM}mode → {rest}{RESET}")
+
+        if mode == "work":
+            # A role only exists where it means something. In discussion there is
+            # no manager to be -- everyone argues on equal footing -- so the role
+            # is granted when the topic becomes work, and taken back when it stops
+            # being work, rather than lingering as a title nobody uses.
+            manager = words[1] if len(words) > 1 else None
+            if not manager:
+                self.emit(f"{RED}work needs a manager: /mode work <agent>{RESET}")
+                self.emit(f"{DIM}candidates: {', '.join(self.seat_names())}{RESET}")
+                return
+            if not self.store.seat(self.topic_id, manager):
+                self.emit(f"{RED}{manager!r} holds no seat here{RESET}")
+                return
+            with self.store.tx() as c:
+                c.execute("UPDATE topics SET mode = 'work' WHERE id = ?", (self.topic_id,))
+                c.execute("UPDATE seats SET role = 'participant' WHERE topic_id = ?",
+                          (self.topic_id,))
+                c.execute("UPDATE seats SET role = 'manager' WHERE topic_id = ? "
+                          "AND agent = ?", (self.topic_id, manager))
+            self.emit(f"{DIM}mode → work, {manager} manages{RESET}")
+        else:
+            with self.store.tx() as c:
+                c.execute("UPDATE topics SET mode = ? WHERE id = ?", (mode, self.topic_id))
+                c.execute("UPDATE seats SET role = 'participant' WHERE topic_id = ?",
+                          (self.topic_id,))
+            self.emit(f"{DIM}mode → {mode} — no roles; everyone argues on equal footing"
+                      f"{RESET}")
         self.on_topic_change()
 
     def _manager(self, rest: str) -> None:
         if not self._require_topic():
+            return
+        if self.store.topic(self.topic_id)["mode"] != "work":
+            self.emit(f"{DIM}no manager in a discussion — roles exist on work topics."
+                      f" /mode work <agent> to switch.{RESET}")
             return
         if not self.store.seat(self.topic_id, rest):
             self.emit(f"{RED}{rest!r} holds no seat here{RESET}")

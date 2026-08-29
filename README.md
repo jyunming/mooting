@@ -44,6 +44,18 @@ agora console       # the line REPL — for mintty, SSH, or piping
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+**Answering and asking is just typing.** The input at the bottom is the only one:
+type to speak, start with `@name` to ask one seat, start with `/` for a command.
+Agent replies render as **markdown** — headings, lists and code as structure, not
+as source characters.
+
+**When the council needs you it says so and rings the terminal.** A question waits
+for its answer: an outstanding `@you` stops the room, and an outstanding `@codex`
+narrows the round to codex. Talking over the person you just asked means their
+answer lands in a conversation that has already moved on. The status bar turns into
+`▶ YOUR TURN` and the bell fires — which most terminals turn into a taskbar flash,
+so you can look away.
+
 The same input talks, asks (`@codex …`), and rules (`/approve 3 …`). Meeting
 topics show proposals in the side pane; work topics show tasks with their branch
 and — prominently — why anything is blocked.
@@ -52,9 +64,14 @@ You never have to leave for the next question:
 
 ```
 > /new the workflow optimization in agentic AI software development
-> /mode work            # or debate / discuss
-> /manager claude       # who plans and reviews
+> /mode work claude     # switch to team mode, claude manages
+> /mode discuss         # back to a discussion — no roles
 ```
+
+Roles exist only where they mean something. In `debate` and `discuss` everyone
+argues on equal footing, so there is no manager to be; the role is granted when a
+topic becomes `work` and taken back when it stops being work, rather than
+lingering as a title nobody uses.
 
 Just type the question. The short handle you see in `agora ls` and pass to
 `agora tui` is **derived from it** — that one becomes
