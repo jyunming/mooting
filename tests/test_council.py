@@ -589,3 +589,29 @@ def test_a_failure_reports_stdout_when_stderr_is_silent(board):
     # And the generic path falls back to stdout rather than reporting nothing.
     assert "boom" in ClaudeDriver("db").failure_detail(1, "boom", "")
     assert "no output" in ClaudeDriver("db").failure_detail(1, "", "")
+
+
+def test_a_seat_that_says_nothing_is_reported_not_counted_as_an_answer(board):
+    """A CLI can exit clean having posted nothing. Recording that as a successful
+    wake left a question apparently ignored with nothing on the board to explain
+    it -- which is exactly what happened to a real @codex question."""
+    topic = open_debate(board)
+    board.ask(topic, "human", "codex", "please elaborate")
+
+    silent = FakeDriver(board, script=lambda st, seat, p: None)
+    result = asyncio.run(Supervisor(board, {"codex": silent}).wake_seat(topic, "codex"))
+
+    assert result.ok, "the CLI itself did not fail"
+    notes = [m["body"] for m in board.transcript(topic) if m["author"] == "agora"]
+    assert any("said nothing" in n for n in notes), "the silence was not reported"
+    # The question is still owed, because nothing answered it.
+    assert board.open_mentions(topic, "codex")
+
+
+def test_a_seat_that_does_speak_is_not_reported_as_silent(board):
+    topic = open_debate(board)
+    driver = FakeDriver(board)
+    asyncio.run(Supervisor(board, {"codex": driver}).wake_seat(topic, "codex"))
+
+    notes = [m["body"] for m in board.transcript(topic) if m["author"] == "agora"]
+    assert not any("said nothing" in n for n in notes)

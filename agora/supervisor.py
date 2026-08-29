@@ -217,6 +217,9 @@ class Supervisor:
 
         self.store.set_seat_state(topic_id, agent, "waking")
         wake_id = self.store.record_wake(topic_id, agent)
+        before = self.store.q1(
+            "SELECT COUNT(*) c FROM messages WHERE topic_id = ? AND author = ?",
+            (topic_id, agent))["c"]
         try:
             result = await asyncio.wait_for(driver.wake(seat, prompt), timeout=driver.timeout_s)
         except asyncio.TimeoutError:
@@ -226,6 +229,21 @@ class Supervisor:
             result = WakeResult.failure(f"{type(exc).__name__}: {exc}")
 
         self.store.finish_wake(wake_id, "ok" if result.ok else "error", result.detail)
+
+        spoke = self.store.q1(
+            "SELECT COUNT(*) c FROM messages WHERE topic_id = ? AND author = ?",
+            (topic_id, agent))["c"] > before
+
+        if result.ok and not spoke:
+            # The CLI ran and exited clean while the seat said nothing. That is
+            # not the same as an answer, and reporting it as a successful wake
+            # left a question apparently ignored with nothing on the board to
+            # explain it. Say so: the turn was spent either way.
+            self.store.post(
+                topic_id, "agora",
+                f"{agent} was woken and said nothing — its turn produced no post. "
+                f"Anything still asked of it stays open; /nudge {agent} to try again.",
+                kind="system", count_turn=False)
 
         if result.ok:
             if result.cli_session and result.cli_session != row["cli_session"]:
