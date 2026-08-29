@@ -45,6 +45,26 @@ from .console import Console
 from .store import StoreError, connect
 
 
+#: One colour per seat, picked from its name so it is the same in every session
+#: and on every screen. In a four-way argument the author matters more than the
+#: message kind, and scanning for "what did codex say" should be a colour, not a
+#: read. Chosen to stay apart on both dark and light terminals.
+SEAT_COLOURS = ("bright_cyan", "bright_green", "bright_magenta", "bright_yellow",
+                "bright_blue", "cyan", "green", "magenta")
+
+
+def seat_colours(names) -> dict:
+    """Assign by position among the seats present, not by hashing the name.
+
+    Hashing looked fine until two of this council's own seats -- codex and agy --
+    landed on the same cyan. Distinctness is the entire point, so it is allocated
+    rather than hoped for: sorted so it stays the same every time you open the
+    topic, and only wrapping past eight seats, which no council here has.
+    """
+    return {name: SEAT_COLOURS[i % len(SEAT_COLOURS)]
+            for i, name in enumerate(sorted(names))}
+
+
 class Board(Console):
     """Console's command set, wired to a widget instead of stdout."""
 
@@ -113,6 +133,7 @@ class AgoraApp(App):
         self.cursor = 0
         #: Set when the council is blocked on you; cleared when you answer.
         self._waiting: str | None = None
+        self._palette: dict[str, str] = {}
 
     # ------------------------------------------------------------------ layout
 
@@ -165,8 +186,10 @@ class AgoraApp(App):
         except Exception:
             pass
 
-    @staticmethod
-    def _render_message(m) -> list:
+    def colour_for(self, name: str) -> str:
+        return self._palette.get(name, "cyan")
+
+    def _render_message(self, m) -> list:
         """Header line plus the body as markdown.
 
         Agents write markdown -- headings, bold, lists, fenced code -- and showing
@@ -175,18 +198,23 @@ class AgoraApp(App):
         *markup*: an agent writing `[balance.json]` means the filename, not a
         style tag.
         """
-        colour = {"system": "dim", "ruling": "green", "object": "yellow",
-                  "propose": "yellow"}.get(m["kind"], "cyan")
+        # The author's colour, not the message kind's: in a four-way argument you
+        # are scanning for who spoke. Kind survives as a dim tag, except for the
+        # two that are about the board rather than a person.
+        if m["kind"] in {"system", "ruling"}:
+            colour = "dim" if m["kind"] == "system" else "bold green"
+        else:
+            colour = f"bold {self.colour_for(m['author'])}"
         tag = "" if m["kind"] == "say" else f"  [{m['kind']}]"
-        header = Text.assemble((m["author"], f"bold {colour}"), (tag, "dim"))
+        header = Text.assemble((m["author"], colour), (tag, "dim"))
         body = m["body"].strip()
         return ["", header, Markdown(body) if body else Text("")]
 
-    @staticmethod
-    def _render_ask(asker: str, question: str) -> list:
+    def _render_ask(self, asker: str, question: str) -> list:
         return ["",
                 Text.assemble(("❓ ", "magenta"),
-                              (f"{asker} is asking you", "bold magenta")),
+                              (asker, f"bold {self.colour_for(asker)}"),
+                              (" is asking you", "bold magenta")),
                 Markdown(question.strip()),
                 Text("   Type your answer below — it clears the question and the "
                      "council resumes.", "dim")]
@@ -251,7 +279,10 @@ class AgoraApp(App):
                 state = f"asked ×{owed}"
             else:
                 state = s["state"]
-            table.add_row(s["agent"], state, f"{s['turns_used']}/{s['max_turns']}")
+            # Same colour as in the transcript, so the sidebar is a legend.
+            who = Text(s["agent"], style="bold" if s["agent"] == self.board.me
+                       else f"bold {self.colour_for(s['agent'])}")
+            table.add_row(who, state, f"{s['turns_used']}/{s['max_turns']}")
 
     def _paint_work(self) -> None:
         """Tasks on a work topic, otherwise open proposals. Blocked reasons are
@@ -317,6 +348,8 @@ class AgoraApp(App):
             self.refresh_board()
             return
         t = self.board.store.topic(self.board.topic_id)
+        self._palette = seat_colours(
+            s["agent"] for s in self.board.store.seats(self.board.topic_id))
         self.title = t["title"]
         self.sub_title = f"{t['slug']} · {t['mode']}"
         for m in self.board.store.transcript(self.board.topic_id)[-40:]:

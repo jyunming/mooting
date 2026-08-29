@@ -147,7 +147,7 @@ class SpawnDriver(Driver):
 
         tail = (out[-4000:] + ("\n[stderr]\n" + err[-2000:] if err.strip() else ""))
         if code != 0:
-            return WakeResult.failure(f"{self.binary} exited {code}: {err.strip()[:300]}", tail)
+            return WakeResult.failure(self.failure_detail(code, out, err), tail)
         return WakeResult(
             ok=True,
             cli_session=self.extract_session(out, err, proposed) if self.stateful else None,
@@ -310,6 +310,18 @@ class CopilotDriver(SpawnDriver):
 
     _RESUME = re.compile(r"--resume=([0-9a-f-]{16,})", re.I)
 
+    def effort_argv(self, seat: Seat) -> list[str]:
+        """Only when a model is named.
+
+        Copilot's default model is `auto`, which rejects the flag outright --
+        'Model "auto" does not support reasoning effort configuration' -- and
+        fails the run. Setting a model on the seat is the user saying they know
+        it takes one.
+        """
+        if seat.effort and seat.cfg.get("model"):
+            return ["--effort", seat.effort]
+        return []
+
     def tool_profile(self, seat: Seat) -> list[str]:
         return [] if seat.executing else ["--deny-tool", "shell", "--deny-tool", "write"]
 
@@ -389,6 +401,29 @@ class AgyDriver(SpawnDriver):
     stateful = False
 
     _CONV = re.compile(r'"conversation_id"\s*:\s*"([^"]+)"')
+
+    #: Which efforts this CLI will actually accept. The flag advertises
+    #: low|medium|high, but the *model* decides: gemini-3.1-pro refuses "medium"
+    #: ("available: low, high") and the whole run fails. An effort setting is a
+    #: preference, so an unsupported one is dropped rather than allowed to cost a
+    #: seat its turn.
+    efforts = frozenset({"low", "high"})
+
+    def effort_argv(self, seat: Seat) -> list[str]:
+        return ["--effort", seat.effort] if seat.effort in self.efforts else []
+
+    def failure_detail(self, code: int, out: str, err: str) -> str:
+        """agy reports errors as JSON on stdout and leaves stderr empty."""
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                if obj.get("error"):
+                    return f"{self.binary}: {str(obj['error'])[:300]}"
+        return super().failure_detail(code, out, err)
 
     def tool_profile(self, seat: Seat) -> list[str]:
         return ["--mode", "accept-edits" if seat.executing else "plan"]

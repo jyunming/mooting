@@ -117,6 +117,19 @@ class Driver(abc.ABC):
     async def wake(self, seat: Seat, prompt: str) -> WakeResult:
         """Deliver `prompt` to `seat`'s session and return when the turn ends."""
 
+    def failure_detail(self, code: int, out: str, err: str) -> str:
+        """Why a non-zero exit happened, in words worth reading.
+
+        stderr is not always where the reason is: agy reports errors as a JSON
+        object on *stdout* and exits 1 with stderr empty, which surfaced as
+        "agy exited 1: " -- an error message containing no error. Falling back to
+        stdout costs nothing and is the difference between a diagnosis and a
+        shrug.
+        """
+        reason = err.strip() or out.strip()
+        return f"{self.binary} exited {code}: {reason[:300]}" if reason else \
+            f"{self.binary} exited {code} with no output"
+
     async def close(self, seat: Seat) -> None:
         """Release any long-lived process held for this seat. Default: nothing."""
         return None

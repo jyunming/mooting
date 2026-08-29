@@ -549,3 +549,43 @@ def test_an_oversized_argv_prompt_is_reported_as_itself(board):
 
     assert not r.ok
     assert "30,000 chars" in r.detail and "Windows caps" in r.detail
+
+
+def test_effort_is_only_sent_where_the_cli_accepts_it(board):
+    """An effort setting is a preference. An unsupported one must not cost a seat
+    its turn -- both of these failed a real council:
+      agy      invalid model selection: gemini-3.1-pro has no "medium" effort
+      copilot  Model "auto" does not support reasoning effort configuration
+    """
+    from agora.drivers.base import Seat
+    from agora.drivers.spawn import AgyDriver, ClaudeDriver, CopilotDriver
+
+    def seat(cfg=None, effort="medium"):
+        return Seat(1, "t", "a", "k", None, cfg or {}, effort=effort)
+
+    # agy's model offers low|high only.
+    assert AgyDriver("db").effort_argv(seat(effort="medium")) == []
+    assert AgyDriver("db").effort_argv(seat(effort="high")) == ["--effort", "high"]
+
+    # copilot's default model rejects the flag; naming a model is opting in.
+    assert CopilotDriver("db").effort_argv(seat()) == []
+    assert CopilotDriver("db").effort_argv(seat({"model": "gpt-5.3"})) == \
+        ["--effort", "medium"]
+
+    # claude takes all three.
+    assert ClaudeDriver("db").effort_argv(seat()) == ["--effort", "medium"]
+
+
+def test_a_failure_reports_stdout_when_stderr_is_silent(board):
+    """agy reports errors as JSON on stdout and exits 1 with stderr empty, which
+    surfaced as "agy exited 1: " -- an error message containing no error."""
+    from agora.drivers.spawn import AgyDriver, ClaudeDriver
+
+    agy_json = ('{"conversation_id":"","status":"ERROR","response":"",'
+                '"error":"invalid model selection: no \\"medium\\" effort"}')
+    detail = AgyDriver("db").failure_detail(1, agy_json, "")
+    assert "invalid model selection" in detail
+
+    # And the generic path falls back to stdout rather than reporting nothing.
+    assert "boom" in ClaudeDriver("db").failure_detail(1, "boom", "")
+    assert "no output" in ClaudeDriver("db").failure_detail(1, "", "")

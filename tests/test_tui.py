@@ -142,7 +142,7 @@ async def test_agent_bodies_render_as_markdown_not_as_markup(tmp_path, board):
     not go through Rich *markup*: `[balance.json]` means the filename."""
     from rich.markdown import Markdown
 
-    parts = AgoraApp._render_message(
+    parts = AgoraApp(tmp_path / "board.db", None, "me")._render_message(
         {"author": "claude", "kind": "say",
          "body": "## Finding" + chr(10) * 2 + "see [balance.json] line 12"
                  + chr(10) * 2 + "- one" + chr(10) + "- two"})
@@ -377,3 +377,22 @@ async def test_history_never_hands_richlog_a_list(tmp_path, board):
     assert not any(isinstance(item, list) for item in got),         "a list of renderables reached RichLog and would be printed as a repr"
     from rich.markdown import Markdown
     assert any(isinstance(item, Markdown) for item in got),         "the body should arrive as rendered markdown"
+
+
+@pytest.mark.asyncio
+async def test_every_seat_gets_a_distinct_colour(tmp_path, board):
+    """Hashing names looked fine until codex and agy both landed on cyan.
+    Distinctness is the point, so it is allocated, not hoped for."""
+    from agora.tui import seat_colours
+
+    palette = seat_colours(["claude", "codex", "agy", "copilot", "jyunming"])
+    assert len(set(palette.values())) == 5, f"colours collided: {palette}"
+    # Same every time you open the topic.
+    assert seat_colours(["codex", "claude"]) == seat_colours(["claude", "codex"])
+
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.colour_for("claude") != app.colour_for("codex")
+        # You are not colour-coded; you are just bold.
+        assert app.board.me in {s["agent"] for s in board.seats(app.board.topic_id)}
