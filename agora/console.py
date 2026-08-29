@@ -476,6 +476,22 @@ class Console:
         if words and words[0] in {"add", "rm", "remove"}:
             return self._seat_change(words[0], words[1] if len(words) > 1 else "",
                                      words[2] if len(words) > 2 else "")
+        # `/seats Santa claude` is what people actually type. Insisting on the
+        # word "add" when the meaning is unambiguous is a rule for the parser's
+        # benefit, not the reader's.
+        if len(words) == 2 and words[1] in AGENT_KINDS:
+            return self._seat_change("add", words[0], words[1])
+        if len(words) == 1 and words[0] not in {"add", "rm", "remove"}:
+            return self._seat_change("add", words[0], "")
+        if words:
+            self.emit(f"{RED}not sure what you meant by /seats {rest}{RESET}")
+            self.emit(f"{DIM}/seats                       who is here{RESET}")
+            self.emit(f"{DIM}/seats <name> <cli>          add a new seat "
+                      f"({', '.join(sorted(AGENT_KINDS))}){RESET}")
+            self.emit(f"{DIM}/seats add <agent>           seat one already "
+                      f"registered{RESET}")
+            self.emit(f"{DIM}/seats rm <agent>            remove one{RESET}")
+            return
         for s in self.store.seats(self.topic_id):
             owed = len(self.store.open_mentions(self.topic_id, s["agent"]))
             flag = f"  {YELLOW}{owed} open ask(s){RESET}" if owed else ""

@@ -589,6 +589,7 @@ async def test_typing_a_slash_offers_the_commands(tmp_path, board):
 
         app.query_one("#say", Input).value = "/se"
         await pilot.pause()
+        await pilot.pause()          # the first Changed after mount needs a settle
         assert hint.has_class("showing")
         assert any(o.startswith("/seats") for o in offered())
 
@@ -932,3 +933,27 @@ async def test_enter_takes_the_highlighted_hint(tmp_path, board):
         await pilot.press("enter")
         await pilot.pause()
         assert box.value == "", "a complete command should have been submitted"
+
+
+@pytest.mark.asyncio
+async def test_seats_accepts_the_form_people_actually_type(tmp_path, board):
+    """`/seats Santa claude` is what a person writes. Insisting on the word "add"
+    when the meaning is unambiguous is a rule for the parser, not the reader."""
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await type_line(pilot, app, "/seats Santa claude")
+        assert board.agent("Santa")["kind"] == "claude"
+        assert board.seat(app.board.topic_id, "Santa") is not None
+
+        # A bare name still means "seat one that already exists".
+        board.add_agent("rudolph", "codex", driver="spawn")
+        await type_line(pilot, app, "/seats rudolph")
+        assert board.seat(app.board.topic_id, "rudolph") is not None
+
+        # And something genuinely ambiguous says what the forms are.
+        said: list[str] = []
+        app.write_line = lambda item: said.append(str(item))
+        app.board.emit = app.write_line
+        app.board.handle("/seats Santa notacli")
+        text = " ".join(said)
+        assert "not sure what you meant" in text and "<name> <cli>" in text
