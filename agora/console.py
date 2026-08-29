@@ -73,6 +73,8 @@ COMMANDS = {
     "/quote": "reply to the last message; or /quote <seat> | <id>",
     "/me": "<name> -- what the council calls you",
     "/minutes": "write the meeting out; /minutes decisions for the rulings only",
+    "/conclude": "<your closing words> -- close the meeting and write the minutes",
+    "/reopen": "resume a meeting you concluded",
     "/rounds": "<n> -- grant the council more rounds on this topic",
     "/seats": "who is here; /seats add <agent> | /seats rm <agent>",
     "/topic": "<slug> -- switch to another topic",
@@ -293,6 +295,7 @@ class Console:
             "manager": self._manager, "rm": self._rm, "reset": self._reset,
             "quote": self._quote, "rounds": self._rounds, "me": self._me,
             "minutes": self._minutes, "show": self._show,
+            "conclude": self._conclude, "reopen": self._reopen,
         }.get(cmd)
         if cmd in {"approve", "reject"}:
             self._decide(cmd, rest)
@@ -395,6 +398,8 @@ class Console:
             ("/seats rm <agent>", "remove one; what it already said stays"),
             ("/rounds <n>", "grant more rounds when a topic runs out"),
             ("/tasks", "the work plan and where each task has got to"),
+            ("/conclude <closing words>", "close the meeting and write its minutes"),
+            ("/reopen", "resume a meeting you concluded"),
             ("/minutes", "write the meeting out as markdown"),
             ("/minutes decisions", "the rulings and work log, without the transcript"),
         ]),
@@ -504,6 +509,53 @@ class Console:
             return
         old, self.me = self.me, new
         self.emit(f"{DIM}{old} → {new}, everywhere on the board{RESET}")
+        self.on_topic_change()
+
+    def _conclude(self, rest: str) -> None:
+        """End the meeting and write it up, in one step.
+
+        Ruling on proposals and exporting were separate, and nothing marked a
+        meeting as over -- so minutes of an abandoned discussion read exactly like
+        minutes of a settled one.
+        """
+        if not self._require_topic():
+            return
+        words = rest.split()
+        force = bool(words) and words[0] in {"force", "-f", "anyway"}
+        note = " ".join(words[1:] if force else words).strip()
+
+        undecided = self.store.proposals(self.topic_id, status="open")
+        unanswered = self.store.open_mentions(self.topic_id)
+        if (undecided or unanswered) and not force:
+            self.emit(f"{YELLOW}this meeting still has loose ends:{RESET}")
+            for p in undecided:
+                self.emit(f"  proposal #{p['id']} {p['title']}  "
+                          f"{DIM}/approve {p['id']} <why>{RESET}")
+            for m in unanswered:
+                self.emit(f"  {m['asker']} asked {m['target']}: "
+                          f"{' '.join(m['question'].split())[:70]}…")
+            self.emit(f"{DIM}rule on them first, or /conclude force <closing words> "
+                      f"to close it as it stands{RESET}")
+            return
+
+        try:
+            self.store.conclude(self.topic_id, self.me, note)
+        except StoreError as exc:
+            self.emit(f"{RED}{exc}{RESET}")
+            return
+        self.emit(f"{DIM}meeting concluded{RESET}")
+        self._minutes("")
+        self.on_topic_change()
+
+    def _reopen(self, _: str) -> None:
+        if not self._require_topic():
+            return
+        try:
+            self.store.reopen(self.topic_id, self.me)
+        except StoreError as exc:
+            self.emit(f"{RED}{exc}{RESET}")
+            return
+        self.emit(f"{DIM}reopened — the council can speak again{RESET}")
         self.on_topic_change()
 
     def _minutes(self, rest: str) -> None:

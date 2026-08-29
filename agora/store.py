@@ -397,6 +397,45 @@ class Store:
             c.execute("UPDATE seats SET max_turns = max_turns + ? WHERE topic_id = ?",
                       (n, topic_id))
 
+    def conclude(self, topic_id: int, by: str, note: str = "") -> int:
+        """Close the meeting, on the record.
+
+        A meeting that just stops is not the same as one that concluded, and the
+        difference matters later: minutes of an abandoned discussion read exactly
+        like minutes of a settled one unless somebody said which it was.
+
+        Reserved to a human for the same reason a ruling is: an agent deciding the
+        meeting is over would be deciding the outcome.
+        """
+        if not self.is_human(by):
+            raise NotAuthorised(f"{by!r} is not a human seat; only a human closes a meeting")
+        topic = self.topic(topic_id)
+        if topic["status"] in {"resolved", "aborted"}:
+            raise StoreError(f"`{topic['slug']}` is already {topic['status']}")
+        with self.tx() as c:
+            c.execute("INSERT INTO messages (topic_id, author, kind, body) "
+                      "VALUES (?,?,'ruling',?)",
+                      (topic_id, by, note.strip() or "Meeting concluded."))
+            c.execute("UPDATE topics SET status = 'resolved', "
+                      "closed_at = datetime('now') WHERE id = ?", (topic_id,))
+            self._emit(c, topic_id, "topic", by, {"action": "resolved", "note": note})
+        return topic_id
+
+    def reopen(self, topic_id: int, by: str) -> None:
+        """Concluding is not meant to be a trap; a meeting can be resumed."""
+        if not self.is_human(by):
+            raise NotAuthorised(f"{by!r} is not a human seat")
+        with self.tx() as c:
+            c.execute("UPDATE topics SET status = 'open', closed_at = NULL WHERE id = ?",
+                      (topic_id,))
+            self._emit(c, topic_id, "topic", by, {"action": "reopened"})
+
+    def closing_note(self, topic_id: int):
+        """The chair's last word, if there was one: a ruling attached to no proposal."""
+        return self.q1(
+            "SELECT * FROM messages WHERE topic_id = ? AND kind = 'ruling' "
+            "AND proposal_id IS NULL ORDER BY id DESC LIMIT 1", (topic_id,))
+
     def set_topic_status(self, topic_id: int, status: str, actor: str, note: str = "") -> None:
         with self.tx() as c:
             closed = "datetime('now')" if status in {"resolved", "aborted"} else "NULL"

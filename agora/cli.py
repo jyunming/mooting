@@ -243,6 +243,33 @@ def cmd_minutes(args) -> int:
     return 0
 
 
+def cmd_conclude(args) -> int:
+    """Close the meeting and write its minutes in one step."""
+    from .minutes import default_path, render
+    board = _board(args)
+    who = _human(board, args.as_)
+    t = board.topic(int(args.topic) if args.topic.isdigit() else args.topic)
+    tid = int(t["id"])
+
+    loose = board.proposals(tid, status="open") + list(board.open_mentions(tid))
+    if loose and not args.force:
+        print(f"`{t['slug']}` still has {len(loose)} loose end(s):")
+        for p in board.proposals(tid, status="open"):
+            print(f"  proposal #{p['id']} {p['title']}")
+        for m in board.open_mentions(tid):
+            print(f"  {m['asker']} asked {m['target']}: "
+                  f"{' '.join(m['question'].split())[:70]}")
+        print("rule on them first, or --force to close it as it stands")
+        return 1
+
+    board.conclude(tid, who, args.note or "")
+    text = render(board, tid, transcript=not args.decisions_only)
+    path = Path(args.out) if args.out else Path(default_path(board, tid))
+    path.write_text(text, encoding="utf-8")
+    print(f"concluded `{t['slug']}` and wrote {path}")
+    return 0
+
+
 def cmd_tasks(args) -> int:
     board = _board(args)
     t = board.topic(int(args.topic) if args.topic.isdigit() else args.topic)
@@ -484,6 +511,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("agents", nargs="?", help="comma-separated; default all seats")
     p.add_argument("--dry-run", action="store_true", help="print the command instead of running it")
     p.set_defaults(fn=cmd_install)
+
+    p = sub.add_parser("conclude", help="close a meeting and write its minutes")
+    p.add_argument("topic")
+    p.add_argument("note", nargs="?", help="your closing words, recorded as the conclusion")
+    p.add_argument("-o", "--out")
+    p.add_argument("--decisions-only", action="store_true")
+    p.add_argument("--force", action="store_true",
+                   help="close it with proposals or questions still open")
+    p.set_defaults(fn=cmd_conclude)
 
     p = sub.add_parser("minutes", help="write the meeting out as markdown")
     p.add_argument("topic")

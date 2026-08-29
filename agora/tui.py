@@ -433,7 +433,21 @@ class AgoraApp(App):
             # Same colour as in the transcript, so the sidebar is a legend.
             who = Text(s["agent"], style="bold" if s["agent"] == self.board.me
                        else f"bold {self.colour_for(s['agent'])}")
-            table.add_row(who, state, f"{s['turns_used']}/{s['max_turns']}")
+            if s["kind"] in {"human", "external"}:
+                # Neither column means anything for a person. A turn budget is a
+                # cost control on metered CLIs -- yours is not metered and your
+                # posts never spend one, so 0/4 implied a limit that does not
+                # exist. And idle/thinking/capped describe a subprocess, not you.
+                # What is true of a person here is what they said, and whether
+                # the room is waiting on them.
+                said = self.board.store.q1(
+                    "SELECT COUNT(*) c FROM messages WHERE topic_id = ? AND author = ? "
+                    "AND kind != 'system'", (self.board.topic_id, s["agent"]))["c"]
+                budget = f"{said} said" if said else "—"
+                state = f"asked ×{owed}" if owed else "—"
+            else:
+                budget = f"{s['turns_used']}/{s['max_turns']}"
+            table.add_row(who, state, budget)
 
     def _paint_work(self) -> None:
         """Tasks on a work topic, otherwise open proposals. Blocked reasons are
@@ -539,6 +553,13 @@ class AgoraApp(App):
     def _hint_rows(self, text: str) -> list[tuple[str, str]]:
         """(what would be typed, how it reads) for the text so far."""
         rows: list[tuple[str, str]] = []
+        # Once there is a space you have chosen the command and are writing its
+        # arguments. Keeping the list open past that point meant Enter could
+        # "accept" a completion over `/rm t yes` and throw the arguments away.
+        # Raw, not stripped: a *trailing* space is the start of arguments too,
+        # and stripping it reopened the list the moment a completion was taken.
+        if " " in text:
+            return rows
         if text.startswith("/"):
             typed = text.split(" ")[0]
             for _heading, entries in self.board.HELP:
@@ -573,6 +594,12 @@ class AgoraApp(App):
         hint.highlighted = 0
         hint.add_class("showing")
 
+    def _highlighted_command(self) -> str:
+        hint = self.query_one("#hint", OptionList)
+        if not hint.has_class("showing") or hint.highlighted is None:
+            return ""
+        return (hint.get_option_at_index(hint.highlighted).id or "").split(" ")[0]
+
     def _accept_hint(self) -> bool:
         """Put the highlighted command in the box, ready for its arguments."""
         hint = self.query_one("#hint", OptionList)
@@ -603,7 +630,18 @@ class AgoraApp(App):
                 hint.highlighted = (cur + (1 if event.key == "down" else -1)) % count
             event.prevent_default()
             event.stop()
-        elif event.key == "tab":
+        elif event.key in ("tab", "enter"):
+            # Enter takes the highlighted one, which is what a list you can walk
+            # implies. Except when what you typed already *is* that command --
+            # then you meant to run it, and making you press Enter twice to run
+            # /help would be its own small insult.
+            chosen = self._highlighted_command()
+            typed = self.query_one("#say", Input).value.strip()
+            if event.key == "enter" and typed == chosen:
+                # You typed it in full, so you meant to run it. Making /help take
+                # two Enters would be its own small insult.
+                self.query_one("#hint", OptionList).remove_class("showing")
+                return
             if self._accept_hint():
                 event.prevent_default()
                 event.stop()

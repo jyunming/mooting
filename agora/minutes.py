@@ -74,6 +74,17 @@ def render(store: Store, topic_id: int, transcript: bool = True) -> str:
 
     out += ["## The question", "", t["brief"].strip() or "_(none given)_", ""]
 
+    # The chair's closing words go first among the outcomes: whoever reads this
+    # wants "what did we settle on" before "what was argued".
+    closing = store.closing_note(topic_id)
+    if closing is not None:
+        out += ["## Conclusion", "",
+                f"_{closing['author']}, {_fmt_when(closing['created_at'])}_", "",
+                closing["body"].strip(), ""]
+    elif t["status"] in {"open", "paused"}:
+        out += ["> **This meeting has not been concluded.** What follows is where "
+                "it had got to.", ""]
+
     # ------------------------------------------------------------- decisions
     out += ["## Decisions", ""]
     decided = [p for p in proposals if p["status"] in {"approved", "rejected"}]

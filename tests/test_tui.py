@@ -804,3 +804,131 @@ async def test_a_proposal_banner_carries_the_proposal(tmp_path, board):
     assert md and "Book with the airline" in md[0].markup, "the body must be there"
     assert "codex object" in text and "OTAs are cheaper" in text
     assert f"/approve {pid}" in text
+
+
+@pytest.mark.asyncio
+async def test_concluding_refuses_to_paper_over_loose_ends(tmp_path, board, monkeypatch):
+    """Minutes of an abandoned discussion read exactly like minutes of a settled
+    one unless somebody says which it was."""
+    monkeypatch.chdir(tmp_path)
+    app = app_for(tmp_path, board)
+    pid = board.propose(app.board.topic_id, "claude", "Book direct", "body")
+
+    async with app.run_test() as pilot:
+        await type_line(pilot, app, "/conclude we are done here")
+        assert board.topic("t")["status"] != "resolved", "closed over an open proposal"
+
+        board.decide(pid, "me", approve=True, rationale="agreed")
+        await type_line(pilot, app, "/conclude book direct, train only if much cheaper")
+
+    t = board.topic("t")
+    assert t["status"] == "resolved"
+    note = board.closing_note(app.board.topic_id)
+    assert note is not None and "train only if much cheaper" in note["body"]
+    # ...and the minutes were written in the same step.
+    text = (tmp_path / "t-minutes.md").read_text(encoding="utf-8")
+    assert "## Conclusion" in text and "train only if much cheaper" in text
+
+
+@pytest.mark.asyncio
+async def test_force_closes_it_as_it_stands(tmp_path, board, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    app = app_for(tmp_path, board)
+    board.propose(app.board.topic_id, "claude", "Book direct", "body")
+
+    async with app.run_test() as pilot:
+        await type_line(pilot, app, "/conclude force no agreement reached")
+
+    assert board.topic("t")["status"] == "resolved"
+    text = (tmp_path / "t-minutes.md").read_text(encoding="utf-8")
+    assert "no agreement reached" in text
+    assert "Still awaiting a ruling" in text, "an unruled proposal must still show"
+
+
+@pytest.mark.asyncio
+async def test_an_unconcluded_meeting_says_so_in_its_minutes(tmp_path, board):
+    from agora.minutes import render
+    app = app_for(tmp_path, board)
+    board.post(app.board.topic_id, "claude", "an argument", count_turn=False)
+
+    text = render(board, app.board.topic_id)
+    assert "has not been concluded" in text
+
+
+@pytest.mark.asyncio
+async def test_a_concluded_meeting_can_be_reopened(tmp_path, board, monkeypatch):
+    """Concluding is not meant to be a trap."""
+    monkeypatch.chdir(tmp_path)
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await type_line(pilot, app, "/conclude done")
+        assert board.topic("t")["status"] == "resolved"
+        await type_line(pilot, app, "/reopen")
+        assert board.topic("t")["status"] == "open"
+        # And the council can speak again.
+        board.post(app.board.topic_id, "claude", "one more thing")
+
+
+@pytest.mark.asyncio
+async def test_the_human_seat_shows_what_it_said_not_a_turn_budget(tmp_path, board):
+    """A turn budget is a cost control on metered CLIs. Yours is not metered and
+    your posts never spend one, so 0/4 implied a limit that does not exist."""
+    app = app_for(tmp_path, board)
+    board.post(app.board.topic_id, "me", "first", count_turn=False)
+    board.post(app.board.topic_id, "me", "second", count_turn=False)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one("#seats", DataTable)
+        rows = {str(table.get_cell_at((r, 0))):
+                (str(table.get_cell_at((r, 1))), str(table.get_cell_at((r, 2))))
+                for r in range(table.row_count)}
+
+    # The brief is posted as a system message by whoever opened the topic; it is
+    # not something they said.
+    assert rows["me"] == ("—", "2 said")
+    # Agents keep a real budget, because theirs is real.
+    assert "/" in rows["claude"][1]
+    # And posting still costs an agent nothing.
+    assert board.seat(app.board.topic_id, "claude")["turns_used"] == 0
+
+    # When the room is waiting on you, that is what the state column should say.
+    board.ask(app.board.topic_id, "claude", "me", "which airport?")
+    again = AgoraApp(tmp_path / "board.db", "t", "me")
+    again.board.auto = False
+    async with again.run_test() as pilot:
+        await pilot.pause()
+        table = again.query_one("#seats", DataTable)
+        row = {str(table.get_cell_at((r, 0))): str(table.get_cell_at((r, 1)))
+               for r in range(table.row_count)}
+    assert row["me"] == "asked ×1"
+
+
+@pytest.mark.asyncio
+async def test_enter_takes_the_highlighted_hint(tmp_path, board):
+    """A list you can walk implies that Enter picks the thing you walked to."""
+    from textual.widgets import OptionList
+
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        box = app.query_one("#say", Input)
+        hint = app.query_one("#hint", OptionList)
+
+        box.value = "/se"
+        await pilot.pause()
+        await pilot.press("down")
+        await pilot.pause()
+        chosen = (hint.get_option_at_index(hint.highlighted).id or "").split(" ")[0]
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert box.value == chosen + " ", "Enter did not take the highlighted one"
+        assert not hint.has_class("showing")
+
+        # But a command you have typed in full runs on the first Enter.
+        box.value = "/seats"
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert box.value == "", "a complete command should have been submitted"
