@@ -819,6 +819,10 @@ async def test_concluding_refuses_to_paper_over_loose_ends(tmp_path, board, monk
         await type_line(pilot, app, "/conclude we are done here")
         assert board.topic("t")["status"] != "resolved", "closed over an open proposal"
 
+        # But a question one agent left hanging for another is not your duty and
+        # must not stop you closing a meeting you are chairing.
+        board.ask(app.board.topic_id, "claude", "codex", "does that hold?")
+
         board.decide(pid, "me", approve=True, rationale="agreed")
         await type_line(pilot, app, "/conclude book direct, train only if much cheaper")
 
@@ -1027,3 +1031,22 @@ def test_model_lists_fall_back_to_known_names_when_a_cli_cannot_be_asked():
     assert "agy" in LISTERS and "codex" not in LISTERS
     assert aio.run(available("codex")) == list(KNOWN["codex"])
     assert aio.run(available("nosuchcli")) == []
+
+
+@pytest.mark.asyncio
+async def test_an_agent_to_agent_question_does_not_veto_the_chair(tmp_path, board,
+                                                                 monkeypatch):
+    """A real meeting could not be concluded because Gravity had asked Santa
+    something. That is a loose end worth recording, not a reason the chair cannot
+    end the meeting."""
+    monkeypatch.chdir(tmp_path)
+    app = app_for(tmp_path, board)
+    board.ask(app.board.topic_id, "claude", "codex", "does that hold?")
+
+    async with app.run_test() as pilot:
+        await type_line(pilot, app, "/conclude enough for today")
+
+    assert board.topic("t")["status"] == "resolved"
+    text = (tmp_path / "t-minutes.md").read_text(encoding="utf-8")
+    assert "Questions left unanswered" in text, "it should still be on the record"
+    assert "does that hold?" in text

@@ -542,17 +542,25 @@ class Console:
 
         undecided = self.store.proposals(self.topic_id, status="open")
         unanswered = self.store.open_mentions(self.topic_id)
-        if (undecided or unanswered) and not force:
-            self.emit(f"{YELLOW}this meeting still has loose ends:{RESET}")
+
+        # Only a proposal stops you, because a proposal is *your* outstanding
+        # duty -- nobody else can close it. A question one agent left hanging for
+        # another is a loose end worth recording, not a reason you cannot end the
+        # meeting you are chairing.
+        if undecided and not force:
+            self.emit(f"{YELLOW}there is a decision still waiting on you:{RESET}")
             for p in undecided:
-                self.emit(f"  proposal #{p['id']} {p['title']}  "
-                          f"{DIM}/approve {p['id']} <why>{RESET}")
-            for m in unanswered:
-                self.emit(f"  {m['asker']} asked {m['target']}: "
-                          f"{' '.join(m['question'].split())[:70]}…")
-            self.emit(f"{DIM}rule on them first, or /conclude force <closing words> "
-                      f"to close it as it stands{RESET}")
+                self.emit(f"  proposal #{p['id']} {p['title']}")
+                self.emit(f"    {DIM}/proposals {p['id']} to read it · "
+                          f"/approve {p['id']} <why> · /reject {p['id']} <why>{RESET}")
+            self.emit(f"{DIM}rule on it, or /conclude force <closing words> to close "
+                      f"the meeting with it unresolved{RESET}")
             return
+        for m in unanswered:
+            self.emit(f"{DIM}left unanswered: {m['asker']} asked {m['target']} — "
+                      f"{' '.join(m['question'].split())[:70]}…{RESET}")
+        if unanswered:
+            self.emit(f"{DIM}(recorded in the minutes){RESET}")
 
         try:
             self.store.conclude(self.topic_id, self.me, note)

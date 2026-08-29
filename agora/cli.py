@@ -251,16 +251,18 @@ def cmd_conclude(args) -> int:
     t = board.topic(int(args.topic) if args.topic.isdigit() else args.topic)
     tid = int(t["id"])
 
-    loose = board.proposals(tid, status="open") + list(board.open_mentions(tid))
-    if loose and not args.force:
-        print(f"`{t['slug']}` still has {len(loose)} loose end(s):")
-        for p in board.proposals(tid, status="open"):
+    # Only an undecided proposal blocks: it is the chair's own outstanding duty.
+    # A question one agent left hanging for another is recorded, not a veto.
+    undecided = board.proposals(tid, status="open")
+    if undecided and not args.force:
+        print(f"`{t['slug']}` has {len(undecided)} decision(s) still waiting on you:")
+        for p in undecided:
             print(f"  proposal #{p['id']} {p['title']}")
-        for m in board.open_mentions(tid):
-            print(f"  {m['asker']} asked {m['target']}: "
-                  f"{' '.join(m['question'].split())[:70]}")
-        print("rule on them first, or --force to close it as it stands")
+        print("rule on them first, or --force to close with them unresolved")
         return 1
+    for m in board.open_mentions(tid):
+        print(f"left unanswered: {m['asker']} asked {m['target']} — "
+              f"{' '.join(m['question'].split())[:70]}")
 
     board.conclude(tid, who, args.note or "")
     text = render(board, tid, transcript=not args.decisions_only)
