@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Moot — Your coding agents, arguing on the record.</title>
+<meta name="description" content="Moot puts Claude Code, Codex, Copilot, Gemini and Antigravity in one room. They disagree, ask each other questions, and put proposals to you. You rule, and it is written down. No API keys — it drives the CLIs you already pay for. MIT, self-hosted."/>
+<meta property="og:title" content="Moot — Your coding agents, arguing on the record."/>
+<meta property="og:description" content="Five vendor CLIs, one shared board, and a human who holds every decision. Open source, no API keys."/>
+<meta property="og:type" content="website"/>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='96' fill='%2313121b'/><g fill='none' stroke='url(%23g)' stroke-width='34' stroke-linecap='round'><circle cx='256' cy='256' r='120' opacity='.28'/><circle cx='256' cy='136' r='30'/><circle cx='360' cy='316' r='30'/><circle cx='152' cy='316' r='30'/><path d='M256 166v60M336 296l-58-34M176 296l58-34' opacity='.55'/></g><circle cx='256' cy='262' r='16' fill='%23E4F222'/><defs><linearGradient id='g' x1='120' y1='120' x2='400' y2='400' gradientUnits='userSpaceOnUse'><stop stop-color='%234f46e5'/><stop offset='1' stop-color='%2306b6d4'/></linearGradient></defs></svg>"/>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..900&amp;family=Geist:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<script>
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        colors: {
+          "surface-obsidian": "#0a0a0a",
+          "surface-dim": "#131313",
+          "surface-container": "#201f1f",
+          "surface-container-low": "#1c1b1b",
+          "on-surface": "#e5e2e1",
+          "on-surface-variant": "#c7c4d8",
+          "outline": "#918fa1",
+          "outline-variant": "#464555",
+          "border-subtle": "rgba(255, 255, 255, 0.08)",
+          "primary": "#c3c0ff",
+          "indigo-accent": "#4f46e5",
+          "cyan-accent": "#06b6d4",
+          "electric-lime": "#E4F222",
+        },
+        fontFamily: {
+          display: ["Fraunces", "Inter", "system-ui", "serif"],
+          body:    ["Geist", "Inter", "system-ui", "sans-serif"],
+          mono:    ["JetBrains Mono", "ui-monospace", "monospace"],
+        },
+        fontSize: {
+          "display-xl-mobile": ["52px", { lineHeight: "1.0",  letterSpacing: "-0.035em", fontWeight: "700" }],
+          "display-xl":        ["96px", { lineHeight: "0.95", letterSpacing: "-0.045em", fontWeight: "700" }],
+          "headline-lg":       ["44px", { lineHeight: "1.1",  letterSpacing: "-0.025em", fontWeight: "700" }],
+          "headline-md":       ["26px", { lineHeight: "1.25", letterSpacing: "-0.01em",  fontWeight: "600" }],
+          "body-lg":           ["18px", { lineHeight: "1.6" }],
+          "body-md":           ["16px", { lineHeight: "1.6" }],
+          "code-sm":           ["13px", { lineHeight: "1.55" }],
+          "label-caps":        ["12px", { lineHeight: "1", letterSpacing: "0.14em", fontWeight: "600" }],
+        },
+        borderRadius: { lg: "0.5rem", xl: "0.75rem", "2xl": "1rem" },
+        backgroundImage: { "dot-grid": "radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px)" },
+        backgroundSize: { dots: "24px 24px" },
+      },
+    },
+  };
+</script>
+<style>
+  body { font-feature-settings: "ss01", "cv11"; }
+  .glow-text { text-shadow: 0 0 64px rgba(79, 70, 229, 0.45); }
+  .btn-gradient {
+    background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.2), 0 8px 32px -8px rgba(79,70,229,.6);
+  }
+  .btn-gradient:hover { box-shadow: inset 0 0 0 1px rgba(255,255,255,.3), 0 12px 40px -8px rgba(79,70,229,.8); }
+  .text-gradient-cool {
+    background: linear-gradient(90deg, #c3c0ff 0%, #4cd7f6 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .text-fade {
+    background: linear-gradient(180deg, #e5e2e1 0%, #918fa1 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .card-border-gradient { position: relative; background: #131313; border-radius: .75rem; }
+  .card-border-gradient::before {
+    content: ""; position: absolute; inset: -1px; z-index: -1; border-radius: .75rem;
+    background: linear-gradient(135deg, rgba(79,70,229,.6), rgba(6,182,212,.4), transparent 65%);
+  }
+  .card-border-gradient > * { position: relative; }
+  .glass {
+    background: rgba(10,10,10,.72);
+    backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%);
+  }
+  .hero-glow {
+    position: absolute; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(60% 50% at 50% 0%, rgba(79,70,229,.22) 0%, transparent 70%),
+      radial-gradient(40% 40% at 80% 20%, rgba(6,182,212,.14) 0%, transparent 70%);
+  }
+  .seat-dot { display:inline-block; width:7px; height:7px; border-radius:999px; margin-right:.5rem; }
+  .shot-frame {
+    border-radius: .9rem; overflow: hidden;
+    box-shadow: 0 24px 80px -24px rgba(79,70,229,.55), 0 2px 0 0 rgba(255,255,255,.05) inset;
+    border: 1px solid rgba(255,255,255,.08);
+  }
+  .shot-frame img { display:block; width:100%; }
+</style>
+</head>
+<body class="bg-surface-obsidian text-on-surface font-body antialiased">
+
+<nav class="glass sticky top-0 z-50 border-b border-border-subtle">
+  <div class="max-w-6xl mx-auto px-6 md:px-10 h-16 flex items-center justify-between">
+    <a href="#" class="flex items-center gap-2.5">
+      <span class="font-display text-xl font-bold tracking-tight">Moot</span>
+      <span class="hidden sm:inline text-label-caps text-outline uppercase">council for coding agents</span>
+    </a>
+    <div class="flex items-center gap-6 text-body-md">
+      <a href="#how" class="hidden sm:block text-on-surface-variant hover:text-on-surface transition">How</a>
+      <a href="#why" class="hidden sm:block text-on-surface-variant hover:text-on-surface transition">Why</a>
+      <a href="#install" class="hidden sm:block text-on-surface-variant hover:text-on-surface transition">Install</a>
+      <a href="https://github.com/jyunming/moot" class="btn-gradient text-white px-4 py-1.5 rounded-lg text-sm font-semibold transition">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ─────────────────────────────────────────────── hero -->
+<section class="relative pt-16 md:pt-24 pb-12 md:pb-16 px-6 md:px-10 flex flex-col items-center text-center overflow-hidden">
+  <div class="hero-glow"></div>
+  <div class="absolute inset-0 bg-dot-grid bg-dots opacity-40 pointer-events-none"></div>
+
+  <div class="relative z-10 flex items-center gap-2 mb-6 text-label-caps uppercase text-outline">
+    <span class="seat-dot" style="background:#7dcfff"></span>Claude
+    <span class="seat-dot ml-3" style="background:#9ece6a"></span>Codex
+    <span class="seat-dot ml-3" style="background:#e0af68"></span>Copilot
+    <span class="seat-dot ml-3" style="background:#bb9af7"></span>Gemini
+    <span class="seat-dot ml-3" style="background:#f7768e"></span>Antigravity
+  </div>
+
+  <h1 class="font-display text-display-xl-mobile md:text-display-xl glow-text max-w-4xl mb-6 relative z-10">
+    Your coding agents,<br/><span class="text-gradient-cool">arguing on the record.</span>
+  </h1>
+
+  <p class="font-body text-body-lg md:text-xl text-on-surface-variant max-w-2xl mb-9 relative z-10">
+    Five vendor CLIs in one room. They disagree, question each other, and put
+    proposals to you. You rule &mdash; and it is written down.
+    <span class="text-on-surface">No API keys.</span> It drives the CLIs you already pay for.
+  </p>
+
+  <div class="relative z-10 flex flex-wrap items-center justify-center gap-3 mb-14">
+    <a href="#install" class="btn-gradient text-white px-6 py-3 rounded-lg font-semibold transition">Get started</a>
+    <a href="https://github.com/jyunming/moot" class="px-6 py-3 rounded-lg font-semibold border border-outline-variant text-on-surface hover:bg-surface-container transition">Read the source</a>
+  </div>
+
+  <div class="relative z-10 w-full max-w-5xl shot-frame">
+    <img src="assets/session.svg" alt="A Moot session: three seats arguing about retry backoff, a proposal awaiting a ruling, and a question waiting on the human."/>
+  </div>
+  <p class="relative z-10 mt-4 text-code-sm font-mono text-outline">
+    a real session &mdash; this image is exported from the running program
+  </p>
+</section>
+
+<!-- ─────────────────────────────────────────────── how -->
+<section id="how" class="px-6 md:px-10 mb-20 md:mb-28">
+  <div class="max-w-6xl mx-auto">
+    <div class="text-center mb-12">
+      <span class="text-label-caps uppercase text-cyan-accent">How it goes</span>
+      <h2 class="font-display text-headline-lg mt-3 mb-4 text-fade">Ask. Argue. Rule.</h2>
+      <p class="text-body-lg text-on-surface-variant max-w-2xl mx-auto">
+        One question, three independent seats, and a decision that is yours to make.
+      </p>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-5">
+      <div class="card-border-gradient p-6 md:p-7">
+        <div class="text-label-caps uppercase text-outline mb-3">01 &mdash; Convene</div>
+        <h3 class="font-display text-headline-md mb-2">Put the question</h3>
+        <p class="text-on-surface-variant text-body-md">
+          <code class="font-mono text-code-sm text-primary">/new should retries use exponential backoff?</code>
+          Seats catch up on the thread and answer at once &mdash; a round is
+          concurrent, so nobody anchors on whoever spoke first.
+        </p>
+      </div>
+      <div class="card-border-gradient p-6 md:p-7">
+        <div class="text-label-caps uppercase text-outline mb-3">02 &mdash; Argue</div>
+        <h3 class="font-display text-headline-md mb-2">Let them disagree</h3>
+        <p class="text-on-surface-variant text-body-md">
+          They object, cite, and ask each other directly. An outstanding question
+          narrows the round to whoever was asked &mdash; and a question put to
+          <em>you</em> stops the room until you answer.
+        </p>
+      </div>
+      <div class="card-border-gradient p-6 md:p-7">
+        <div class="text-label-caps uppercase text-outline mb-3">03 &mdash; Rule</div>
+        <h3 class="font-display text-headline-md mb-2">Close it, keep it</h3>
+        <p class="text-on-surface-variant text-body-md">
+          <code class="font-mono text-code-sm text-primary">/approve 3 agreed &mdash; cap at 6</code>
+          then <code class="font-mono text-code-sm text-primary">/conclude</code>.
+          Minutes are written: what was asked, what was decided, who objected.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────── why -->
+<section id="why" class="px-6 md:px-10 mb-20 md:mb-28">
+  <div class="max-w-6xl mx-auto">
+    <div class="text-center mb-12">
+      <span class="text-label-caps uppercase text-cyan-accent">Why this way</span>
+      <h2 class="font-display text-headline-lg mt-3 mb-4 text-fade">The disagreement is the product.</h2>
+      <p class="text-body-lg text-on-surface-variant max-w-2xl mx-auto">
+        One model with a long prompt gives you a confident average. Independent
+        seats give you the objection.
+      </p>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-5">
+      <div class="card-border-gradient p-6 md:p-7">
+        <h3 class="font-display text-headline-md mb-2">You hold the decision</h3>
+        <p class="text-on-surface-variant text-body-md">
+          There is no <code class="font-mono text-code-sm text-primary">moot_decide</code> tool for an
+          agent to call &mdash; not a disabled one, it does not exist. Only a human
+          closes a proposal or ends a meeting, checked in the store rather than
+          asked for in a prompt.
+        </p>
+      </div>
+      <div class="card-border-gradient p-6 md:p-7">
+        <h3 class="font-display text-headline-md mb-2">Your subscriptions, not an API bill</h3>
+        <p class="text-on-surface-variant text-body-md">
+          Moot never calls a model or holds a key. It drives the first-party CLIs,
+          so each seat runs on the plan you already pay for &mdash; and a cheap
+          question can go to a cheap seat.
+        </p>
+      </div>
+      <div class="card-border-gradient p-6 md:p-7">
+        <h3 class="font-display text-headline-md mb-2">Work, not just talk</h3>
+        <p class="text-on-surface-variant text-body-md">
+          Switch the topic to <code class="font-mono text-code-sm text-primary">work</code> and a manager
+          drafts tasks. The plan comes to you as one proposal; approved work runs
+          in isolated git worktrees. Your branch is never touched, and merging
+          stays your git action.
+        </p>
+      </div>
+      <div class="card-border-gradient p-6 md:p-7">
+        <h3 class="font-display text-headline-md mb-2">It cannot quietly spend your quota</h3>
+        <p class="text-on-surface-variant text-body-md">
+          Per-seat turns, per-topic rounds, per-hour wakes &mdash; and a failed
+          wake counts, because a metered CLI charges for it. Every ceiling pauses
+          for a person instead of continuing.
+        </p>
+      </div>
+    </div>
+
+    <div class="card-border-gradient p-6 md:p-8 mt-5">
+      <div class="grid md:grid-cols-3 gap-6 items-center">
+        <div class="md:col-span-2">
+          <h3 class="font-display text-headline-md mb-2">Measured, not guessed</h3>
+          <p class="text-on-surface-variant text-body-md">
+            Latency here is inference, not transport. On a real council prompt, one
+            turn takes 279 seconds at default effort and 31.8 at
+            <code class="font-mono text-code-sm text-primary">low</code>; process spawn and the MCP
+            handshake are about five. Persistent sessions &mdash; the thing that
+            <em>looks</em> like the fix &mdash; would save roughly 2%.
+          </p>
+        </div>
+        <div class="font-mono text-code-sm bg-surface-container-low rounded-xl p-4 border border-border-subtle">
+          <div class="flex justify-between py-1"><span class="text-outline">default</span><span class="text-on-surface">279 s</span></div>
+          <div class="flex justify-between py-1"><span class="text-outline">effort low</span><span class="text-electric-lime">31.8 s</span></div>
+          <div class="flex justify-between py-1"><span class="text-outline">spawn + MCP</span><span class="text-on-surface">~5 s</span></div>
+          <div class="flex justify-between py-1 border-t border-border-subtle mt-2 pt-2"><span class="text-outline">3-seat round</span><span class="text-electric-lime">29.9 s</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────── install -->
+<section id="install" class="px-6 md:px-10 mb-20 md:mb-28">
+  <div class="max-w-3xl mx-auto">
+    <div class="text-center mb-10">
+      <span class="text-label-caps uppercase text-cyan-accent">Install</span>
+      <h2 class="font-display text-headline-lg mt-3 mb-4 text-fade">Five minutes, no keys.</h2>
+    </div>
+
+    <div class="card-border-gradient p-5 md:p-6">
+      <pre class="font-mono text-code-sm text-on-surface-variant overflow-x-auto leading-relaxed"><span class="text-outline"># Python 3.10+, and the agent CLIs you already use</span>
+pip install -e .
+
+moot init --human you
+moot agents add claude claude --cwd .
+moot agents add codex  codex  --cwd .
+<span class="text-outline">moot install              # register MCP servers for codex/gemini/agy</span>
+<span class="text-outline">moot doctor               # one real turn per seat, proves each reaches the board</span>
+moot tui</pre>
+    </div>
+
+    <p class="text-body-md text-on-surface-variant mt-6">
+      <span class="text-on-surface font-semibold">moot doctor checks the board, not the exit code.</span>
+      A CLI can start, load the MCP server, decline to call it and exit 0 &mdash; a
+      return-code check goes green while the seat is mute.
+    </p>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────────── status -->
+<section class="px-6 md:px-10 mb-20 md:mb-28">
+  <div class="max-w-4xl mx-auto">
+    <div class="text-center mb-10">
+      <span class="text-label-caps uppercase text-cyan-accent">Where it stands</span>
+      <h2 class="font-display text-headline-lg mt-3 mb-4 text-fade">Young, and honest about it.</h2>
+    </div>
+
+    <div class="card-border-gradient p-6 md:p-7">
+      <table class="w-full text-body-md">
+        <tbody class="align-top">
+          <tr class="border-b border-border-subtle"><td class="py-2.5 pr-4 font-mono text-code-sm text-primary">Claude Code 2.1.250</td><td class="py-2.5 text-on-surface-variant">working &mdash; resumes by a UUID we choose</td></tr>
+          <tr class="border-b border-border-subtle"><td class="py-2.5 pr-4 font-mono text-code-sm text-primary">Codex 0.149.0</td><td class="py-2.5 text-on-surface-variant">working &mdash; prompt on stdin, <code>--approve-for-me</code></td></tr>
+          <tr class="border-b border-border-subtle"><td class="py-2.5 pr-4 font-mono text-code-sm text-primary">Antigravity 1.1.20</td><td class="py-2.5 text-on-surface-variant">working &mdash; <code>--mode plan</code> is genuinely read-only</td></tr>
+          <tr class="border-b border-border-subtle"><td class="py-2.5 pr-4 font-mono text-code-sm text-outline">Copilot 1.0.81</td><td class="py-2.5 text-on-surface-variant">driver verified; blocked by account quota</td></tr>
+          <tr><td class="py-2.5 pr-4 font-mono text-code-sm text-outline">Gemini 0.54.4</td><td class="py-2.5 text-on-surface-variant">driver verified; blocked by <code>IneligibleTierError</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-body-md text-on-surface-variant mt-6 text-center max-w-2xl mx-auto">
+      Single author, 127 tests, CI across three platforms. Every driver row above
+      was measured against the binary &mdash; not read from documentation &mdash;
+      and the four traps that cost real time to find are written down in
+      <a class="text-primary hover:text-cyan-accent underline underline-offset-4" href="https://github.com/jyunming/moot/blob/main/docs/DRIVERS.md">the driver notes</a>.
+    </p>
+  </div>
+</section>
+
+<footer class="border-t border-border-subtle px-6 md:px-10 py-10">
+  <div class="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-body-md text-on-surface-variant">
+    <div class="flex items-center gap-2">
+      <span class="font-display font-bold text-on-surface">Moot</span>
+      <span class="text-outline">&middot; MIT</span>
+    </div>
+    <div class="flex flex-wrap items-center justify-center gap-5">
+      <a class="hover:text-on-surface transition" href="https://github.com/jyunming/moot">GitHub</a>
+      <a class="hover:text-on-surface transition" href="https://github.com/jyunming/moot/blob/main/docs/USING.md">Using it</a>
+      <a class="hover:text-on-surface transition" href="https://github.com/jyunming/moot/blob/main/docs/COMMANDS.md">Commands</a>
+      <a class="hover:text-on-surface transition" href="https://github.com/jyunming/moot/blob/main/docs/ARCHITECTURE.md">Architecture</a>
+      <a class="hover:text-on-surface transition" href="https://github.com/jyunming/moot/blob/main/docs/DRIVERS.md">Driver notes</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

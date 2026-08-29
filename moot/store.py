@@ -112,20 +112,11 @@ class Event:
 
 
 def default_db_path() -> Path:
-    """Board location: the env override, then `.moot/`, then a legacy `.agora/`.
-
-    The project was called agora first. Someone with a board already on disk
-    should not lose their councils to a rename, so an existing `.agora/board.db`
-    is still opened when there is no `.moot/` one.
-    """
+    """Board location. Env override first, then the repo-local `.moot/` dir."""
     env = os.environ.get("MOOT_DB")
     if env:
         return Path(env)
-    here = Path.cwd() / ".moot" / "board.db"
-    legacy = Path.cwd() / ".agora" / "board.db"
-    if not here.exists() and legacy.exists():
-        return legacy
-    return here
+    return Path.cwd() / ".moot" / "board.db"
 
 
 class Store:
