@@ -35,7 +35,10 @@ from pathlib import Path
 
 from rich.markdown import Markdown
 from rich.markup import escape
+from rich.padding import Padding
+from rich.style import Style
 from rich.text import Text
+from textual.color import Color
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -49,8 +52,36 @@ from .store import StoreError, connect
 #: and on every screen. In a four-way argument the author matters more than the
 #: message kind, and scanning for "what did codex say" should be a colour, not a
 #: read. Chosen to stay apart on both dark and light terminals.
-SEAT_COLOURS = ("bright_cyan", "bright_green", "bright_magenta", "bright_yellow",
-                "bright_blue", "cyan", "green", "magenta")
+#: Hex, not ANSI names: `Color.parse("bright_cyan")` fails, so every blended tint
+#: came out empty and the backgrounds silently did nothing. Hex is understood by
+#: both Rich (for the text) and Textual's colour maths (for the tint behind it).
+SEAT_COLOURS = ("#7dcfff",   # sky
+                "#9ece6a",   # green
+                "#e0af68",   # amber
+                "#bb9af7",   # violet
+                "#f7768e",   # rose
+                "#2ac3de",   # teal
+                "#ff9e64",   # orange
+                "#73daca")   # mint
+
+
+#: How much of a seat's colour to mix into the background behind its messages.
+#: Low on purpose: the point is to group a reply visually, not to highlight it.
+#: Much above this and a four-way argument becomes a colour chart.
+TINT = 0.13
+
+
+def tint_for(colour: str, base: Color) -> str:
+    """The seat's colour blended into the real background, as hex.
+
+    Blended rather than set outright, so the band sits *under* the text at every
+    theme instead of fighting it -- and so a light terminal gets a light tint
+    rather than the same dark one.
+    """
+    try:
+        return base.blend(Color.parse(colour), TINT).hex
+    except Exception:          # an unparseable colour must not cost you the message
+        return ""
 
 
 def seat_colours(names) -> dict:
@@ -134,6 +165,7 @@ class AgoraApp(App):
         #: Set when the council is blocked on you; cleared when you answer.
         self._waiting: str | None = None
         self._palette: dict[str, str] = {}
+        self._tints: dict[str, str] = {}
 
     # ------------------------------------------------------------------ layout
 
@@ -189,6 +221,20 @@ class AgoraApp(App):
     def colour_for(self, name: str) -> str:
         return self._palette.get(name, "cyan")
 
+    def base_colour(self) -> Color:
+        """The background actually behind the transcript, so tints follow the theme."""
+        try:
+            bg = self.query_one("#transcript").background_colors[1]
+            if bg is not None:
+                return bg
+        except Exception:
+            pass
+        return Color(24, 24, 32)
+
+    def tint_style(self, name: str) -> Style:
+        hexcol = self._tints.get(name, "")
+        return Style(bgcolor=hexcol) if hexcol else Style()
+
     def _render_message(self, m) -> list:
         """Header line plus the body as markdown.
 
@@ -201,14 +247,23 @@ class AgoraApp(App):
         # The author's colour, not the message kind's: in a four-way argument you
         # are scanning for who spoke. Kind survives as a dim tag, except for the
         # two that are about the board rather than a person.
-        if m["kind"] in {"system", "ruling"}:
+        system = m["kind"] in {"system", "ruling"}
+        if system:
             colour = "dim" if m["kind"] == "system" else "bold green"
         else:
             colour = f"bold {self.colour_for(m['author'])}"
         tag = "" if m["kind"] == "say" else f"  [{m['kind']}]"
-        header = Text.assemble((m["author"], colour), (tag, "dim"))
         body = m["body"].strip()
-        return ["", header, Markdown(body) if body else Text("")]
+
+        # System notes and rulings are about the board rather than a person, so
+        # they stay untinted -- that is what makes them read as not-a-seat.
+        bg = Style() if system else self.tint_style(m["author"])
+        header = Text.assemble((m["author"], colour), (tag, "dim"), style=bg)
+        rendered = Markdown(body) if body else Text("")
+        # Padding, not a bare style: it extends the band across the full width, so
+        # a reply is one block rather than a ragged right edge following the text.
+        return ["", Padding(header, (0, 1), style=bg),
+                Padding(rendered, (0, 1), style=bg)]
 
     def _render_ask(self, asker: str, question: str) -> list:
         return ["",
@@ -350,6 +405,8 @@ class AgoraApp(App):
         t = self.board.store.topic(self.board.topic_id)
         self._palette = seat_colours(
             s["agent"] for s in self.board.store.seats(self.board.topic_id))
+        base = self.base_colour()
+        self._tints = {name: tint_for(col, base) for name, col in self._palette.items()}
         self.title = t["title"]
         self.sub_title = f"{t['slug']} · {t['mode']}"
         for m in self.board.store.transcript(self.board.topic_id)[-40:]:

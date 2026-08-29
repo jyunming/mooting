@@ -146,7 +146,10 @@ async def test_agent_bodies_render_as_markdown_not_as_markup(tmp_path, board):
         {"author": "claude", "kind": "say",
          "body": "## Finding" + chr(10) * 2 + "see [balance.json] line 12"
                  + chr(10) * 2 + "- one" + chr(10) + "- two"})
-    body = [p for p in parts if isinstance(p, Markdown)]
+    # The body is wrapped in a Padding that carries the seat's colour band.
+    from rich.padding import Padding
+    inner = [p.renderable if isinstance(p, Padding) else p for p in parts]
+    body = [p for p in inner if isinstance(p, Markdown)]
     assert body, "the body should be a rendered Markdown, not a plain string"
     assert "[balance.json]" in body[0].markup
     assert "## Finding" in body[0].markup
@@ -376,7 +379,9 @@ async def test_history_never_hands_richlog_a_list(tmp_path, board):
     assert got, "history was not replayed"
     assert not any(isinstance(item, list) for item in got),         "a list of renderables reached RichLog and would be printed as a repr"
     from rich.markdown import Markdown
-    assert any(isinstance(item, Markdown) for item in got),         "the body should arrive as rendered markdown"
+    from rich.padding import Padding
+    inner = [g.renderable if isinstance(g, Padding) else g for g in got]
+    assert any(isinstance(item, Markdown) for item in inner),         "the body should arrive as rendered markdown"
 
 
 @pytest.mark.asyncio
@@ -439,3 +444,34 @@ async def test_the_manager_cannot_simply_be_removed(tmp_path, board):
     async with app.run_test() as pilot:
         await type_line(pilot, app, "/seats rm claude")
     assert board.is_manager(app.board.topic_id, "claude"), "manager left silently"
+
+
+@pytest.mark.asyncio
+async def test_each_seat_gets_a_distinct_tinted_band(tmp_path, board):
+    """Colour the name and band the message, blended into the real background so
+    it groups a reply rather than highlighting it."""
+    from rich.padding import Padding
+    from textual.color import Color
+
+    from agora.tui import seat_colours, tint_for
+
+    base = Color(24, 24, 32)
+    pal = seat_colours(["claude", "codex", "agy", "copilot"])
+    bands = {tint_for(c, base) for c in pal.values()}
+    assert len(bands) == len(pal), f"bands collided: {bands}"
+    assert all(bands), "a band came out empty — Color.parse rejected the colour"
+    assert base.hex not in bands, "the band is indistinguishable from the background"
+
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        parts = app._render_message({"author": "claude", "kind": "say", "body": "hi"})
+        padded = [p for p in parts if isinstance(p, Padding)]
+        assert len(padded) == 2, "header and body should both carry the band"
+        assert padded[0].style.bgcolor is not None
+
+        # Board notices are not a seat speaking, so they stay untinted.
+        sys_parts = app._render_message(
+            {"author": "agora", "kind": "system", "body": "paused"})
+        sys_padded = [p for p in sys_parts if isinstance(p, Padding)]
+        assert all(p.style.bgcolor is None for p in sys_padded)
