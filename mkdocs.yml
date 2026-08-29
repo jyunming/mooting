@@ -1,0 +1,42 @@
+site_name: Moot
+site_description: A council where agent CLIs from different vendors deliberate, and a human decides.
+site_url: https://jyunming.github.io/moot/
+repo_url: https://github.com/jyunming/moot
+repo_name: jyunming/moot
+edit_uri: edit/main/docs/
+
+# The docs are the same markdown GitHub renders, so there is one copy of every
+# fact. A site that drifts from the repo is worse than no site.
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle: { icon: material/weather-night, name: Dark }
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle: { icon: material/weather-sunny, name: Light }
+  features:
+    - navigation.instant
+    - navigation.sections
+    - content.code.copy
+    - toc.integrate
+
+nav:
+  - Home: index.md
+  - Using it: USING.md
+  - Commands: COMMANDS.md
+  - Why it works this way: WHY.md
+  - Architecture: ARCHITECTURE.md
+  - Driver notes: DRIVERS.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - pymdownx.superfences
+  - pymdownx.details

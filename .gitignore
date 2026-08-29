@@ -11,3 +11,4 @@ __pycache__/
 .grok/
 .gemini/
 .codex/
+site/
