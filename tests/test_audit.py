@@ -291,3 +291,23 @@ def test_model_list_parsing_survives_real_cli_output():
     assert _parse("error: not logged in") == []
     assert _parse("Usage: agy models [options]") == []
     assert _parse("") == []
+
+
+def test_codex_can_deliberate_outside_a_git_repo(tmp_path):
+    """The deliberation sandbox is a bare directory under the board, and codex
+    refuses to start outside a git repo. That only ever worked because the
+    sandbox sits under .moot/ and inherited whatever repo moot was run from --
+    so running moot anywhere else killed every codex wake."""
+    from moot.drivers.base import Seat
+    from moot.drivers.spawn import CodexDriver
+
+    driver = CodexDriver(tmp_path / "board.db")
+
+    def seat_for(executing):
+        return Seat(topic_id=1, topic_slug="t", agent="codex", kind="codex",
+                    cli_session=None, cfg={"cwd": str(tmp_path)}, executing=executing)
+
+    assert "--skip-git-repo-check" in driver.argv(seat_for(False), "p", None)
+    # ...but an executing seat runs in the user's own tree, where codex refusing
+    # to touch an unversioned directory is the right answer.
+    assert "--skip-git-repo-check" not in driver.argv(seat_for(True), "p", None)

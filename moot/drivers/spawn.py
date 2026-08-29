@@ -253,7 +253,18 @@ class CodexDriver(SpawnDriver):
         # printed in the plain-text header anyway, so --json bought nothing.
         # `-` means "read the prompt from stdin", which is what makes a multi-line
         # council prompt survive the .CMD shim. See SpawnDriver.prompt_via_stdin.
-        return [self.binary, "exec", "-", "--approve-for-me",
+        # A deliberation seat runs in a scratch directory we create under the
+        # board (see working_dir), and codex refuses to start outside a git repo:
+        # "Not inside a trusted directory and --skip-git-repo-check was not
+        # specified." This went unnoticed for a long time because the scratch dir
+        # sits under .moot/, so whenever moot itself was run from inside a repo the
+        # sandbox inherited that repo and codex was satisfied. Run moot from a
+        # folder that is not a repo -- a home directory, say -- and every codex
+        # wake dies. The flag is scoped to that case on purpose: for an executing
+        # seat the working directory is the user's own tree, and codex declining to
+        # write to something unversioned is the correct answer, not a nuisance.
+        sandboxed = [] if seat.executing else ["--skip-git-repo-check"]
+        return [self.binary, "exec", "-", "--approve-for-me", *sandboxed,
                 *self.effort_argv(seat), *self.extra_argv]
 
     def effort_argv(self, seat: Seat) -> list[str]:
