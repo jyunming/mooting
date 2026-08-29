@@ -615,3 +615,31 @@ def test_a_seat_that_does_speak_is_not_reported_as_silent(board):
 
     notes = [m["body"] for m in board.transcript(topic) if m["author"] == "agora"]
     assert not any("said nothing" in n for n in notes)
+
+
+def test_a_post_from_someone_with_no_seat_is_refused(board):
+    """Identity is bound when a CLI's MCP server launches. Get it wrong and a
+    seat posts under another seat's name -- which happened: a seat named Gravity
+    running agy posted as `agy`, and the supervisor then reported Gravity as
+    having said nothing."""
+    topic = board.open_topic("t2", "T", "B", "human", seats=("claude", "human"))
+    board.add_agent("codex", "codex", driver="spawn")   # registered, but not seated
+
+    with pytest.raises(StoreError, match="holds no seat"):
+        board.post(topic, "codex", "this would be attributed to the wrong seat")
+
+    # The board itself is not a councillor and may always speak.
+    board.post(topic, "agora", "--- round 2 ---", kind="system", count_turn=False)
+    # And a seated agent is unaffected.
+    board.post(topic, "claude", "an argument")
+
+
+def test_the_refusal_names_the_fix(board):
+    topic = open_debate(board)
+    board.add_agent("Gravity", "agy", driver="spawn")
+    try:
+        board.post(topic, "Gravity", "posted as the wrong councillor")
+    except StoreError as exc:
+        assert "agora install Gravity" in str(exc)
+    else:
+        raise AssertionError("the post should have been refused")

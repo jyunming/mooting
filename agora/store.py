@@ -502,6 +502,20 @@ class Store:
         topic = self.topic(topic_id)
         if topic["status"] not in {"open", "paused"}:
             raise StoreError(f"topic {topic['slug']} is {topic['status']}; not accepting posts")
+        # Identity is bound when a CLI's MCP server is launched, and for the CLIs
+        # that cannot take it per-run it comes from a global registration. Get
+        # that wrong and a seat posts under another seat's name -- which happened:
+        # a seat named Gravity running agy posted as `agy`, and the supervisor
+        # then reported Gravity as having said nothing.
+        #
+        # Refusing the post turns a silent mis-attribution into an error at the
+        # moment it happens. `agora` is the board itself and holds no seat.
+        if author != "agora" and self.seat(topic_id, author) is None:
+            raise StoreError(
+                f"{author!r} holds no seat on `{topic['slug']}`, so this post would "
+                f"be attributed to the wrong councillor. If this seat runs codex, "
+                f"gemini or agy, its MCP server needs registering under its own "
+                f"name: agora install {author}")
         with self.tx() as c:
             cur = c.execute(
                 """INSERT INTO messages (topic_id, author, kind, body, reply_to, proposal_id)

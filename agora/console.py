@@ -687,6 +687,21 @@ class Console:
             if verb == "add" and kind in AGENT_KINDS:
                 self.store.add_agent(agent, kind, driver_cfg={"cwd": os.getcwd()})
                 self.emit(f"{DIM}registered {agent} (runs {kind}){RESET}")
+                # codex, gemini and agy cannot be handed their MCP server per
+                # run, so it is registered under the seat's own name. Without
+                # this the CLI falls back to whatever server that *kind* has
+                # registered globally, and posts arrive under that name instead.
+                from .install import NEEDS_REGISTRATION, install_seat
+                if kind in NEEDS_REGISTRATION:
+                    ok, detail = install_seat(self.store, agent)
+                    if ok:
+                        self.emit(f"{DIM}{detail} — {agent} will post as itself"
+                                  f"{RESET}")
+                    else:
+                        self.emit(f"{RED}could not register {agent}'s MCP server: "
+                                  f"{detail}{RESET}")
+                        self.emit(f"{RED}it would post under {kind}'s name; run "
+                                  f"`agora install {agent}` before using it{RESET}")
             else:
                 self.emit(f"{RED}{agent!r} is not a registered seat{RESET}")
                 self.emit(f"{DIM}name the CLI to create it:  /seats add {agent} "

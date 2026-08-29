@@ -720,7 +720,12 @@ class Supervisor:
         lines += [
             "## What to do now",
             "",
-            "Use the `agora` MCP tools. Your reply text here is not read by anyone —",
+            f"Use the **`agora-{agent}`** MCP server — that one, not any other "
+            f"`agora-*` server you can see. It is bound to your seat, and posting "
+            f"through a different one would attribute your words to another "
+            f"councillor (the board will refuse it).",
+            "",
+            "Your reply text here is not read by anyone —",
             "**only what you post through the tools reaches the council.**",
             "",
             "- `agora_read(topic)` — full transcript, if the excerpt above is not enough.",
