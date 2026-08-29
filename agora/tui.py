@@ -161,6 +161,11 @@ class AgoraApp(App):
         scrollbar-color-hover: $secondary;
     }
     #status { height: 1; background: $boost; color: $text; padding: 0 1; }
+    /* Grows only while you are typing a command, so it never costs space when
+       you are reading. */
+    #hint { height: auto; max-height: 8; background: $panel; padding: 0 1;
+            color: $text-muted; display: none; }
+    #hint.showing { display: block; }
     Input { border: round $accent; }
     /* When the council is blocked on you, the box you would type into is the
        thing that should be shouting -- not a line elsewhere on the screen. */
@@ -194,6 +199,7 @@ class AgoraApp(App):
             with Vertical(id="side"):
                 yield DataTable(id="seats", cursor_type="none", zebra_stripes=True)
                 yield DataTable(id="work", cursor_type="none", zebra_stripes=True)
+        yield Static("", id="hint")
         yield Static("", id="status")
         yield Input(placeholder="type to speak · @agent to ask one seat · /help",
                     id="say")
@@ -431,7 +437,9 @@ class AgoraApp(App):
             box.placeholder = "type to speak · @agent to ask one seat · /help"
             box.remove_class("waiting")
 
-        bits = [f"effort {b.effort()}",
+        topic = b.store.topic(b.topic_id)
+        bits = [f"round {topic['round'] + 1}/{topic['max_rounds']}",
+                f"effort {b.effort()}",
                 "driving" if b.driving.is_set() else "idle",
                 f"auto {'on' if b.auto else 'off'}"]
         if asks:
@@ -486,9 +494,40 @@ class AgoraApp(App):
 
     # -------------------------------------------------------------- behaviour
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Show what the thing you are half-way through typing could become.
+
+        Discovering commands by reading /help and remembering them is a poor deal
+        when the screen can just say. Only ever a hint -- it never completes for
+        you, because guessing wrong mid-sentence is worse than not helping.
+        """
+        text = event.value
+        hint = self.query_one("#hint", Static)
+        rows: list[str] = []
+
+        if text.startswith("/"):
+            typed = text.split(" ")[0]
+            for heading, entries in self.board.HELP:
+                for cmd, why in entries:
+                    name = cmd.split(" ")[0]
+                    if name.startswith("/") and name.startswith(typed):
+                        rows.append(f"[cyan]{cmd:<26}[/cyan] [dim]{why}[/dim]")
+        elif text.startswith("@") and " " not in text:
+            for name in self.board.seat_names():
+                if name.startswith(text[1:]):
+                    rows.append(f"[cyan]@{name:<25}[/cyan] [dim]ask this seat "
+                                f"directly[/dim]")
+
+        if rows:
+            hint.update(chr(10).join(rows[:7]))
+            hint.add_class("showing")
+        else:
+            hint.remove_class("showing")
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         line = event.value.strip()
         event.input.value = ""
+        self.query_one("#hint", Static).remove_class("showing")
         if not line:
             return
         if line.startswith("/") or line.startswith("@"):

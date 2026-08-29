@@ -17,7 +17,7 @@ pytest.importorskip("textual")
 
 from textual.widgets import DataTable, Input, RichLog, Static  # noqa: E402
 
-from agora.store import connect                          # noqa: E402
+from agora.store import StoreError, connect                          # noqa: E402
 from agora.tui import AgoraApp                           # noqa: E402
 
 
@@ -567,3 +567,62 @@ async def test_the_input_box_says_what_to_do_when_you_are_asked(tmp_path, board)
 
         assert "answer" in box.placeholder and "claude" in box.placeholder
         assert box.has_class("waiting")
+
+
+@pytest.mark.asyncio
+async def test_typing_a_slash_offers_the_commands(tmp_path, board):
+    """Discovering commands by reading /help and remembering them is a poor deal
+    when the screen can just say."""
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        hint = app.query_one("#hint", Static)
+        assert not hint.has_class("showing"), "the hint should cost nothing at rest"
+
+        app.query_one("#say", Input).value = "/se"
+        await pilot.pause()
+        assert hint.has_class("showing")
+        assert "/seats" in str(hint.content)
+
+        app.query_one("#say", Input).value = "@c"
+        await pilot.pause()
+        assert "@claude" in str(hint.content) and "@codex" in str(hint.content)
+
+        app.query_one("#say", Input).value = "just talking"
+        await pilot.pause()
+        assert not hint.has_class("showing")
+
+
+@pytest.mark.asyncio
+async def test_the_round_is_on_screen_next_to_the_turn_budget(tmp_path, board):
+    """A seat showing 2/6 on a 3-round topic reads as a contradiction; the round
+    count was simply not displayed anywhere."""
+    app = app_for(tmp_path, board, max_rounds=3)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert "round 1/3" in str(app.query_one("#status", Static).content)
+
+    # And a seat can no longer be given more turns than there are rounds to use.
+    seats = board.seats(app.board.topic_id)
+    assert all(s["max_turns"] == 3 for s in seats), \
+        f"turn budget outruns the rounds: {[dict(s)['max_turns'] for s in seats]}"
+
+
+@pytest.mark.asyncio
+async def test_a_seat_can_be_created_and_renamed_from_the_session(tmp_path, board):
+    """Several seats can run the same CLI under names you chose, which is most of
+    what makes a four-way transcript readable."""
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await type_line(pilot, app, "/seats add reviewer codex")
+        assert board.agent("reviewer")["kind"] == "codex"
+        assert board.seat(app.board.topic_id, "reviewer") is not None
+
+        await type_line(pilot, app, "/me jyunming")
+        assert app.board.me == "jyunming"
+
+    # A rename must not orphan what was already said.
+    assert board.topic("t")["opened_by"] == "jyunming"
+    assert board.seat(app.board.topic_id, "jyunming") is not None
+    with pytest.raises(StoreError):
+        board.agent("me")

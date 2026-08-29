@@ -71,9 +71,16 @@ You never have to leave for the next question:
 > /mode work claude     # switch to team mode, claude manages
 > /mode discuss         # back to a discussion — no roles
 > /seats                # who is here
-> /seats add agy        # seat another CLI; it catches up on the discussion
+> /seats add agy               # seat one already registered
+> /seats add reviewer codex    # register a new seat running codex, and seat it
+> /me jyunming                 # what the council calls you
 > /seats rm copilot     # what it already said stays
 ```
+
+Several seats can run the **same CLI under names you chose** — a `historian` and
+an `engineer` both on claude, pointed at different directories. The name is the
+identity on the board, so a four-way transcript reads as people rather than as
+vendors.
 
 The council is **per topic**, not global. Some questions want the seat that read
 the sources, some want the one that owns the subsystem, and paying four CLIs to

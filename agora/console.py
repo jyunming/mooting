@@ -35,12 +35,16 @@ deep on the branch worth it.
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import time
 from pathlib import Path
 
 from .store import MENTION_RE, Store, StoreError, connect, slugify
+
+#: CLIs a seat can be created against from inside the session.
+AGENT_KINDS = frozenset({"claude", "codex", "copilot", "gemini", "agy"})
 
 try:  # optional, but the difference between usable and not
     from prompt_toolkit import PromptSession
@@ -66,6 +70,7 @@ COMMANDS = {
     "/proposals": "what is waiting on you",
     "/tasks": "the work plan and where each task has got to",
     "/quote": "<id> -- attach your next message to that one",
+    "/me": "<name> -- what the council calls you",
     "/rounds": "<n> -- grant the council more rounds on this topic",
     "/seats": "who is here; /seats add <agent> | /seats rm <agent>",
     "/topic": "<slug> -- switch to another topic",
@@ -284,7 +289,7 @@ class Console:
             "proposals": self._proposals, "seats": self._seats, "topic": self._switch,
             "tasks": self._tasks, "new": self._new, "mode": self._mode,
             "manager": self._manager, "rm": self._rm, "reset": self._reset,
-            "quote": self._quote, "rounds": self._rounds,
+            "quote": self._quote, "rounds": self._rounds, "me": self._me,
         }.get(cmd)
         if cmd in {"approve", "reject"}:
             self._decide(cmd, rest)
@@ -355,6 +360,7 @@ class Console:
             ("<anything>", "post it — and it clears any question waiting on you"),
             ("@agent <question>", "ask one seat; the others wait for their answer"),
             ("/quote <id>", "attach your next message to that one, like a reply"),
+            ("/me <name>", "what the council calls you"),
         ]),
         ("Running the council", [
             ("/run", "start it (posting starts it too, unless /auto off)"),
@@ -375,7 +381,8 @@ class Console:
             ("/mode debate|discuss", "argue to find the flaw / build together"),
             ("/mode work <agent>", "team mode; that seat plans and reviews"),
             ("/seats", "who is here, budget left, who owes an answer"),
-            ("/seats add <agent>", "seat another CLI on this topic"),
+            ("/seats add <agent>", "seat one already registered"),
+            ("/seats add <name> <cli>", "register a new seat and seat it"),
             ("/seats rm <agent>", "remove one; what it already said stays"),
             ("/rounds <n>", "grant more rounds when a topic runs out"),
             ("/tasks", "the work plan and where each task has got to"),
@@ -451,7 +458,8 @@ class Console:
             return
         words = rest.split()
         if words and words[0] in {"add", "rm", "remove"}:
-            return self._seat_change(words[0], words[1] if len(words) > 1 else "")
+            return self._seat_change(words[0], words[1] if len(words) > 1 else "",
+                                     words[2] if len(words) > 2 else "")
         for s in self.store.seats(self.topic_id):
             owed = len(self.store.open_mentions(self.topic_id, s["agent"]))
             flag = f"  {YELLOW}{owed} open ask(s){RESET}" if owed else ""
@@ -471,6 +479,21 @@ class Console:
                 self.emit(f"       {DIM}{t['branch']}{RESET}")
             if t["result"]:
                 self.emit(f"       {t['result'].strip()[:200]}")
+
+    def _me(self, rest: str) -> None:
+        """Rename yourself. The council addresses you by this."""
+        new = rest.strip().lstrip("@")
+        if not new:
+            self.emit(f"  you are {BOLD}{self.me}{RESET}   {DIM}/me <name>{RESET}")
+            return
+        try:
+            self.store.rename_agent(self.me, new)
+        except StoreError as exc:
+            self.emit(f"{RED}{exc}{RESET}")
+            return
+        old, self.me = self.me, new
+        self.emit(f"{DIM}{old} → {new}, everywhere on the board{RESET}")
+        self.on_topic_change()
 
     def _quote(self, rest: str) -> None:
         if not self._require_topic():
@@ -506,7 +529,7 @@ class Console:
         t = self.store.topic(self.topic_id)
         self.emit(f"{DIM}now round {t['round'] + 1} of {t['max_rounds']}{RESET}")
 
-    def _seat_change(self, verb: str, agent: str) -> None:
+    def _seat_change(self, verb: str, agent: str, kind: str = "") -> None:
         """Add or remove a seat on this topic.
 
         The council is per topic, not global: some questions want the historian,
@@ -521,10 +544,18 @@ class Console:
         try:
             self.store.agent(agent)
         except StoreError:
-            self.emit(f"{RED}{agent!r} is not a registered seat{RESET}")
-            self.emit(f"{DIM}register it first:  agora agents add {agent} <kind> "
-                      f"--cwd .{RESET}")
-            return
+            # Naming a CLI registers the seat on the spot. Several seats can run
+            # the same CLI under different names -- a historian and an engineer
+            # both on claude, with different working directories -- and giving
+            # them names you chose is most of what makes a council readable.
+            if verb == "add" and kind in AGENT_KINDS:
+                self.store.add_agent(agent, kind, driver_cfg={"cwd": os.getcwd()})
+                self.emit(f"{DIM}registered {agent} (runs {kind}){RESET}")
+            else:
+                self.emit(f"{RED}{agent!r} is not a registered seat{RESET}")
+                self.emit(f"{DIM}name the CLI to create it:  /seats add {agent} "
+                          f"<{'|'.join(sorted(AGENT_KINDS))}>{RESET}")
+                return
 
         seated = self.store.seat(self.topic_id, agent) is not None
         if verb == "add":

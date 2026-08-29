@@ -261,6 +261,40 @@ class Store:
     def agents(self) -> list[sqlite3.Row]:
         return self.q("SELECT * FROM agents ORDER BY name")
 
+    #: Every place a seat's name is written down. `messages.author` and friends are
+    #: plain text with no foreign key, so a rename has to visit them by hand --
+    #: leaving them behind would orphan everything the seat ever said.
+    NAME_COLUMNS = (
+        ("seats", "agent"), ("messages", "author"),
+        ("mentions", "asker"), ("mentions", "target"),
+        ("proposals", "author"), ("proposals", "decided_by"),
+        ("votes", "agent"), ("wakes", "agent"),
+        ("tasks", "assignee"), ("tasks", "created_by"),
+        ("topics", "opened_by"),
+    )
+
+    def rename_agent(self, old: str, new: str) -> None:
+        """Rename a seat everywhere, so the record stays coherent.
+
+        A seat's name is its identity on the board, and it is also how you address
+        it. Changing one without the other would leave a transcript attributed to
+        somebody who no longer exists.
+        """
+        self.agent(old)
+        if not new or any(c.isspace() for c in new) or new.startswith("@"):
+            raise StoreError(f"{new!r} must be a single word without a leading @")
+        if self.q1("SELECT 1 FROM agents WHERE name = ?", (new,)):
+            raise StoreError(f"{new!r} is already taken")
+        with self.tx() as c:
+            # seats.agent points at agents.name, so renaming the parent breaks the
+            # child for the rest of the transaction whichever order you pick.
+            # Deferring enforcement to COMMIT lets both sides move together.
+            c.execute("PRAGMA defer_foreign_keys = ON")
+            c.execute("UPDATE agents SET name = ? WHERE name = ?", (new, old))
+            for table, column in self.NAME_COLUMNS:
+                c.execute(f"UPDATE {table} SET {column} = ? WHERE {column} = ?",
+                          (new, old))
+
     def delete_agent(self, name: str) -> dict[str, int]:
         """Remove a seat from the registry.
 
@@ -295,7 +329,10 @@ class Store:
         *,
         seats: Iterable[str] = (),
         max_rounds: int = 3,
-        max_turns: int = 6,
+        #: None means "one turn per round", which is what concurrent rounds
+        #: actually allow. A separate larger number just made the seat panel say
+        #: 2/6 on a topic that could never reach 6.
+        max_turns: int | None = None,
         mode: str = "debate",
         effort: str | None = None,
         manager: str | None = None,
@@ -320,11 +357,12 @@ class Store:
                 (slug, title, brief, opened_by, max_rounds, mode, effort),
             )
             topic_id = int(cur.lastrowid)
+            turns = max_rounds if max_turns is None else max_turns
             for agent in seats:
                 c.execute(
                     "INSERT INTO seats (topic_id, agent, role, max_turns) VALUES (?,?,?,?)",
                     (topic_id, agent, "manager" if agent == manager else "participant",
-                     max_turns),
+                     turns),
                 )
             c.execute(
                 "INSERT INTO messages (topic_id, author, kind, body) VALUES (?,?,'system',?)",
