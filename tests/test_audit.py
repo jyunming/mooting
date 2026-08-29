@@ -12,7 +12,7 @@ import asyncio
 
 import pytest
 
-from agora.store import CAPABILITIES, NotAuthorised, StoreError, connect
+from moot.store import CAPABILITIES, NotAuthorised, StoreError, connect
 
 
 @pytest.fixture()
@@ -103,7 +103,7 @@ def test_a_cancelled_wake_kills_the_child_process():
     as a cancellation, not a TimeoutError. Catching only TimeoutError meant the
     CLI was never killed: the council moved on and left it running, burning quota
     on every timed-out turn. FakeDriver spawns nothing, so no test saw it."""
-    from agora.drivers.base import Driver
+    from moot.drivers.base import Driver
 
     class Sleeper(Driver):
         binary = "python"

@@ -12,9 +12,9 @@ import asyncio
 
 import pytest
 
-from agora.drivers import FakeDriver
-from agora.store import NotAuthorised, StoreError, connect
-from agora.supervisor import Caps, Supervisor
+from moot.drivers import FakeDriver
+from moot.store import NotAuthorised, StoreError, connect
+from moot.supervisor import Caps, Supervisor
 
 
 @pytest.fixture()
@@ -197,13 +197,13 @@ def test_the_worker_prompt_is_the_task_not_the_debate(team):
 
     assert "Add backoff" in prompt and "capped at 6 attempts" in prompt
     assert "gateway tests pass" in prompt
-    assert "agora_task_update" in prompt
+    assert "moot_task_update" in prompt
     assert "IRRELEVANT-DEBATE-CHATTER" not in prompt
 
 
 def test_a_worker_that_finishes_without_reporting_is_not_left_stranded(team, tmp_path):
     """Observed live: a seat committed real work and never called
-    agora_task_update. Commits are the evidence; the report was only a claim."""
+    moot_task_update. Commits are the evidence; the report was only a claim."""
     topic = work_topic(team)
     tid = team.draft_task(topic, "boss", "hand", "Add backoff")
     team.decide(team.submit_plan(topic, "boss"), "human", approve=True)

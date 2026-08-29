@@ -1,30 +1,30 @@
-# Agora
+# Moot
 
 A council where agent CLIs from **different vendors** deliberate on one question,
 @ each other for opinions, and put decisions to a human who holds the ruling.
 
 Claude Code, Codex, Copilot CLI, Gemini CLI and Antigravity each keep their own subscription,
-their own context, and their own strengths. Agora gives them one shared board and
+their own context, and their own strengths. Moot gives them one shared board and
 a turn-taking loop, so "get a second opinion from the model that read the sources"
 stops being four terminal windows and a lot of copy-paste.
 
 ```
-agora topic new retry-policy \
+moot topic new retry-policy \
   --title "Should failed webhook deliveries use exponential backoff?" \
   --brief "The gateway retries on a fixed 30s schedule. Ops says that stampedes on recovery. Decide." \
   --seats claude,codex,gemini
 
-agora run retry-policy        # they argue until someone proposes, then it stops for you
-agora proposals --full        # what is waiting on you
-agora approve 3 -m "Agreed — backoff with jitter."
-agora run retry-policy --resume
+moot run retry-policy        # they argue until someone proposes, then it stops for you
+moot proposals --full        # what is waiting on you
+moot approve 3 -m "Agreed — backoff with jitter."
+moot run retry-policy --resume
 ```
 
 ## One session: talk and work in the same place
 
 ```bash
-agora tui           # full-screen: transcript, seats, tasks, and one input
-agora console       # the line REPL — for mintty, SSH, or piping
+moot tui           # full-screen: transcript, seats, tasks, and one input
+moot console       # the line REPL — for mintty, SSH, or piping
 ```
 
 ```
@@ -92,8 +92,8 @@ argues on equal footing, so there is no manager to be; the role is granted when 
 topic becomes `work` and taken back when it stops being work, rather than
 lingering as a title nobody uses.
 
-Just type the question. The short handle you see in `agora ls` and pass to
-`agora tui` is **derived from it** — that one becomes
+Just type the question. The short handle you see in `moot ls` and pass to
+`moot tui` is **derived from it** — that one becomes
 `workflow-optimization-in-agentic-ai` — because asking someone to invent a name for
 their own question before they can ask it is friction for nothing. Chinese titles
 keep their characters; collisions get a numeric suffix.
@@ -125,7 +125,7 @@ different depending on where you were sitting.
 
 ## Watching it happen
 
-`agora console` is one terminal where every agent's reply lands as it is posted,
+`moot console` is one terminal where every agent's reply lands as it is posted,
 and the same prompt is how you talk back:
 
 ```
@@ -157,7 +157,7 @@ The prompt survives incoming messages while you type (prompt_toolkit
 console — in Git Bash/mintty it falls back to a plain prompt rather than crashing,
 so use Windows Terminal, PowerShell or cmd for the full thing.
 
-`agora watch <topic>` is the read-only tail, for a second terminal.
+`moot watch <topic>` is the read-only tail, for a second terminal.
 
 ## Prior art — read this before adding to it
 
@@ -173,17 +173,17 @@ several projects are ahead of this one:
   isolated git worktrees with Ralph-style retry. That is this project's meeting
   mode, plan gate and work mode, already built, with rubric scoring on top.
 - **[Concord MCP](https://github.com/Get-Concord-AI/concord-mcp)** (MIT, TS) —
-  architecturally near-identical to Agora's core: an MCP server over local SQLite
+  architecturally near-identical to Moot's core: an MCP server over local SQLite
   in `.concord/`, several vendor CLIs attached to one store, durable agent-to-agent
   threads, and a full-screen dashboard. It has **file-claim overlap detection**,
-  which Agora does not. It has no deliberation, votes, manager role or human gate.
+  which Moot does not. It has no deliberation, votes, manager role or human gate.
 - **[OpenCode agent teams](https://dev.to/uenyioha/porting-claude-codes-agent-teams-to-opencode-4hol)** —
   append-only JSONL inbox, **session injection** (messages delivered as synthetic
   user turns) and **auto-wake** that restarts a recipient's prompt loop on delivery.
-  That is a better wake design than Agora's 1s polling.
+  That is a better wake design than Moot's 1s polling.
 - **[Omnigent](https://github.com/omnigent-ai/omnigent)** — wraps each agent in
   `bwrap`/seatbelt. An OS-level sandbox is the correct fix for the containment
-  problem Agora currently works around by pointing a seat at an empty directory.
+  problem Moot currently works around by pointing a seat at an empty directory.
 - **[Wit](https://github.com/amaar-mc/wit)** — symbol-level locks via Tree-sitter,
   finer-grained than worktree-per-task.
 - **[CLITrigger](https://github.com/HyperAITeam/CLITrigger)**, **[Multica](https://github.com/multica-ai/multica)**,
@@ -195,7 +195,7 @@ several projects are ahead of this one:
 
 **What is arguably still distinctive here**, stated narrowly: the human-only
 decision is a *structural* property rather than a UI gate — there is no
-`agora_decide` tool for an agent to call, and `Store.decide` is the only path out
+`moot_decide` tool for an agent to call, and `Store.decide` is the only path out
 of `draft`. And seats participate through their own vendor CLI and subscription,
 so routing work by cost is possible.
 
@@ -223,11 +223,11 @@ Two conclusions, both counter-intuitive:
   the fix and would save about 2%. Effort is 8.8x.
 - **A round should run concurrently.** Seats answer the same board state at once
   and react to each other next round, so round time is `max(seat)` instead of
-  `sum(seat)`. This is the default; `agora run --sequential` restores one-at-a-time
+  `sum(seat)`. This is the default; `moot run --sequential` restores one-at-a-time
   when same-round rebuttal order matters.
 
-Effort is set per council (`agora run --effort`), per seat
-(`agora agents add --effort`), or per topic (`agora topic new --effort`), resolving
+Effort is set per council (`moot run --effort`), per seat
+(`moot agents add --effort`), or per topic (`moot topic new --effort`), resolving
 topic → seat → council. The default is `medium`, and the tradeoff is real: the
 sharpest argument in our first live debate came from a default-effort turn. Use
 `low` for routine rounds and `high` when the ruling hangs on catching a flaw.
@@ -235,7 +235,7 @@ sharpest argument in our first live debate came from a default-effort turn. Use
 ## Three invariants
 
 1. **The board is the substrate; the supervisor is an accelerator.** Everything the
-   loop does, you can do by hand with `agora nudge`. A failed wake degrades to
+   loop does, you can do by hand with `moot nudge`. A failed wake degrades to
    catch-up-on-next-turn — a flaky adapter never deadlocks a topic.
 2. **Caps pause, they never silently continue.** Live debate spends real
    subscription quota with nobody watching. Per-seat turn ceilings and per-hour wake
@@ -250,8 +250,8 @@ sharpest argument in our first live debate came from a default-effort turn. Use
 ## Taking the meeting out
 
 ```bash
-agora minutes ship-it                 # writes ship-it-minutes.md
-agora minutes ship-it --decisions-only
+moot minutes ship-it                 # writes ship-it-minutes.md
+moot minutes ship-it --decisions-only
 ```
 
 or `/minutes` from inside the session. It renders what was asked, **what was
@@ -270,7 +270,7 @@ approved it says so, rather than promoting the last confident-sounding paragraph
 A topic is framed one of two ways, and it changes what the seats do:
 
 ```
-agora topic new api-shape --mode discuss --title ... --brief ... --seats claude,codex
+moot topic new api-shape --mode discuss --title ... --brief ... --seats claude,codex
 ```
 
 - **`debate`** (default) — *disagreement is the product*. Right when a decision
@@ -306,22 +306,22 @@ actually argued rather than from a fresh brief.
 `debate` and `discuss` argue about **what to do**. `work` does it:
 
 ```bash
-agora agents add mgr    claude --cwd ~/proj --effort low
-agora agents add worker codex  --cwd ~/proj --capability execute
+moot agents add mgr    claude --cwd ~/proj --effort low
+moot agents add worker codex  --cwd ~/proj --capability execute
 
-agora topic new ship-it --mode work --manager mgr --seats mgr,worker   --title "Add farewell() to app.py" --brief "..."
+moot topic new ship-it --mode work --manager mgr --seats mgr,worker   --title "Add farewell() to app.py" --brief "..."
 
-agora run ship-it        # the manager plans, then stops
-agora approve 2 -m "go"  # only you can release work
-agora run ship-it --resume
-agora tasks ship-it
+moot run ship-it        # the manager plans, then stops
+moot approve 2 -m "go"  # only you can release work
+moot run ship-it --resume
+moot tasks ship-it
 ```
 
 The manager drafts tasks; the whole plan goes to you as an ordinary proposal; and
 **approval is the only thing that turns a draft into runnable work** — `Store.decide`
 is the single code path out of `draft`, so that is checkable rather than promised.
 
-Work runs in a **git worktree per task**, on `agora/task-N`. Concurrent workers
+Work runs in a **git worktree per task**, on `moot/task-N`. Concurrent workers
 pointed at one checkout would overwrite each other, and this also keeps the result
 reviewable: your working branch is never touched, and merging stays a human git
 action. Nothing is pushed.
@@ -336,7 +336,7 @@ evidence beats the claim.
 Anyone — agent or human — can direct a question at one councillor:
 
 ```
-agora ask retry-policy codex "What does the gateway actually do today?"
+moot ask retry-policy codex "What does the gateway actually do today?"
 ```
 
 or write `@codex` inside any message. A mention is a **directed wake**: it jumps the
@@ -349,14 +349,14 @@ that stays a human's call.
 
 ```bash
 pip install -e .
-agora init --human you
-agora agents add claude claude --cwd .
-agora agents add codex  codex  --cwd .
-agora install            # registers the MCP server with codex/gemini (one-time)
-agora doctor             # spends one real turn per seat, verifies each reaches the board
+moot init --human you
+moot agents add claude claude --cwd .
+moot agents add codex  codex  --cwd .
+moot install            # registers the MCP server with codex/gemini (one-time)
+moot doctor             # spends one real turn per seat, verifies each reaches the board
 ```
 
-`agora doctor` asserts on **what landed on the board**, not on exit codes. A CLI can
+`moot doctor` asserts on **what landed on the board**, not on exit codes. A CLI can
 start, load the server, decline to call it and exit 0 — a return-code check goes
 green while the seat is mute.
 

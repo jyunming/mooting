@@ -1,4 +1,4 @@
-"""Register the Agora MCP server with the CLIs that cannot take it per-run.
+"""Register the Moot MCP server with the CLIs that cannot take it per-run.
 
 Claude and Copilot accept `--mcp-config` / `--additional-mcp-config` on every
 invocation, so a council seat never touches their global config. Codex and Gemini
@@ -9,7 +9,7 @@ do not:
   introduced *only* by `-c` is not launched; it has to exist in the config.
 
 So those two get a one-time `mcp add`. The server is registered per seat name
-(`agora-<seat>`), not once globally, because the agent identity is bound in the
+(`moot-<seat>`), not once globally, because the agent identity is bound in the
 server's argv -- that is what stops one CLI from posting as another. Two codex
 seats therefore need two registrations, which is correct rather than awkward.
 """
@@ -30,18 +30,18 @@ NEEDS_REGISTRATION = {"codex", "gemini", "agy"}
 
 def server_argv(agent: str, db: Path | str) -> list[str]:
     # Forward slashes: codex parses `-c` values as TOML and mangles backslashes.
-    return [sys.executable.replace("\\", "/"), "-X", "utf8", "-m", "agora.mcp_server",
+    return [sys.executable.replace("\\", "/"), "-X", "utf8", "-m", "moot.mcp_server",
             "--agent", agent, "--db", str(db).replace("\\", "/")]
 
 
 def install_cmd(kind: str, agent: str, db: Path | str) -> list[str] | None:
-    name = f"agora-{agent}"
+    name = f"moot-{agent}"
     argv = server_argv(agent, db)
     if kind == "codex":
         return ["codex", "mcp", "add", name, "--", *argv]
     if kind == "gemini":
         return ["gemini", "mcp", "add", name, *argv,
-                "--scope", "user", "--trust", "--description", f"Agora council seat {agent}"]
+                "--scope", "user", "--trust", "--description", f"Moot council seat {agent}"]
     if kind == "agy":
         return ["agy", "mcp", "add", name, *argv]
     return None
@@ -65,11 +65,11 @@ def install_seat(store: Store, agent: str, *, dry_run: bool = False) -> tuple[bo
                           encoding="utf-8", errors="replace")
     if proc.returncode != 0:
         return False, (proc.stderr or proc.stdout).strip()[:300]
-    return True, f"registered as agora-{agent}"
+    return True, f"registered as moot-{agent}"
 
 
 def uninstall_cmd(kind: str, agent: str) -> list[str] | None:
-    name = f"agora-{agent}"
+    name = f"moot-{agent}"
     if kind in {"codex", "gemini", "agy"}:
         return [kind, "mcp", "remove", name]
     return None

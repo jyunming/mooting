@@ -1,4 +1,4 @@
-"""`agora console` -- one terminal where the whole council is visible, and where
+"""`moot console` -- one terminal where the whole council is visible, and where
 you answer when it asks you something.
 
 ## Why this is not just a log tail
@@ -89,7 +89,7 @@ COMMANDS = {
     "/quit": "leave (the board keeps everything)",
 }
 
-BANNER = f"""{BOLD}agora console{RESET}  --  everything the council says, in one place
+BANNER = f"""{BOLD}moot console{RESET}  --  everything the council says, in one place
 
   {CYAN}<text>{RESET}              post as yourself, and answer anything asked of you
   {CYAN}@agent <question>{RESET}   ask one councillor directly (jumps the queue)
@@ -713,7 +713,7 @@ class Console:
                         self.emit(f"{RED}could not register {agent}'s MCP server: "
                                   f"{detail}{RESET}")
                         self.emit(f"{RED}it would post under {kind}'s name; run "
-                                  f"`agora install {agent}` before using it{RESET}")
+                                  f"`moot install {agent}` before using it{RESET}")
             else:
                 self.emit(f"{RED}{agent!r} is not a registered seat{RESET}")
                 self.emit(f"{DIM}name the CLI to create it:  /seats add {agent} "
@@ -1120,7 +1120,7 @@ class Console:
             self.stop.set()
             self.store.close()
         self.emit(f"{DIM}left the console. The board keeps everything: "
-              f"agora show {self.topic['slug']}{RESET}")
+              f"moot show {self.topic['slug']}{RESET}")
         return 0
 
     def _input_loop(self) -> None:

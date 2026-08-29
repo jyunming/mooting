@@ -1,26 +1,48 @@
 [project]
-name = "agora"
-version = "0.0.1"
+name = "moot"
+version = "0.1.0"
 description = "A council where agent CLIs from different vendors deliberate, and a human decides."
+readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["prompt_toolkit>=3.0"]
+license = { text = "MIT" }
+authors = [{ name = "jyunming" }]
+keywords = ["ai", "agents", "cli", "mcp", "multi-agent", "claude-code", "codex"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development",
+]
+# Not optional: an agent reaches the board through MCP, and the session is the
+# way a person uses this. Both were extras while being load-bearing, so a clean
+# install produced a tool that could not convene anything.
+dependencies = [
+    "mcp>=1.2",
+    "prompt_toolkit>=3.0",
+    "textual>=1.0",
+]
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.2"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 
+[project.urls]
+Homepage = "https://github.com/jyunming/moot"
+Source = "https://github.com/jyunming/moot"
+
 [project.scripts]
-agora = "agora.cli:main"
+moot = "moot.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["agora*"]
+include = ["moot*"]
 
 [tool.setuptools.package-data]
-agora = ["schema.sql"]
+moot = ["schema.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

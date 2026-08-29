@@ -140,7 +140,7 @@ def render(store: Store, topic_id: int, transcript: bool = True) -> str:
                     out += [f"> Replying to #{ref['id']} {ref['author']}: {quoted}…", ""]
             out += [m["body"].strip(), ""]
 
-    out += ["---", "", f"_Minutes generated from the Agora board "
+    out += ["---", "", f"_Minutes generated from the Moot board "
             f"(`{t['slug']}`)._"]
     return "\n".join(out).rstrip() + "\n"
 

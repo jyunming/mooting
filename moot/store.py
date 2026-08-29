@@ -1,6 +1,6 @@
 """SQLite-backed council board.
 
-Every process in Agora -- the MCP server each agent CLI spawns for itself, the
+Every process in Moot -- the MCP server each agent CLI spawns for itself, the
 supervisor, the human UI -- talks to one file through this module. There is no
 server-of-record and no daemon requirement: if nothing else is running, the board
 is still readable and writable, which is what lets a failed wake degrade to
@@ -112,11 +112,20 @@ class Event:
 
 
 def default_db_path() -> Path:
-    """Board location. Env override first, then the repo-local .agora/ dir."""
-    env = os.environ.get("AGORA_DB")
+    """Board location: the env override, then `.moot/`, then a legacy `.agora/`.
+
+    The project was called agora first. Someone with a board already on disk
+    should not lose their councils to a rename, so an existing `.agora/board.db`
+    is still opened when there is no `.moot/` one.
+    """
+    env = os.environ.get("MOOT_DB")
     if env:
         return Path(env)
-    return Path.cwd() / ".agora" / "board.db"
+    here = Path.cwd() / ".moot" / "board.db"
+    legacy = Path.cwd() / ".agora" / "board.db"
+    if not here.exists() and legacy.exists():
+        return legacy
+    return here
 
 
 class Store:
@@ -526,13 +535,13 @@ class Store:
         # then reported Gravity as having said nothing.
         #
         # Refusing the post turns a silent mis-attribution into an error at the
-        # moment it happens. `agora` is the board itself and holds no seat.
-        if author != "agora" and self.seat(topic_id, author) is None:
+        # moment it happens. `moot` is the board itself and holds no seat.
+        if author != "moot" and self.seat(topic_id, author) is None:
             raise StoreError(
                 f"{author!r} holds no seat on `{topic['slug']}`, so this post would "
                 f"be attributed to the wrong councillor. If this seat runs codex, "
                 f"gemini or agy, its MCP server needs registering under its own "
-                f"name: agora install {author}")
+                f"name: moot install {author}")
         with self.tx() as c:
             cur = c.execute(
                 """INSERT INTO messages (topic_id, author, kind, body, reply_to, proposal_id)
@@ -734,7 +743,7 @@ class Store:
             else:
                 released = 0
         if released:
-            self.post(int(p["topic_id"]), "agora",
+            self.post(int(p["topic_id"]), "moot",
                       f"plan approved - {released} task(s) assigned",
                       kind="system", count_turn=False)
 
@@ -945,8 +954,8 @@ def connect(path: Path | str | None = None, *, init: bool = False) -> Store:
         # directory into "nothing set up yet", which reads like a fresh install
         # rather than a mistake.
         raise StoreError(
-            f"no board at {target}. Run `agora init` here, or point --db / "
-            f"$AGORA_DB at an existing one.")
+            f"no board at {target}. Run `moot init` here, or point --db / "
+            f"$MOOT_DB at an existing one.")
     store = Store(path)
     store.init_schema()
     return store

@@ -1,6 +1,6 @@
-"""`agora tui` -- one screen where the council talks and the team works.
+"""`moot tui` -- one screen where the council talks and the team works.
 
-The REPL (`agora console`) is a scrolling log: fine for a conversation, poor for
+The REPL (`moot console`) is a scrolling log: fine for a conversation, poor for
 work, where "what is every seat doing and where has each task got to" is a
 *state* question and a log answers it badly. This is the same board with the
 state made visible -- transcript, seats, tasks and proposals side by side, and
@@ -53,7 +53,7 @@ from textual.widgets.option_list import Option
 from .console import Console
 from .store import StoreError, connect
 
-log = logging.getLogger("agora.tui")
+log = logging.getLogger("moot.tui")
 
 
 #: One colour per seat, picked from its name so it is the same in every session
@@ -128,7 +128,7 @@ def seat_colours(names) -> dict:
 class Board(Console):
     """Console's command set, wired to a widget instead of stdout."""
 
-    def __init__(self, db, topic, me, app: "AgoraApp") -> None:
+    def __init__(self, db, topic, me, app: "MootApp") -> None:
         super().__init__(db, topic, me)
         self.app_ref = app
         self.emit = app.write_line
@@ -215,7 +215,7 @@ class ModelPicker(ModalScreen):
         self.dismiss(None)          # None means "changed nothing"
 
 
-class AgoraApp(App):
+class MootApp(App):
     CSS = """
     Screen { layout: vertical; }
     #body { height: 1fr; }
@@ -621,7 +621,7 @@ class AgoraApp(App):
         log = self.query_one("#transcript", RichLog)
         log.clear()
         if self.board.topic_id is None:
-            self.title = "Agora"
+            self.title = "Moot"
             self.sub_title = "no topic"
             log.write(mk("[dim]Nothing on the board yet.[/dim]"))
             log.write("")
@@ -938,5 +938,5 @@ class AgoraApp(App):
 
 
 def run_tui(db: Path | str | None, topic: str, me: str) -> int:
-    AgoraApp(db, topic, me).run()
+    MootApp(db, topic, me).run()
     return 0

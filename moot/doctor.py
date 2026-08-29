@@ -21,16 +21,16 @@ from .drivers.base import Seat
 from .drivers.spawn import DRIVER_CLASSES
 from .store import Store
 
-PROBE_TOKEN = "AGORA-PROBE-OK"
+PROBE_TOKEN = "MOOT-PROBE-OK"
 
-PROBE_PROMPT = f"""Call the `agora_say` tool with topic="{{slug}}" and body="{{token}}". Do only that.
+PROBE_PROMPT = f"""Call the `moot_say` tool with topic="{{slug}}" and body="{{token}}". Do only that.
 
-The tool is served by an MCP server named `agora` (or `agora-<seat>`). It may be
-namespaced (`agora-codex/agora_say`, `mcp__agora__agora_say`) and may be deferred
+The tool is served by an MCP server named `moot` (or `moot-<seat>`). It may be
+namespaced (`moot-codex/moot_say`, `mcp__moot__moot_say`) and may be deferred
 until searched for -- find it and call it.
 
 Call no other tool. Do not read files, run commands, or explore. If the
-`agora_say` call itself fails, reply NO-AGORA-TOOLS and the error it gave.
+`moot_say` call itself fails, reply NO-MOOT-TOOLS and the error it gave.
 """
 
 
@@ -62,11 +62,11 @@ async def probe_agent(board: Store, agent: str, kind: str, timeout: float) -> Pr
     existing = [t for t in board.topics() if t["slug"] == slug]
     tid = int(existing[0]["id"]) if existing else board.open_topic(
         slug, f"Installation self-test for {agent}",
-        "Throwaway topic used by `agora doctor`. Safe to delete.",
-        "agora", seats=(agent,), max_rounds=1, max_turns=99,
+        "Throwaway topic used by `moot doctor`. Safe to delete.",
+        "moot", seats=(agent,), max_rounds=1, max_turns=99,
     )
     if existing and existing[0]["status"] != "open":
-        board.set_topic_status(tid, "open", "agora", "doctor re-run")
+        board.set_topic_status(tid, "open", "moot", "doctor re-run")
 
     before = {m["id"] for m in board.transcript(tid)}
     driver = cls(board.path, timeout_s=timeout)
@@ -84,7 +84,7 @@ async def probe_agent(board: Store, agent: str, kind: str, timeout: float) -> Pr
             board.set_cli_session(tid, agent, result.cli_session)
         return Probe(agent, kind, True, "reached the board", result.cli_session, driver.stateful)
 
-    if "NO-AGORA-TOOLS" in (result.tail or ""):
+    if "NO-MOOT-TOOLS" in (result.tail or ""):
         return Probe(agent, kind, False, _no_tools_hint(kind, agent))
 
     if not result.ok:
@@ -93,18 +93,18 @@ async def probe_agent(board: Store, agent: str, kind: str, timeout: float) -> Pr
 
 
 def _no_tools_hint(kind: str, agent: str) -> str:
-    """The CLI started and answered, but saw no Agora tools.
+    """The CLI started and answered, but saw no Moot tools.
 
-    Worth separating from a crash, because the usual cause is not Agora at all.
+    Worth separating from a crash, because the usual cause is not Moot at all.
     On this machine codex loaded *none* of its MCP servers -- not axon, not
-    node_repl, not agora -- because one unauthenticated HTTP server killed the
+    node_repl, not moot -- because one unauthenticated HTTP server killed the
     shared rmcp worker (`Transport channel closed, when AuthRequired`) and took
     the whole subsystem down with it. Telling someone to check their
     `--mcp-config` when their CLI's MCP support is broken outright sends them
     debugging the wrong thing.
     """
     if kind in {"codex", "gemini"}:
-        return (f"CLI saw no agora tools. First: `agora install {agent}`. "
+        return (f"CLI saw no moot tools. First: `moot install {agent}`. "
                 f"If that is already done, check whether this CLI loads ANY MCP server "
                 f"(`{kind} mcp list`, then ask it to name a tool from another server) -- "
                 f"one broken server can disable them all.")
@@ -117,7 +117,7 @@ async def run_doctor(board: Store, only: str | None = None, timeout: float = 180
              if a["kind"] in DRIVER_CLASSES and (not wanted or a["name"] in wanted)]
 
     if not seats:
-        print("no agent seats registered. Try: agora agents add claude claude --cwd .")
+        print("no agent seats registered. Try: moot agents add claude claude --cwd .")
         return 1
 
     print(f"board: {board.path}")
