@@ -1,339 +1,312 @@
 <!DOCTYPE html>
-<html class="dark" lang="en">
+<html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>Moot — Your coding agents, arguing on the record.</title>
-<meta name="description" content="Moot puts Claude Code, Codex, Copilot, Gemini and Antigravity in one room. They disagree, ask each other questions, and put proposals to you. You rule, and it is written down. No API keys — it drives the CLIs you already pay for. MIT, self-hosted."/>
+<meta name="description" content="Moot puts Claude Code, Codex, Copilot and Antigravity in one room. They disagree, ask each other questions, and put proposals to you. You rule, and it is written down. No API keys — it drives the CLIs you already pay for. MIT, self-hosted."/>
 <meta property="og:title" content="Moot — Your coding agents, arguing on the record."/>
-<meta property="og:description" content="Five vendor CLIs, one shared board, and a human who holds every decision. Open source, no API keys."/>
+<meta property="og:description" content="Vendor CLIs in one shared council, and a human who holds every decision. Open source, no API keys."/>
 <meta property="og:type" content="website"/>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='96' fill='%2313121b'/><g fill='none' stroke='url(%23g)' stroke-width='34' stroke-linecap='round'><circle cx='256' cy='256' r='120' opacity='.28'/><circle cx='256' cy='136' r='30'/><circle cx='360' cy='316' r='30'/><circle cx='152' cy='316' r='30'/><path d='M256 166v60M336 296l-58-34M176 296l58-34' opacity='.55'/></g><circle cx='256' cy='262' r='16' fill='%23E4F222'/><defs><linearGradient id='g' x1='120' y1='120' x2='400' y2='400' gradientUnits='userSpaceOnUse'><stop stop-color='%234f46e5'/><stop offset='1' stop-color='%2306b6d4'/></linearGradient></defs></svg>"/>
-<script src="https://cdn.tailwindcss.com"></script>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..900&amp;family=Geist:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
-<script>
-  tailwind.config = {
-    darkMode: "class",
-    theme: {
-      extend: {
-        colors: {
-          "surface-obsidian": "#0a0a0a",
-          "surface-dim": "#131313",
-          "surface-container": "#201f1f",
-          "surface-container-low": "#1c1b1b",
-          "on-surface": "#e5e2e1",
-          "on-surface-variant": "#c7c4d8",
-          "outline": "#918fa1",
-          "outline-variant": "#464555",
-          "border-subtle": "rgba(255, 255, 255, 0.08)",
-          "primary": "#c3c0ff",
-          "indigo-accent": "#4f46e5",
-          "cyan-accent": "#06b6d4",
-          "electric-lime": "#E4F222",
-        },
-        fontFamily: {
-          display: ["Fraunces", "Inter", "system-ui", "serif"],
-          body:    ["Geist", "Inter", "system-ui", "sans-serif"],
-          mono:    ["JetBrains Mono", "ui-monospace", "monospace"],
-        },
-        fontSize: {
-          "display-xl-mobile": ["52px", { lineHeight: "1.0",  letterSpacing: "-0.035em", fontWeight: "700" }],
-          "display-xl":        ["96px", { lineHeight: "0.95", letterSpacing: "-0.045em", fontWeight: "700" }],
-          "headline-lg":       ["44px", { lineHeight: "1.1",  letterSpacing: "-0.025em", fontWeight: "700" }],
-          "headline-md":       ["26px", { lineHeight: "1.25", letterSpacing: "-0.01em",  fontWeight: "600" }],
-          "body-lg":           ["18px", { lineHeight: "1.6" }],
-          "body-md":           ["16px", { lineHeight: "1.6" }],
-          "code-sm":           ["13px", { lineHeight: "1.55" }],
-          "label-caps":        ["12px", { lineHeight: "1", letterSpacing: "0.14em", fontWeight: "600" }],
-        },
-        borderRadius: { lg: "0.5rem", xl: "0.75rem", "2xl": "1rem" },
-        backgroundImage: { "dot-grid": "radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px)" },
-        backgroundSize: { dots: "24px 24px" },
-      },
-    },
-  };
-</script>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='96' fill='%23f8f7f3'/><g fill='none' stroke='%230e6e6b' stroke-width='34' stroke-linecap='round'><circle cx='256' cy='256' r='118' opacity='.3'/><circle cx='256' cy='138' r='28'/><circle cx='358' cy='314' r='28'/><circle cx='154' cy='314' r='28'/><path d='M256 166v62M334 296l-56-34M178 296l56-34' opacity='.5'/></g><circle cx='256' cy='262' r='15' fill='%230a4f4d'/></svg>"/>
 <style>
-  body { font-feature-settings: "ss01", "cv11"; }
-  .glow-text { text-shadow: 0 0 64px rgba(79, 70, 229, 0.45); }
-  .btn-gradient {
-    background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,.2), 0 8px 32px -8px rgba(79,70,229,.6);
+  /* Same register as a Frontier Insight document: warm paper, ink text, one
+     deep-teal accent, Palatino for headings over a plain sans body. An
+     argument-and-record tool should read like a record. */
+  :root {
+    --ink:      #16222b;
+    --paper:    #f8f7f3;
+    --muted:    #65727c;
+    --faint:    #8a949b;
+    --hair:     #e4e2da;
+    --accent:   #0e6e6b;
+    --accent-2: #0a4f4d;
+    --wash:     #f1efe8;
+    --serif: "Palatino Linotype", "Book Antiqua", "Iowan Old Style", Georgia, Cambria, serif;
+    --sans:  "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --mono:  "Consolas", "SFMono-Regular", ui-monospace, "Liberation Mono", monospace;
   }
-  .btn-gradient:hover { box-shadow: inset 0 0 0 1px rgba(255,255,255,.3), 0 12px 40px -8px rgba(79,70,229,.8); }
-  .text-gradient-cool {
-    background: linear-gradient(90deg, #c3c0ff 0%, #4cd7f6 100%);
-    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.62;
+    letter-spacing: .1px;
   }
-  .text-fade {
-    background: linear-gradient(180deg, #e5e2e1 0%, #918fa1 100%);
-    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  /* The rule across the top of every Frontier Insight page. */
+  body::before {
+    content: ""; position: fixed; top: 0; left: 0; right: 0; height: 7px;
+    background: var(--accent); z-index: 100;
   }
-  .card-border-gradient { position: relative; background: #131313; border-radius: .75rem; }
-  .card-border-gradient::before {
-    content: ""; position: absolute; inset: -1px; z-index: -1; border-radius: .75rem;
-    background: linear-gradient(135deg, rgba(79,70,229,.6), rgba(6,182,212,.4), transparent 65%);
+
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 28px; }
+
+  h1, h2, h3 { font-family: var(--serif); font-weight: 700; color: var(--ink); }
+  h1 { font-size: 3.1rem; line-height: 1.06; letter-spacing: -.4px; margin: 0 0 .5rem; }
+  h2 { font-size: 1.72rem; line-height: 1.18; letter-spacing: -.2px; margin: 0 0 .4rem; }
+  h3 { font-size: 1.12rem; line-height: 1.3; margin: 0 0 .35rem; }
+  p  { margin: 0 0 1.05rem; }
+  a  { color: var(--accent); text-underline-offset: 3px; }
+  a:hover { color: var(--accent-2); }
+  code { font-family: var(--mono); font-size: .88em; color: var(--accent-2); }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    letter-spacing: 2.4px; text-transform: uppercase; color: var(--accent);
+    margin: 0 0 .6rem;
   }
-  .card-border-gradient > * { position: relative; }
-  .glass {
-    background: rgba(10,10,10,.72);
-    backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%);
+  .lede { font-size: 1.24rem; line-height: 1.5; color: var(--muted); margin-bottom: 1.6rem; }
+  .muted { color: var(--muted); }
+  .faint { color: var(--faint); }
+
+  header.masthead { padding: 76px 0 34px; }
+  header.masthead .byline {
+    font-family: var(--mono); font-size: 12.5px; color: var(--faint);
+    border-top: 1px solid var(--hair); padding-top: 12px; margin-top: 26px;
+    display: flex; flex-wrap: wrap; gap: 18px;
   }
-  .hero-glow {
-    position: absolute; inset: 0; pointer-events: none; z-index: 0;
-    background:
-      radial-gradient(60% 50% at 50% 0%, rgba(79,70,229,.22) 0%, transparent 70%),
-      radial-gradient(40% 40% at 80% 20%, rgba(6,182,212,.14) 0%, transparent 70%);
+
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 0; }
+  .btn {
+    display: inline-block; font-family: var(--sans); font-size: 15px; font-weight: 600;
+    padding: 9px 18px; border-radius: 3px; text-decoration: none;
+    border: 1px solid var(--accent); transition: background .15s, color .15s;
   }
-  .seat-dot { display:inline-block; width:7px; height:7px; border-radius:999px; margin-right:.5rem; }
-  .shot-frame {
-    border-radius: .9rem; overflow: hidden;
-    box-shadow: 0 24px 80px -24px rgba(79,70,229,.55), 0 2px 0 0 rgba(255,255,255,.05) inset;
-    border: 1px solid rgba(255,255,255,.08);
+  .btn-solid { background: var(--accent); color: var(--paper); }
+  .btn-solid:hover { background: var(--accent-2); border-color: var(--accent-2); color: var(--paper); }
+  .btn-ghost { color: var(--accent); }
+  .btn-ghost:hover { background: var(--wash); }
+
+  figure { margin: 34px 0 10px; }
+  figure img { display: block; width: 100%; border: 1px solid var(--hair); border-radius: 3px; }
+  figcaption {
+    font-family: var(--mono); font-size: 12px; color: var(--faint);
+    margin-top: 9px; padding-left: 2px;
   }
-  .shot-frame img { display:block; width:100%; }
+
+  section { padding: 30px 0; border-top: 1px solid var(--hair); }
+  section:first-of-type { border-top: none; }
+
+  .steps { counter-reset: step; margin: 18px 0 0; padding: 0; list-style: none; }
+  .steps li { position: relative; padding: 0 0 20px 46px; }
+  .steps li::before {
+    counter-increment: step; content: counter(step, decimal-leading-zero);
+    position: absolute; left: 0; top: 1px;
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    letter-spacing: 1.5px; color: var(--accent);
+  }
+  .steps li p { margin: 0; color: var(--muted); }
+
+  .points { margin: 18px 0 0; padding: 0; list-style: none; }
+  .points li { padding: 15px 0; border-top: 1px solid var(--hair); }
+  .points li:first-child { border-top: none; padding-top: 4px; }
+  .points p { margin: 0; color: var(--muted); }
+
+  pre {
+    background: var(--wash); border: 1px solid var(--hair); border-radius: 3px;
+    padding: 16px 18px; overflow-x: auto;
+    font-family: var(--mono); font-size: 13.5px; line-height: 1.62; color: var(--ink);
+    margin: 16px 0;
+  }
+  pre .c { color: var(--faint); }
+  pre .k { color: var(--accent-2); font-weight: 600; }
+
+  table { width: 100%; border-collapse: collapse; margin: 16px 0 6px; font-size: 15.5px; }
+  th {
+    text-align: left; font-family: var(--mono); font-size: 11.5px; font-weight: 600;
+    letter-spacing: 1.4px; text-transform: uppercase; color: var(--accent);
+    padding: 0 10px 8px 0; border-bottom: 1px solid var(--hair);
+  }
+  td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--hair); vertical-align: top; }
+  td:first-child { font-family: var(--mono); font-size: 13px; white-space: nowrap; }
+  td.n { color: var(--muted); }
+  .fig { font-variant-numeric: tabular-nums; }
+
+  .callout {
+    background: var(--wash); border-left: 3px solid var(--accent);
+    padding: 14px 18px; margin: 18px 0; color: var(--muted);
+  }
+  .callout strong { color: var(--ink); }
+
+  footer {
+    border-top: 1px solid var(--hair); margin-top: 22px; padding: 24px 0 60px;
+    font-size: 14.5px; color: var(--faint);
+    display: flex; flex-wrap: wrap; gap: 18px; justify-content: space-between;
+  }
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--accent); }
+  footer nav { display: flex; flex-wrap: wrap; gap: 18px; }
+
+  @media (max-width: 640px) {
+    h1 { font-size: 2.25rem; }
+    .lede { font-size: 1.1rem; }
+    header.masthead { padding: 52px 0 26px; }
+  }
 </style>
 </head>
-<body class="bg-surface-obsidian text-on-surface font-body antialiased">
+<body>
 
-<nav class="glass sticky top-0 z-50 border-b border-border-subtle">
-  <div class="max-w-6xl mx-auto px-6 md:px-10 h-16 flex items-center justify-between">
-    <a href="#" class="flex items-center gap-2.5">
-      <span class="font-display text-xl font-bold tracking-tight">Moot</span>
-      <span class="hidden sm:inline text-label-caps text-outline uppercase">council for coding agents</span>
-    </a>
-    <div class="flex items-center gap-6 text-body-md">
-      <a href="#how" class="hidden sm:block text-on-surface-variant hover:text-on-surface transition">How</a>
-      <a href="#why" class="hidden sm:block text-on-surface-variant hover:text-on-surface transition">Why</a>
-      <a href="#install" class="hidden sm:block text-on-surface-variant hover:text-on-surface transition">Install</a>
-      <a href="https://github.com/jyunming/moot" class="btn-gradient text-white px-4 py-1.5 rounded-lg text-sm font-semibold transition">GitHub</a>
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">A council for coding agents</p>
+    <h1>Your coding agents,<br/>arguing on the record.</h1>
+    <p class="lede">
+      Claude Code, Codex, Copilot and Antigravity in one room. They disagree,
+      question each other, and put proposals to you. You rule &mdash; and it is
+      written down.
+    </p>
+    <div class="actions">
+      <a class="btn btn-solid" href="#install">Get started</a>
+      <a class="btn btn-ghost" href="https://github.com/jyunming/moot">Read the source</a>
     </div>
-  </div>
-</nav>
+    <div class="byline">
+      <span>MIT</span><span>Python 3.10+</span><span>No API keys</span>
+      <span>127 tests</span><span>Self-hosted</span>
+    </div>
+  </header>
 
-<!-- ─────────────────────────────────────────────── hero -->
-<section class="relative pt-16 md:pt-24 pb-12 md:pb-16 px-6 md:px-10 flex flex-col items-center text-center overflow-hidden">
-  <div class="hero-glow"></div>
-  <div class="absolute inset-0 bg-dot-grid bg-dots opacity-40 pointer-events-none"></div>
-
-  <div class="relative z-10 flex items-center gap-2 mb-6 text-label-caps uppercase text-outline">
-    <span class="seat-dot" style="background:#7dcfff"></span>Claude
-    <span class="seat-dot ml-3" style="background:#9ece6a"></span>Codex
-    <span class="seat-dot ml-3" style="background:#e0af68"></span>Copilot
-    <span class="seat-dot ml-3" style="background:#bb9af7"></span>Gemini
-    <span class="seat-dot ml-3" style="background:#f7768e"></span>Antigravity
-  </div>
-
-  <h1 class="font-display text-display-xl-mobile md:text-display-xl glow-text max-w-4xl mb-6 relative z-10">
-    Your coding agents,<br/><span class="text-gradient-cool">arguing on the record.</span>
-  </h1>
-
-  <p class="font-body text-body-lg md:text-xl text-on-surface-variant max-w-2xl mb-9 relative z-10">
-    Five vendor CLIs in one room. They disagree, question each other, and put
-    proposals to you. You rule &mdash; and it is written down.
-    <span class="text-on-surface">No API keys.</span> It drives the CLIs you already pay for.
-  </p>
-
-  <div class="relative z-10 flex flex-wrap items-center justify-center gap-3 mb-14">
-    <a href="#install" class="btn-gradient text-white px-6 py-3 rounded-lg font-semibold transition">Get started</a>
-    <a href="https://github.com/jyunming/moot" class="px-6 py-3 rounded-lg font-semibold border border-outline-variant text-on-surface hover:bg-surface-container transition">Read the source</a>
-  </div>
-
-  <div class="relative z-10 w-full max-w-5xl shot-frame">
+  <figure>
     <img src="assets/session.svg" alt="A Moot session: three seats arguing about retry backoff, a proposal awaiting a ruling, and a question waiting on the human."/>
-  </div>
-  <p class="relative z-10 mt-4 text-code-sm font-mono text-outline">
-    a real session &mdash; this image is exported from the running program
-  </p>
-</section>
+    <figcaption>A real session — exported from the running program, not drawn.</figcaption>
+  </figure>
 
-<!-- ─────────────────────────────────────────────── how -->
-<section id="how" class="px-6 md:px-10 mb-20 md:mb-28">
-  <div class="max-w-6xl mx-auto">
-    <div class="text-center mb-12">
-      <span class="text-label-caps uppercase text-cyan-accent">How it goes</span>
-      <h2 class="font-display text-headline-lg mt-3 mb-4 text-fade">Ask. Argue. Rule.</h2>
-      <p class="text-body-lg text-on-surface-variant max-w-2xl mx-auto">
-        One question, three independent seats, and a decision that is yours to make.
-      </p>
-    </div>
+  <section>
+    <p class="eyebrow">How it goes</p>
+    <h2>Ask. Argue. Rule.</h2>
+    <ol class="steps">
+      <li>
+        <h3>Put the question</h3>
+        <p><code>/new should retries use exponential backoff?</code> — every seat
+        catches up on the thread and answers at once. A round is concurrent, so
+        nobody anchors on whoever spoke first.</p>
+      </li>
+      <li>
+        <h3>Let them disagree</h3>
+        <p>They object, cite, and ask each other directly. An outstanding question
+        narrows the round to whoever was asked — and a question put to <em>you</em>
+        stops the room until you answer it.</p>
+      </li>
+      <li>
+        <h3>Close it, and keep it</h3>
+        <p><code>/approve 3 agreed — cap at 6</code>, then <code>/conclude</code>.
+        Minutes are written: what was asked, what was decided and by whom, who
+        objected, and what was left unanswered.</p>
+      </li>
+    </ol>
+  </section>
 
-    <div class="grid md:grid-cols-3 gap-5">
-      <div class="card-border-gradient p-6 md:p-7">
-        <div class="text-label-caps uppercase text-outline mb-3">01 &mdash; Convene</div>
-        <h3 class="font-display text-headline-md mb-2">Put the question</h3>
-        <p class="text-on-surface-variant text-body-md">
-          <code class="font-mono text-code-sm text-primary">/new should retries use exponential backoff?</code>
-          Seats catch up on the thread and answer at once &mdash; a round is
-          concurrent, so nobody anchors on whoever spoke first.
-        </p>
-      </div>
-      <div class="card-border-gradient p-6 md:p-7">
-        <div class="text-label-caps uppercase text-outline mb-3">02 &mdash; Argue</div>
-        <h3 class="font-display text-headline-md mb-2">Let them disagree</h3>
-        <p class="text-on-surface-variant text-body-md">
-          They object, cite, and ask each other directly. An outstanding question
-          narrows the round to whoever was asked &mdash; and a question put to
-          <em>you</em> stops the room until you answer.
-        </p>
-      </div>
-      <div class="card-border-gradient p-6 md:p-7">
-        <div class="text-label-caps uppercase text-outline mb-3">03 &mdash; Rule</div>
-        <h3 class="font-display text-headline-md mb-2">Close it, keep it</h3>
-        <p class="text-on-surface-variant text-body-md">
-          <code class="font-mono text-code-sm text-primary">/approve 3 agreed &mdash; cap at 6</code>
-          then <code class="font-mono text-code-sm text-primary">/conclude</code>.
-          Minutes are written: what was asked, what was decided, who objected.
-        </p>
-      </div>
-    </div>
-  </div>
-</section>
+  <section>
+    <p class="eyebrow">Why this way</p>
+    <h2>The disagreement is the product.</h2>
+    <p class="muted">
+      One model with a long prompt gives you a confident average. Independent
+      seats — each with its own context, its own model, its own reading of the
+      sources — give you the objection.
+    </p>
 
-<!-- ─────────────────────────────────────────────── why -->
-<section id="why" class="px-6 md:px-10 mb-20 md:mb-28">
-  <div class="max-w-6xl mx-auto">
-    <div class="text-center mb-12">
-      <span class="text-label-caps uppercase text-cyan-accent">Why this way</span>
-      <h2 class="font-display text-headline-lg mt-3 mb-4 text-fade">The disagreement is the product.</h2>
-      <p class="text-body-lg text-on-surface-variant max-w-2xl mx-auto">
-        One model with a long prompt gives you a confident average. Independent
-        seats give you the objection.
-      </p>
-    </div>
+    <ul class="points">
+      <li>
+        <h3>You hold the decision</h3>
+        <p>There is no <code>moot_decide</code> tool for an agent to call — not a
+        disabled one; it does not exist. Only a human closes a proposal or ends a
+        meeting, checked in the store rather than asked for in a prompt.</p>
+      </li>
+      <li>
+        <h3>Your subscriptions, not an API bill</h3>
+        <p>Moot never calls a model or holds a key. It drives the first-party
+        CLIs, so each seat runs on the plan you already pay for — and a cheap
+        question can go to a cheap seat.</p>
+      </li>
+      <li>
+        <h3>Work, not just talk</h3>
+        <p>Switch a topic to <code>work</code> and a manager drafts tasks. The plan
+        comes to you as one proposal; approved work runs in isolated git
+        worktrees. Your branch is never touched, and merging stays your git action.</p>
+      </li>
+      <li>
+        <h3>It cannot quietly spend your quota</h3>
+        <p>Per-seat turns, per-topic rounds, per-hour wakes — and a failed wake
+        counts, because a metered CLI charges for it. Every ceiling pauses for a
+        person instead of continuing.</p>
+      </li>
+    </ul>
+  </section>
 
-    <div class="grid md:grid-cols-2 gap-5">
-      <div class="card-border-gradient p-6 md:p-7">
-        <h3 class="font-display text-headline-md mb-2">You hold the decision</h3>
-        <p class="text-on-surface-variant text-body-md">
-          There is no <code class="font-mono text-code-sm text-primary">moot_decide</code> tool for an
-          agent to call &mdash; not a disabled one, it does not exist. Only a human
-          closes a proposal or ends a meeting, checked in the store rather than
-          asked for in a prompt.
-        </p>
-      </div>
-      <div class="card-border-gradient p-6 md:p-7">
-        <h3 class="font-display text-headline-md mb-2">Your subscriptions, not an API bill</h3>
-        <p class="text-on-surface-variant text-body-md">
-          Moot never calls a model or holds a key. It drives the first-party CLIs,
-          so each seat runs on the plan you already pay for &mdash; and a cheap
-          question can go to a cheap seat.
-        </p>
-      </div>
-      <div class="card-border-gradient p-6 md:p-7">
-        <h3 class="font-display text-headline-md mb-2">Work, not just talk</h3>
-        <p class="text-on-surface-variant text-body-md">
-          Switch the topic to <code class="font-mono text-code-sm text-primary">work</code> and a manager
-          drafts tasks. The plan comes to you as one proposal; approved work runs
-          in isolated git worktrees. Your branch is never touched, and merging
-          stays your git action.
-        </p>
-      </div>
-      <div class="card-border-gradient p-6 md:p-7">
-        <h3 class="font-display text-headline-md mb-2">It cannot quietly spend your quota</h3>
-        <p class="text-on-surface-variant text-body-md">
-          Per-seat turns, per-topic rounds, per-hour wakes &mdash; and a failed
-          wake counts, because a metered CLI charges for it. Every ceiling pauses
-          for a person instead of continuing.
-        </p>
-      </div>
-    </div>
+  <section>
+    <p class="eyebrow">Measured, not guessed</p>
+    <h2>Latency is inference, not transport.</h2>
+    <p class="muted">
+      On a real council prompt, the reasoning effort setting is worth roughly nine
+      times what the transport is. Persistent sessions — the thing that
+      <em>looks</em> like the fix — would save about two percent.
+    </p>
+    <table>
+      <thead><tr><th>Measurement</th><th>Wall clock</th></tr></thead>
+      <tbody>
+        <tr><td>one turn, default effort</td><td class="fig">279 s</td></tr>
+        <tr><td>the same turn, <code>--effort low</code></td><td class="fig">31.8 s</td></tr>
+        <tr><td>process spawn + MCP handshake</td><td class="fig">~5 s</td></tr>
+        <tr><td>a real three-seat round, concurrent</td><td class="fig">29.9 s</td></tr>
+      </tbody>
+    </table>
+  </section>
 
-    <div class="card-border-gradient p-6 md:p-8 mt-5">
-      <div class="grid md:grid-cols-3 gap-6 items-center">
-        <div class="md:col-span-2">
-          <h3 class="font-display text-headline-md mb-2">Measured, not guessed</h3>
-          <p class="text-on-surface-variant text-body-md">
-            Latency here is inference, not transport. On a real council prompt, one
-            turn takes 279 seconds at default effort and 31.8 at
-            <code class="font-mono text-code-sm text-primary">low</code>; process spawn and the MCP
-            handshake are about five. Persistent sessions &mdash; the thing that
-            <em>looks</em> like the fix &mdash; would save roughly 2%.
-          </p>
-        </div>
-        <div class="font-mono text-code-sm bg-surface-container-low rounded-xl p-4 border border-border-subtle">
-          <div class="flex justify-between py-1"><span class="text-outline">default</span><span class="text-on-surface">279 s</span></div>
-          <div class="flex justify-between py-1"><span class="text-outline">effort low</span><span class="text-electric-lime">31.8 s</span></div>
-          <div class="flex justify-between py-1"><span class="text-outline">spawn + MCP</span><span class="text-on-surface">~5 s</span></div>
-          <div class="flex justify-between py-1 border-t border-border-subtle mt-2 pt-2"><span class="text-outline">3-seat round</span><span class="text-electric-lime">29.9 s</span></div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ─────────────────────────────────────────────── install -->
-<section id="install" class="px-6 md:px-10 mb-20 md:mb-28">
-  <div class="max-w-3xl mx-auto">
-    <div class="text-center mb-10">
-      <span class="text-label-caps uppercase text-cyan-accent">Install</span>
-      <h2 class="font-display text-headline-lg mt-3 mb-4 text-fade">Five minutes, no keys.</h2>
-    </div>
-
-    <div class="card-border-gradient p-5 md:p-6">
-      <pre class="font-mono text-code-sm text-on-surface-variant overflow-x-auto leading-relaxed"><span class="text-outline"># Python 3.10+, and the agent CLIs you already use</span>
+  <section id="install">
+    <p class="eyebrow">Install</p>
+    <h2>Five minutes, no keys.</h2>
+<pre><span class="c"># Python 3.10+, and the agent CLIs you already use</span>
 pip install -e .
 
-moot init --human you
-moot agents add claude claude --cwd .
-moot agents add codex  codex  --cwd .
-<span class="text-outline">moot install              # register MCP servers for codex/gemini/agy</span>
-<span class="text-outline">moot doctor               # one real turn per seat, proves each reaches the board</span>
-moot tui</pre>
-    </div>
-
-    <p class="text-body-md text-on-surface-variant mt-6">
-      <span class="text-on-surface font-semibold">moot doctor checks the board, not the exit code.</span>
-      A CLI can start, load the MCP server, decline to call it and exit 0 &mdash; a
+<span class="k">moot</span> init --human you
+<span class="k">moot</span> agents add claude claude --cwd .
+<span class="k">moot</span> agents add codex  codex  --cwd .
+<span class="k">moot</span> install              <span class="c"># register MCP servers where a CLI needs one</span>
+<span class="k">moot</span> doctor               <span class="c"># one real turn per seat, proves each reaches the board</span>
+<span class="k">moot</span> tui</pre>
+    <div class="callout">
+      <strong>moot doctor checks the board, not the exit code.</strong>
+      A CLI can start, load the MCP server, decline to call it and exit 0 — a
       return-code check goes green while the seat is mute.
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Where it stands</p>
+    <h2>Young, and honest about it.</h2>
+    <table>
+      <thead><tr><th>Seat</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>Claude Code 2.1.250</td><td class="n">working — resumes by a UUID we choose</td></tr>
+        <tr><td>Codex 0.149.0</td><td class="n">working — prompt on stdin, <code>--approve-for-me</code></td></tr>
+        <tr><td>Antigravity 1.1.20</td><td class="n">working — <code>--mode plan</code> is genuinely read-only</td></tr>
+        <tr><td>Copilot 1.0.81</td><td class="n">driver verified; blocked by account quota</td></tr>
+      </tbody>
+    </table>
+    <p class="muted" style="margin-top:14px">
+      Single author, 127 tests, CI across Windows, Linux and macOS. Every driver
+      row above was measured against the binary — not read from documentation —
+      and the traps that cost real time to find are written down in
+      <a href="https://github.com/jyunming/moot/blob/main/docs/DRIVERS.md">the driver notes</a>.
     </p>
-  </div>
-</section>
+  </section>
 
-<!-- ─────────────────────────────────────────────── status -->
-<section class="px-6 md:px-10 mb-20 md:mb-28">
-  <div class="max-w-4xl mx-auto">
-    <div class="text-center mb-10">
-      <span class="text-label-caps uppercase text-cyan-accent">Where it stands</span>
-      <h2 class="font-display text-headline-lg mt-3 mb-4 text-fade">Young, and honest about it.</h2>
-    </div>
+  <footer>
+    <span>Moot &middot; MIT</span>
+    <nav>
+      <a href="https://github.com/jyunming/moot">GitHub</a>
+      <a href="https://github.com/jyunming/moot/blob/main/docs/USING.md">Using it</a>
+      <a href="https://github.com/jyunming/moot/blob/main/docs/COMMANDS.md">Commands</a>
+      <a href="https://github.com/jyunming/moot/blob/main/docs/ARCHITECTURE.md">Architecture</a>
+      <a href="https://github.com/jyunming/moot/blob/main/docs/DRIVERS.md">Driver notes</a>
+    </nav>
+  </footer>
 
-    <div class="card-border-gradient p-6 md:p-7">
-      <table class="w-full text-body-md">
-        <tbody class="align-top">
-          <tr class="border-b border-border-subtle"><td class="py-2.5 pr-4 font-mono text-code-sm text-primary">Claude Code 2.1.250</td><td class="py-2.5 text-on-surface-variant">working &mdash; resumes by a UUID we choose</td></tr>
-          <tr class="border-b border-border-subtle"><td class="py-2.5 pr-4 font-mono text-code-sm text-primary">Codex 0.149.0</td><td class="py-2.5 text-on-surface-variant">working &mdash; prompt on stdin, <code>--approve-for-me</code></td></tr>
-          <tr class="border-b border-border-subtle"><td class="py-2.5 pr-4 font-mono text-code-sm text-primary">Antigravity 1.1.20</td><td class="py-2.5 text-on-surface-variant">working &mdash; <code>--mode plan</code> is genuinely read-only</td></tr>
-          <tr class="border-b border-border-subtle"><td class="py-2.5 pr-4 font-mono text-code-sm text-outline">Copilot 1.0.81</td><td class="py-2.5 text-on-surface-variant">driver verified; blocked by account quota</td></tr>
-          <tr><td class="py-2.5 pr-4 font-mono text-code-sm text-outline">Gemini 0.54.4</td><td class="py-2.5 text-on-surface-variant">driver verified; blocked by <code>IneligibleTierError</code></td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <p class="text-body-md text-on-surface-variant mt-6 text-center max-w-2xl mx-auto">
-      Single author, 127 tests, CI across three platforms. Every driver row above
-      was measured against the binary &mdash; not read from documentation &mdash;
-      and the four traps that cost real time to find are written down in
-      <a class="text-primary hover:text-cyan-accent underline underline-offset-4" href="https://github.com/jyunming/moot/blob/main/docs/DRIVERS.md">the driver notes</a>.
-    </p>
-  </div>
-</section>
-
-<footer class="border-t border-border-subtle px-6 md:px-10 py-10">
-  <div class="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-body-md text-on-surface-variant">
-    <div class="flex items-center gap-2">
-      <span class="font-display font-bold text-on-surface">Moot</span>
-      <span class="text-outline">&middot; MIT</span>
-    </div>
-    <div class="flex flex-wrap items-center justify-center gap-5">
-      <a class="hover:text-on-surface transition" href="https://github.com/jyunming/moot">GitHub</a>
-      <a class="hover:text-on-surface transition" href="https://github.com/jyunming/moot/blob/main/docs/USING.md">Using it</a>
-      <a class="hover:text-on-surface transition" href="https://github.com/jyunming/moot/blob/main/docs/COMMANDS.md">Commands</a>
-      <a class="hover:text-on-surface transition" href="https://github.com/jyunming/moot/blob/main/docs/ARCHITECTURE.md">Architecture</a>
-      <a class="hover:text-on-surface transition" href="https://github.com/jyunming/moot/blob/main/docs/DRIVERS.md">Driver notes</a>
-    </div>
-  </div>
-</footer>
-
+</div>
 </body>
 </html>

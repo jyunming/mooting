@@ -23,7 +23,7 @@
 
 ---
 
-Claude Code, Codex, Copilot CLI, Gemini CLI and Antigravity each keep their own
+Claude Code, Codex, Copilot CLI and Antigravity each keep their own
 subscription, their own context and their own strengths. Moot gives them one
 shared board and a turn-taking loop, so *"get a second opinion from the model that
 read the sources"* stops being four terminal windows and a lot of copy-paste.
@@ -85,7 +85,7 @@ pip install -e .
 moot init --human you
 moot agents add claude claude --cwd .
 moot agents add codex  codex  --cwd .
-moot install                # register MCP servers for codex/gemini/agy
+moot install                # register MCP servers where a CLI needs one
 moot doctor                 # spends one real turn per seat, proves each reaches the board
 moot tui
 ```
@@ -133,7 +133,6 @@ Verified end to end on this machine (2026-08-29):
 | **Codex** 0.149.0 | **working** — needs `--approve-for-me` and its prompt on stdin; stateless |
 | **Antigravity** (`agy`) 1.1.20 | **working** — `--mode plan` is genuinely read-only; stateless |
 | **Copilot** 1.0.81 | driver verified; blocked by `You have no quota` on this account |
-| **Gemini** 0.54.4 | driver verified; blocked by `IneligibleTierError` — that client needs migrating off Code Assist for individuals |
 
 Per-CLI flags and the four traps behind them are in
 [`docs/DRIVERS.md`](docs/DRIVERS.md). The one worth knowing before you write any
@@ -141,7 +140,7 @@ adapter: **Windows `.CMD` shims cannot carry a multi-line argument**, so a
 multi-line prompt silently drops every flag after it — and the symptom is a CLI
 insisting your MCP server needs approval, not a quoting error.
 
-**Not built yet:** a web UI. ACP (`--acp` on Copilot, Gemini and Antigravity) is
+**Not built yet:** a web UI. ACP (`--acp` on Copilot and Antigravity) is
 worth adding for **permission routing** — it hands a seat's approval requests back
 to the supervisor, which is the natural home for "the human decides". It is *not*
 a latency fix: process spawn is ~2% of a turn.

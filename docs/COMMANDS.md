@@ -101,7 +101,7 @@ moot init --human you                   # create a board and your seat
 moot agents add <name> <cli> --cwd .    # register a seat
 moot agents ls                          # every registered seat, board-wide
 moot agents rm <name> --yes             # deregister one
-moot install [name]                     # register MCP servers for codex/gemini/agy
+moot install [name]                     # register MCP servers where a CLI needs one
 moot doctor [--only a,b]                # spend one real turn per seat, prove each reaches the board
 ```
 

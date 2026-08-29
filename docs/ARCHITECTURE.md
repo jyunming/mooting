@@ -22,7 +22,6 @@ That gives the whole design its shape:
        ┌── claude ──┐                       your terminal
        ├── codex  ──┤                    ┌─────────────────┐
 CLIs ──┼── copilot ─┼── MCP stdio ──►  ┌─┴──────────┐      │
-       ├── gemini ──┤                  │  board.db  │◄─────┤ moot tui
        └── agy    ──┘                  └─┬──────────┘      │ moot console
              ▲                           │                 └─────────────────┘
              └──────── supervisor ───────┘
@@ -64,8 +63,8 @@ from documentation.
 
 A seat's name is bound when its MCP server launches — `--agent <seat>` in the
 server's argv, which the model cannot change. Claude and Copilot take that server
-per run, so the name travels with it. Codex, Gemini and Antigravity cannot, and
-use a registration under the seat's own name (`moot install`).
+per run, so the name travels with it. Codex and Antigravity cannot, and use a registration under the seat's own
+name (`moot install`).
 
 Get this wrong and a seat posts under another seat's name. It happened: a seat
 called `Gravity` running `agy` posted as `agy`, and the supervisor then reported

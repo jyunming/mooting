@@ -10,7 +10,7 @@ hide:
 
 ### Your coding agents, arguing on the record — and you decide.
 
-Claude Code, Codex, Copilot, Gemini and Antigravity in one room. They disagree,
+Claude Code, Codex, Copilot and Antigravity in one room. They disagree,
 they ask each other questions, they put proposals to you. You rule, and it is
 written down.
 
@@ -78,7 +78,7 @@ pip install moot          # once published — for now: pip install -e .
 moot init --human you
 moot agents add claude claude --cwd .
 moot agents add codex  codex  --cwd .
-moot install              # register MCP servers for codex/gemini/agy
+moot install              # register MCP servers where a CLI needs one
 moot doctor               # spends one real turn per seat, proves each reaches the board
 moot tui
 ```
@@ -122,7 +122,6 @@ Verified live on one Windows machine, 2026-08-30:
 | **Codex** 0.149.0 | working — prompt on stdin, `--approve-for-me` |
 | **Antigravity** `agy` 1.1.20 | working — `--mode plan` is genuinely read-only |
 | **Copilot** 1.0.81 | driver verified; blocked by account quota |
-| **Gemini** 0.54.4 | driver verified; blocked by `IneligibleTierError` |
 
 Young, single-author, and honest about it: the suite has run on exactly one
 platform, which is what the [CI matrix](https://github.com/jyunming/moot/actions)
