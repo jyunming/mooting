@@ -396,3 +396,46 @@ async def test_every_seat_gets_a_distinct_colour(tmp_path, board):
         assert app.colour_for("claude") != app.colour_for("codex")
         # You are not colour-coded; you are just bold.
         assert app.board.me in {s["agent"] for s in board.seats(app.board.topic_id)}
+
+
+@pytest.mark.asyncio
+async def test_seats_can_be_changed_on_the_topic(tmp_path, board):
+    """The council is per topic: some questions want the historian, some want the
+    engine, and paying four CLIs to sit through a question two of them cannot
+    help with is the cost this exists to control."""
+    board.add_agent("agy", "agy", driver="spawn")
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        here = lambda: {s["agent"] for s in board.seats(app.board.topic_id)}
+        assert "agy" not in here()
+
+        await type_line(pilot, app, "/seats add agy")
+        assert "agy" in here()
+
+        await type_line(pilot, app, "/seats rm codex")
+        assert "codex" not in here()
+
+        await type_line(pilot, app, "/seats add nobody")     # not registered
+        assert "nobody" not in here()
+
+
+@pytest.mark.asyncio
+async def test_removing_a_seat_keeps_what_it_said_and_frees_the_room(tmp_path, board):
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        board.post(app.board.topic_id, "codex", "an argument that still counts",
+                   count_turn=False)
+        board.ask(app.board.topic_id, "claude", "codex", "does that hold?")
+        await type_line(pilot, app, "/seats rm codex")
+
+    assert any(m["author"] == "codex" for m in board.transcript(app.board.topic_id))
+    # A question nobody can answer would block the room forever.
+    assert board.open_mentions(app.board.topic_id) == []
+
+
+@pytest.mark.asyncio
+async def test_the_manager_cannot_simply_be_removed(tmp_path, board):
+    app = app_for(tmp_path, board, slug="w", mode="work", manager="claude")
+    async with app.run_test() as pilot:
+        await type_line(pilot, app, "/seats rm claude")
+    assert board.is_manager(app.board.topic_id, "claude"), "manager left silently"

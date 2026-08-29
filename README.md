@@ -66,7 +66,15 @@ You never have to leave for the next question:
 > /new the workflow optimization in agentic AI software development
 > /mode work claude     # switch to team mode, claude manages
 > /mode discuss         # back to a discussion — no roles
+> /seats                # who is here
+> /seats add agy        # seat another CLI; it catches up on the discussion
+> /seats rm copilot     # what it already said stays
 ```
+
+The council is **per topic**, not global. Some questions want the seat that read
+the sources, some want the one that owns the subsystem, and paying four CLIs to
+sit through a question two of them cannot help with is the cost this exists to
+control.
 
 Roles exist only where they mean something. In `debate` and `discuss` everyone
 argues on equal footing, so there is no manager to be; the role is granted when a

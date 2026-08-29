@@ -65,7 +65,7 @@ COMMANDS = {
     "/reject": "<id> <why>",
     "/proposals": "what is waiting on you",
     "/tasks": "the work plan and where each task has got to",
-    "/seats": "who has budget left, who owes an answer",
+    "/seats": "who is here; /seats add <agent> | /seats rm <agent>",
     "/topic": "<slug> -- switch to another topic",
     "/new": "<what you want to discuss> -- opens a topic, same seats",
     "/mode": "debate | discuss | work <agent> -- what kind of topic this is",
@@ -346,6 +346,8 @@ class Console:
             ("/mode debate|discuss", "argue to find the flaw / build together"),
             ("/mode work <agent>", "team mode; that seat plans and reviews"),
             ("/seats", "who is here, budget left, who owes an answer"),
+            ("/seats add <agent>", "seat another CLI on this topic"),
+            ("/seats rm <agent>", "remove one; what it already said stays"),
             ("/tasks", "the work plan and where each task has got to"),
         ]),
         ("Clearing up", [
@@ -414,9 +416,12 @@ class Console:
         for a in asks:
             self.emit(_ask_banner(a["asker"], a["question"]))
 
-    def _seats(self, _: str) -> None:
+    def _seats(self, rest: str = "") -> None:
         if not self._require_topic():
             return
+        words = rest.split()
+        if words and words[0] in {"add", "rm", "remove"}:
+            return self._seat_change(words[0], words[1] if len(words) > 1 else "")
         for s in self.store.seats(self.topic_id):
             owed = len(self.store.open_mentions(self.topic_id, s["agent"]))
             flag = f"  {YELLOW}{owed} open ask(s){RESET}" if owed else ""
@@ -436,6 +441,58 @@ class Console:
                 self.emit(f"       {DIM}{t['branch']}{RESET}")
             if t["result"]:
                 self.emit(f"       {t['result'].strip()[:200]}")
+
+    def _seat_change(self, verb: str, agent: str) -> None:
+        """Add or remove a seat on this topic.
+
+        The council is per topic, not global: some questions want the historian,
+        some want the engine, and paying four CLIs to sit through a question two
+        of them cannot help with is the cost this whole thing exists to control.
+        """
+        if not agent:
+            self.emit(f"{RED}usage: /seats {verb} <agent>{RESET}")
+            self.emit(f"{DIM}registered: "
+                      f"{', '.join(a['name'] for a in self.store.agents())}{RESET}")
+            return
+        try:
+            self.store.agent(agent)
+        except StoreError:
+            self.emit(f"{RED}{agent!r} is not a registered seat{RESET}")
+            self.emit(f"{DIM}register it first:  agora agents add {agent} <kind> "
+                      f"--cwd .{RESET}")
+            return
+
+        seated = self.store.seat(self.topic_id, agent) is not None
+        if verb == "add":
+            if seated:
+                self.emit(f"{DIM}{agent} is already here{RESET}")
+                return
+            with self.store.tx() as c:
+                c.execute("INSERT INTO seats (topic_id, agent) VALUES (?,?)",
+                          (self.topic_id, agent))
+            # last_seen stays 0 on purpose: someone joining late should read what
+            # was already said before answering, which the bounded catch-up gives
+            # them for free.
+            self.emit(f"{DIM}{agent} seated — it will catch up on the discussion "
+                      f"so far{RESET}")
+        else:
+            if not seated:
+                self.emit(f"{DIM}{agent} is not on this topic{RESET}")
+                return
+            if self.store.is_manager(self.topic_id, agent):
+                self.emit(f"{RED}{agent} manages this topic — /mode work <someone "
+                          f"else> first, or /mode discuss{RESET}")
+                return
+            owed = len(self.store.open_mentions(self.topic_id, agent))
+            with self.store.tx() as c:
+                c.execute("DELETE FROM seats WHERE topic_id = ? AND agent = ?",
+                          (self.topic_id, agent))
+                # An unanswerable question would block the room forever.
+                c.execute("DELETE FROM mentions WHERE topic_id = ? AND target = ? "
+                          "AND answered_by IS NULL", (self.topic_id, agent))
+            note = f" ({owed} unanswered question(s) dropped)" if owed else ""
+            self.emit(f"{DIM}{agent} left — what it already said stays{note}{RESET}")
+        self.on_topic_change()
 
     def _proposals(self, _: str) -> None:
         if not self._require_topic():
