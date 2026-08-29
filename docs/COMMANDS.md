@@ -97,6 +97,7 @@ task row opens it in the transcript.
 ### Setting up
 
 ```bash
+moot setup [-y]                         # everything below, in an order that works
 moot init --human you                   # create a board and your seat
 moot agents add <name> <cli> --cwd .    # register a seat
 moot agents ls                          # every registered seat, board-wide

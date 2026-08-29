@@ -53,6 +53,12 @@ def cmd_init(args) -> int:
     return 0
 
 
+def cmd_setup(args) -> int:
+    """One command that gets a council standing."""
+    from .setup import run
+    return run(args.db, assume_yes=args.yes)
+
+
 def cmd_agents_add(args) -> int:
     board = _board(args)
     cfg = {"cwd": os.path.abspath(args.cwd)} if args.cwd else {}
@@ -437,6 +443,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--db", help="board path (default ./.moot/board.db, or $MOOT_DB)")
     ap.add_argument("--as", dest="as_", help="act as this human seat (or $MOOT_HUMAN)")
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("setup", help="find your CLIs, seat them, wire them up, prove it works")
+    p.add_argument("-y", "--yes", action="store_true",
+                   help="take every default; seat every CLI found")
+    p.set_defaults(fn=cmd_setup)
 
     p = sub.add_parser("init", help="create a board and your human seat")
     p.add_argument("--human", default=os.environ.get("MOOT_HUMAN", "human"))

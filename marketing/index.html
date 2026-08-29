@@ -8,20 +8,23 @@
 <meta property="og:title" content="Moot — Your coding agents, arguing on the record."/>
 <meta property="og:description" content="Vendor CLIs in one shared council, and a human who holds every decision. Open source, no API keys."/>
 <meta property="og:type" content="website"/>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='96' fill='%23f8f7f3'/><g fill='none' stroke='%230e6e6b' stroke-width='34' stroke-linecap='round'><circle cx='256' cy='256' r='118' opacity='.3'/><circle cx='256' cy='138' r='28'/><circle cx='358' cy='314' r='28'/><circle cx='154' cy='314' r='28'/><path d='M256 166v62M334 296l-56-34M178 296l56-34' opacity='.5'/></g><circle cx='256' cy='262' r='15' fill='%230a4f4d'/></svg>"/>
+<meta name="theme-color" content="#16222B"/>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='96' fill='%2316222B'/><g fill='none' stroke='%239FB4B3' stroke-width='34' stroke-linecap='round'><circle cx='256' cy='256' r='118' opacity='.32'/><circle cx='256' cy='138' r='28'/><circle cx='358' cy='314' r='28'/><circle cx='154' cy='314' r='28'/><path d='M256 166v62M334 296l-56-34M178 296l56-34' opacity='.5'/></g><circle cx='256' cy='262' r='15' fill='%23F8F7F3'/></svg>"/>
 <style>
-  /* Same register as a Frontier Insight document: warm paper, ink text, one
-     deep-teal accent, Palatino for headings over a plain sans body. An
-     argument-and-record tool should read like a record. */
+  /* The deck's dark composition, exactly: #16222B ground, #F8F7F3 text, teal
+     #0E6E6B with #9FB4B3 as the on-dark tint. Same document register as the
+     Frontier Insight papers -- Palatino headings, hairline rules, no gradients
+     -- because a tool whose output is a record should read like one. */
   :root {
-    --ink:      #16222b;
-    --paper:    #f8f7f3;
-    --muted:    #65727c;
-    --faint:    #8a949b;
-    --hair:     #e4e2da;
-    --accent:   #0e6e6b;
-    --accent-2: #0a4f4d;
-    --wash:     #f1efe8;
+    --paper:    #F8F7F3;   /* text on dark */
+    --ground:   #16222B;   /* slide background */
+    --raised:   #26333C;   /* the second dark the deck uses for blocks */
+    --muted:    #CDD8D6;
+    --faint:    #8A949B;
+    --hair:     rgba(159, 180, 179, .22);
+    --teal:     #0E6E6B;
+    --teal-lt:  #9FB4B3;   /* teal that survives a dark ground */
+    --teal-dk:  #0A4F4D;
     --serif: "Palatino Linotype", "Book Antiqua", "Iowan Old Style", Georgia, Cambria, serif;
     --sans:  "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
     --mono:  "Consolas", "SFMono-Regular", ui-monospace, "Liberation Mono", monospace;
@@ -31,38 +34,38 @@
   html { -webkit-text-size-adjust: 100%; }
   body {
     margin: 0;
-    background: var(--paper);
-    color: var(--ink);
+    background: var(--ground);
+    color: var(--paper);
     font-family: var(--sans);
     font-size: 17px;
     line-height: 1.62;
     letter-spacing: .1px;
   }
-  /* The rule across the top of every Frontier Insight page. */
+  /* The rule across the top of every page in the deck. */
   body::before {
     content: ""; position: fixed; top: 0; left: 0; right: 0; height: 7px;
-    background: var(--accent); z-index: 100;
+    background: var(--teal); z-index: 100;
   }
 
   .wrap { max-width: 760px; margin: 0 auto; padding: 0 28px; }
 
-  h1, h2, h3 { font-family: var(--serif); font-weight: 700; color: var(--ink); }
+  h1, h2, h3 { font-family: var(--serif); font-weight: 700; color: var(--paper); }
   h1 { font-size: 3.1rem; line-height: 1.06; letter-spacing: -.4px; margin: 0 0 .5rem; }
   h2 { font-size: 1.72rem; line-height: 1.18; letter-spacing: -.2px; margin: 0 0 .4rem; }
   h3 { font-size: 1.12rem; line-height: 1.3; margin: 0 0 .35rem; }
   p  { margin: 0 0 1.05rem; }
-  a  { color: var(--accent); text-underline-offset: 3px; }
-  a:hover { color: var(--accent-2); }
-  code { font-family: var(--mono); font-size: .88em; color: var(--accent-2); }
+  a  { color: var(--teal-lt); text-underline-offset: 3px; }
+  a:hover { color: var(--paper); }
+  code { font-family: var(--mono); font-size: .88em; color: var(--teal-lt); }
+  em { color: var(--paper); font-style: italic; }
 
   .eyebrow {
     font-family: var(--mono); font-size: 12px; font-weight: 600;
-    letter-spacing: 2.4px; text-transform: uppercase; color: var(--accent);
+    letter-spacing: 2.4px; text-transform: uppercase; color: var(--teal-lt);
     margin: 0 0 .6rem;
   }
   .lede { font-size: 1.24rem; line-height: 1.5; color: var(--muted); margin-bottom: 1.6rem; }
   .muted { color: var(--muted); }
-  .faint { color: var(--faint); }
 
   header.masthead { padding: 76px 0 34px; }
   header.masthead .byline {
@@ -71,26 +74,28 @@
     display: flex; flex-wrap: wrap; gap: 18px;
   }
 
-  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 0; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; }
   .btn {
-    display: inline-block; font-family: var(--sans); font-size: 15px; font-weight: 600;
+    display: inline-block; font-size: 15px; font-weight: 600;
     padding: 9px 18px; border-radius: 3px; text-decoration: none;
-    border: 1px solid var(--accent); transition: background .15s, color .15s;
+    border: 1px solid var(--teal-lt); transition: background .15s, color .15s, border-color .15s;
   }
-  .btn-solid { background: var(--accent); color: var(--paper); }
-  .btn-solid:hover { background: var(--accent-2); border-color: var(--accent-2); color: var(--paper); }
-  .btn-ghost { color: var(--accent); }
-  .btn-ghost:hover { background: var(--wash); }
+  .btn-solid { background: var(--teal); border-color: var(--teal); color: var(--paper); }
+  .btn-solid:hover { background: var(--teal-dk); border-color: var(--teal-dk); color: var(--paper); }
+  .btn-ghost { color: var(--teal-lt); }
+  .btn-ghost:hover { background: var(--raised); color: var(--paper); }
 
   figure { margin: 34px 0 10px; }
-  figure img { display: block; width: 100%; border: 1px solid var(--hair); border-radius: 3px; }
+  figure img {
+    display: block; width: 100%;
+    border: 1px solid var(--hair); border-radius: 3px;
+  }
   figcaption {
     font-family: var(--mono); font-size: 12px; color: var(--faint);
     margin-top: 9px; padding-left: 2px;
   }
 
   section { padding: 30px 0; border-top: 1px solid var(--hair); }
-  section:first-of-type { border-top: none; }
 
   .steps { counter-reset: step; margin: 18px 0 0; padding: 0; list-style: none; }
   .steps li { position: relative; padding: 0 0 20px 46px; }
@@ -98,7 +103,7 @@
     counter-increment: step; content: counter(step, decimal-leading-zero);
     position: absolute; left: 0; top: 1px;
     font-family: var(--mono); font-size: 12px; font-weight: 600;
-    letter-spacing: 1.5px; color: var(--accent);
+    letter-spacing: 1.5px; color: var(--teal-lt);
   }
   .steps li p { margin: 0; color: var(--muted); }
 
@@ -108,18 +113,18 @@
   .points p { margin: 0; color: var(--muted); }
 
   pre {
-    background: var(--wash); border: 1px solid var(--hair); border-radius: 3px;
+    background: var(--raised); border: 1px solid var(--hair); border-radius: 3px;
     padding: 16px 18px; overflow-x: auto;
-    font-family: var(--mono); font-size: 13.5px; line-height: 1.62; color: var(--ink);
+    font-family: var(--mono); font-size: 13.5px; line-height: 1.62; color: var(--paper);
     margin: 16px 0;
   }
   pre .c { color: var(--faint); }
-  pre .k { color: var(--accent-2); font-weight: 600; }
+  pre .k { color: var(--teal-lt); font-weight: 600; }
 
   table { width: 100%; border-collapse: collapse; margin: 16px 0 6px; font-size: 15.5px; }
   th {
     text-align: left; font-family: var(--mono); font-size: 11.5px; font-weight: 600;
-    letter-spacing: 1.4px; text-transform: uppercase; color: var(--accent);
+    letter-spacing: 1.4px; text-transform: uppercase; color: var(--teal-lt);
     padding: 0 10px 8px 0; border-bottom: 1px solid var(--hair);
   }
   td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--hair); vertical-align: top; }
@@ -128,10 +133,10 @@
   .fig { font-variant-numeric: tabular-nums; }
 
   .callout {
-    background: var(--wash); border-left: 3px solid var(--accent);
+    background: var(--raised); border-left: 3px solid var(--teal-lt);
     padding: 14px 18px; margin: 18px 0; color: var(--muted);
   }
-  .callout strong { color: var(--ink); }
+  .callout strong { color: var(--paper); }
 
   footer {
     border-top: 1px solid var(--hair); margin-top: 22px; padding: 24px 0 60px;
@@ -139,7 +144,7 @@
     display: flex; flex-wrap: wrap; gap: 18px; justify-content: space-between;
   }
   footer a { color: var(--muted); text-decoration: none; }
-  footer a:hover { color: var(--accent); }
+  footer a:hover { color: var(--teal-lt); }
   footer nav { display: flex; flex-wrap: wrap; gap: 18px; }
 
   @media (max-width: 640px) {
@@ -259,18 +264,19 @@
 
   <section id="install">
     <p class="eyebrow">Install</p>
-    <h2>Five minutes, no keys.</h2>
-<pre><span class="c"># Python 3.10+, and the agent CLIs you already use</span>
-pip install -e .
+    <h2>One command sets it up.</h2>
+<pre>pip install -e .
 
-<span class="k">moot</span> init --human you
-<span class="k">moot</span> agents add claude claude --cwd .
-<span class="k">moot</span> agents add codex  codex  --cwd .
-<span class="k">moot</span> install              <span class="c"># register MCP servers where a CLI needs one</span>
-<span class="k">moot</span> doctor               <span class="c"># one real turn per seat, proves each reaches the board</span>
+<span class="k">moot</span> setup            <span class="c"># finds your CLIs, seats them, registers, and proves it works</span>
 <span class="k">moot</span> tui</pre>
+    <p class="muted">
+      <code>moot setup</code> detects which agent CLIs are installed, registers a
+      seat for each, wires up the MCP servers that need it, and spends one real
+      turn per seat to prove it can reach the board. Everything it does has a
+      plain command behind it if you would rather do it by hand.
+    </p>
     <div class="callout">
-      <strong>moot doctor checks the board, not the exit code.</strong>
+      <strong>It checks the board, not the exit code.</strong>
       A CLI can start, load the MCP server, decline to call it and exit 0 — a
       return-code check goes green while the seat is mute.
     </div>

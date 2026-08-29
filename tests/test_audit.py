@@ -126,3 +126,51 @@ def test_a_cancelled_wake_kills_the_child_process():
     asyncio.run(go())
     # The child is killed inside _run's handler; reaching here without the event
     # loop complaining about a live transport is the observable part.
+
+
+# ------------------------------------------------------------------- setup
+
+def test_setup_seats_what_it_finds_and_wires_it_in_order(tmp_path, monkeypatch):
+    """The order is the point: a seat of certain kinds posts under the wrong name
+    until its own MCP server exists, so registration has to happen before
+    anything is woken."""
+    from moot import setup as setup_mod
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(setup_mod, "_found",
+                        lambda: [("claude", "C:/x/claude.exe"), ("codex", "C:/x/codex.cmd")])
+    installed: list[str] = []
+    monkeypatch.setattr(setup_mod, "install_seat",
+                        lambda store, name: (installed.append(name), (True, "registered"))[1])
+    probed: list[str] = []
+
+    async def fake_doctor(store, only=None, timeout=180.0):
+        probed.append(only or "")
+        return 0
+
+    monkeypatch.setattr("moot.doctor.run_doctor", fake_doctor)
+    monkeypatch.setattr(setup_mod, "_ask", lambda *a, **k: (a[1] if len(a) > 1 else ""))
+
+    rc = setup_mod.run(tmp_path / "board.db", assume_yes=True)
+
+    assert rc == 0
+    board = connect(tmp_path / "board.db")
+    names = {a["name"] for a in board.agents()}
+    assert {"claude", "codex"} <= names, f"seats not registered: {names}"
+    assert any(a["kind"] == "human" for a in board.agents()), "no human seat"
+    # codex needs a server of its own; claude is handed one per run.
+    assert installed == ["codex"], f"wrong seats registered: {installed}"
+    assert probed and "codex" in probed[0], "the seats were never proved"
+    board.close()
+
+
+def test_setup_stops_when_no_cli_is_installed(tmp_path, monkeypatch):
+    """A council with no seats is not a council; say so rather than leaving an
+    empty board that looks set up."""
+    from moot import setup as setup_mod
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(setup_mod, "_found", lambda: [])
+    monkeypatch.setattr(setup_mod, "_ask", lambda *a, **k: (a[1] if len(a) > 1 else ""))
+
+    assert setup_mod.run(tmp_path / "board.db", assume_yes=True) == 1

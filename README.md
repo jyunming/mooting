@@ -82,11 +82,7 @@ pip install moot            # once published
 # or, from a clone:
 pip install -e .
 
-moot init --human you
-moot agents add claude claude --cwd .
-moot agents add codex  codex  --cwd .
-moot install                # register MCP servers where a CLI needs one
-moot doctor                 # spends one real turn per seat, proves each reaches the board
+moot setup                  # finds your CLIs, seats them, wires them up, proves it works
 moot tui
 ```
 
