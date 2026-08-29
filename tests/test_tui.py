@@ -713,3 +713,47 @@ async def test_a_message_can_be_read_in_full_after_it_scrolls_away(tmp_path, boa
     text = " ".join(said)
     assert "I disagree" in text
     assert f"replying to #{mid}" in text and "claude" in text
+
+
+@pytest.mark.asyncio
+async def test_proposal_numbers_are_not_message_numbers(tmp_path, board):
+    """Two counters, and typing one where the other is expected quotes the wrong
+    thing without complaining. The screen has to say which is which."""
+    app = app_for(tmp_path, board)
+    for i in range(4):                       # push message ids away from proposal ids
+        board.post(app.board.topic_id, "claude", f"filler {i}", count_turn=False)
+    pid = board.propose(app.board.topic_id, "claude", "Adopt backoff", "body")
+    msg_id = board.proposal(pid)["message_id"]
+    assert pid != msg_id, "the fixture needs the two counters to differ"
+
+    said: list[str] = []
+    async with app.run_test() as pilot:
+        app.write_line = lambda item: said.append(str(item))
+        app.board.emit = app.write_line
+        app.board.handle(f"/proposals {pid}")
+
+    text = " ".join(said)
+    assert f"proposal #{pid}" in text
+    assert f"/quote {msg_id}" in text, "the message id to reply to must be given"
+
+
+@pytest.mark.asyncio
+async def test_minutes_can_be_written_decisions_only(tmp_path, board, monkeypatch):
+    """What you hand to someone is usually what was ruled; the transcript is the
+    evidence behind it, not the thing itself."""
+    monkeypatch.chdir(tmp_path)
+    app = app_for(tmp_path, board)
+    board.post(app.board.topic_id, "claude", "SOME-LONG-ARGUMENT", count_turn=False)
+    pid = board.propose(app.board.topic_id, "claude", "Adopt backoff", "with jitter")
+    board.decide(pid, "me", approve=True, rationale="agreed")
+
+    async with app.run_test() as pilot:
+        await type_line(pilot, app, "/minutes decisions")
+        await type_line(pilot, app, "/minutes")
+
+    brief = (tmp_path / "t-decisions.md").read_text(encoding="utf-8")
+    full = (tmp_path / "t-minutes.md").read_text(encoding="utf-8")
+
+    assert "Adopt backoff" in brief and "agreed" in brief
+    assert "SOME-LONG-ARGUMENT" not in brief, "the transcript should be omitted"
+    assert "SOME-LONG-ARGUMENT" in full, "the full minutes should keep it"

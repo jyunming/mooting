@@ -72,7 +72,7 @@ COMMANDS = {
     "/tasks": "the work plan and where each task has got to",
     "/quote": "reply to the last message; or /quote <seat> | <id>",
     "/me": "<name> -- what the council calls you",
-    "/minutes": "write this meeting out as markdown, decisions and all",
+    "/minutes": "write the meeting out; /minutes decisions for the rulings only",
     "/rounds": "<n> -- grant the council more rounds on this topic",
     "/seats": "who is here; /seats add <agent> | /seats rm <agent>",
     "/topic": "<slug> -- switch to another topic",
@@ -395,7 +395,8 @@ class Console:
             ("/seats rm <agent>", "remove one; what it already said stays"),
             ("/rounds <n>", "grant more rounds when a topic runs out"),
             ("/tasks", "the work plan and where each task has got to"),
-            ("/minutes [file]", "write this meeting out as markdown"),
+            ("/minutes", "write the meeting out as markdown"),
+            ("/minutes decisions", "the rulings and work log, without the transcript"),
         ]),
         ("Clearing up", [
             ("/rm [slug] yes", "delete a topic (omit slug for this one)"),
@@ -513,8 +514,18 @@ class Console:
         from pathlib import Path as _Path
 
         from .minutes import default_path, render
-        text = render(self.store, self.topic_id)
-        path = _Path(rest.strip() or default_path(self.store, self.topic_id))
+        words = rest.split()
+        # "decisions" first, because what you usually want to hand to someone is
+        # what was ruled -- the transcript is the evidence behind it, not the
+        # thing itself.
+        brief = bool(words) and words[0] in {"decisions", "decision", "-d"}
+        if brief:
+            words = words[1:]
+        stem = default_path(self.store, self.topic_id)
+        if brief:
+            stem = stem.replace("-minutes.md", "-decisions.md")
+        text = render(self.store, self.topic_id, transcript=not brief)
+        path = _Path(words[0] if words else stem)
         try:
             path.write_text(text, encoding="utf-8")
         except OSError as exc:
@@ -523,7 +534,8 @@ class Console:
         decided = [p for p in self.store.proposals(self.topic_id)
                    if p["status"] in {"approved", "rejected"}]
         self.emit(f"{DIM}wrote {path.resolve()} — {len(text.splitlines())} lines, "
-                  f"{len(decided)} decision(s){RESET}")
+                  f"{len(decided)} decision(s)"
+                  f"{', transcript omitted' if brief else ''}{RESET}")
 
     def _quote(self, rest: str) -> None:
         """Attach your next message to one already said.
@@ -658,8 +670,10 @@ class Console:
         for p in rows:
             votes = ", ".join(f"{v['agent']}:{v['stance']}"
                               for v in self.store.votes(p["id"]))
-            self.emit(f"  #{p['id']} [{p['status']}] {p['title']}  {DIM}{votes}{RESET}")
-        self.emit(f"{DIM}/proposals <id> for the whole thing{RESET}")
+            self.emit(f"  proposal #{p['id']} [{p['status']}] {p['title']}  "
+                      f"{DIM}{votes}{RESET}")
+        self.emit(f"{DIM}/proposals <n> for the whole thing — those are proposal "
+                  f"numbers, not the #n beside a message{RESET}")
 
     def _proposal_detail(self, pid: int) -> None:
         """Everything behind a one-line summary.
@@ -674,8 +688,12 @@ class Console:
             self.emit(f"{RED}{exc}{RESET}")
             return
         self.emit("")
-        self.emit(f"{BOLD}#{p['id']} {p['title']}{RESET}  {DIM}[{p['status']}] "
-                  f"by {p['author']}{RESET}")
+        self.emit(f"{BOLD}proposal #{p['id']} {p['title']}{RESET}  "
+                  f"{DIM}[{p['status']}] by {p['author']}{RESET}")
+        # Proposal numbers and message numbers are different counters, and typing
+        # one where the other is expected quotes the wrong thing without complaint.
+        self.emit(f"{DIM}posted as message #{p['message_id']} — "
+                  f"/quote {p['message_id']} to reply to it{RESET}")
         if p["decided_by"]:
             self.emit(f"{DIM}ruled {p['status']} by {p['decided_by']} "
                       f"{p['decided_at'] or ''}{RESET}")
