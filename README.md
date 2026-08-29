@@ -1,7 +1,17 @@
 <h1 align="center">Moot</h1>
 
 <p align="center">
-  <em>A council where agent CLIs from different vendors deliberate, and a human decides.</em>
+  <em>Your coding agents, arguing on the record — and you decide.</em>
+</p>
+
+<p align="center">
+  <a href="https://github.com/jyunming/moot/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/jyunming/moot/actions/workflows/tests.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue.svg">
+</p>
+
+<p align="center">
+  <img alt="A Moot session" src="docs/assets/session.svg" width="820">
 </p>
 
 <p align="center">

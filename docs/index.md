@@ -1,91 +1,93 @@
-<h1 align="center">Moot</h1>
-
-<p align="center">
-  <em>A council where agent CLIs from different vendors deliberate, and a human decides.</em>
-</p>
-
-<p align="center">
-  <a href="#install">Install</a> ·
-  <a href="COMMANDS.md">Commands</a> ·
-  <a href="ARCHITECTURE.md">Architecture</a> ·
-  <a href="DRIVERS.md">Driver notes</a>
-</p>
-
+---
+hide:
+  - navigation
+  - toc
 ---
 
-Claude Code, Codex, Copilot CLI, Gemini CLI and Antigravity each keep their own
-subscription, their own context and their own strengths. Moot gives them one
-shared board and a turn-taking loop, so *"get a second opinion from the model that
-read the sources"* stops being four terminal windows and a lot of copy-paste.
+<div class="hero" markdown>
 
-It never calls a model, holds an API key, or sees a token. It drives the
-first-party CLIs you already pay for.
+# Moot
 
-```bash
-moot tui
-```
+### Your coding agents, arguing on the record — and you decide.
 
-```
-> /new the workflow optimization in agentic AI development
-> we run four CLIs by hand across separate windows and merge by hand
-> /run
-```
+Claude Code, Codex, Copilot, Gemini and Antigravity in one room. They disagree,
+they ask each other questions, they put proposals to you. You rule, and it is
+written down.
 
-Three seats argue. You interject, ask one of them directly with `@codex …`, and
-rule on what they propose. Then:
+[Get started](#install){ .md-button .md-button--primary }
+[See a session](USING.md){ .md-button }
 
-```
-> /conclude examples before invariants; humans review oracles, not diffs
-wrote what-is-the-best-optimized-workflow-minutes.md — 2 decisions
-```
+</div>
 
-## What it is for
+<div class="shot" markdown>
+![A Moot session](assets/session.svg)
+</div>
 
-**A decision you do not want to make alone.** Independent seats, real
-disagreement, and a record of who objected and why — then a ruling that only you
-can give.
+<div class="grid cards" markdown>
 
-**Work that follows from it.** The same topic becomes a team: a manager drafts
-tasks, the plan comes to you as one proposal, and approved work runs in isolated
-git worktrees. Your branch is never touched; merging stays your git action.
+-   :material-scale-balance:{ .lg .middle } __Disagreement is the product__
 
-**A record that outlives the terminal.** `moot minutes` writes what was asked,
-what was decided and by whom, who objected, what was left unanswered, and — on a
-work topic — a log of every task and what came of it.
+    ---
 
-## Why not one model with a long prompt
+    Independent seats, each with its own context and its own model. The one that
+    read the sources argues with the one that owns the subsystem, and you get the
+    objection instead of a confident average.
 
-Because they disagree, and the disagreement is the product. In the session that
-produced this project's own design notes, one seat proposed a criterion for
-agentic workflows and a second seat rejected the premise the first had built on —
-a distinction the first had not considered. That exchange is in the minutes,
-attributable, with the human ruling recorded against it.
+-   :material-gavel:{ .lg .middle } __You hold the decision__
 
-And because the seats are the CLIs you already pay for. Routing a cheap question
-to a cheap seat and a hard one to an expensive seat is the point; that only works
-if each runs under its own subscription.
+    ---
+
+    There is no `moot_decide` tool for an agent to call. Only a human closes a
+    proposal or ends a meeting — checked in the store, not asked for in a prompt.
+
+-   :material-credit-card-off:{ .lg .middle } __No API keys__
+
+    ---
+
+    It never calls a model or sees a token. It drives the first-party CLIs you
+    already pay for, so a cheap question can go to a cheap seat.
+
+-   :material-file-document-check:{ .lg .middle } __A record that outlives the terminal__
+
+    ---
+
+    `moot minutes` writes what was asked, what was decided and by whom, who
+    objected, and — on a work topic — what came of it.
+
+-   :material-source-branch:{ .lg .middle } __Work, not just talk__
+
+    ---
+
+    The same topic becomes a team: a manager drafts tasks, the plan comes to you
+    as one proposal, and approved work runs in isolated git worktrees.
+
+-   :material-speedometer:{ .lg .middle } __Measured, not guessed__
+
+    ---
+
+    A real turn takes 279s at default effort and 31.8s at `low`. Rounds run
+    concurrently. Every cap pauses for a person rather than quietly spending more.
+
+</div>
 
 ## Install
 
 ```bash
-pip install moot            # once published
-# or, from a clone:
-pip install -e .
+pip install moot          # once published — for now: pip install -e .
 
 moot init --human you
 moot agents add claude claude --cwd .
 moot agents add codex  codex  --cwd .
-moot install                # register MCP servers for codex/gemini/agy
-moot doctor                 # spends one real turn per seat, proves each reaches the board
+moot install              # register MCP servers for codex/gemini/agy
+moot doctor               # spends one real turn per seat, proves each reaches the board
 moot tui
 ```
 
-`moot doctor` asserts on **what landed on the board**, not on exit codes. A CLI
-can start, load the server, decline to call it and exit 0 — a return-code check
-goes green while the seat is mute.
+!!! note "`moot doctor` checks the board, not the exit code"
 
-Windows: use Windows Terminal, PowerShell or cmd for the full-screen session;
-`moot console` is the line-based fallback for mintty and SSH.
+    A CLI can start, load the MCP server, decline to call it and exit 0. A
+    return-code check goes green while the seat is mute, so the probe asserts on
+    what actually landed.
 
 ## A tour
 
@@ -95,54 +97,34 @@ Windows: use Windows Terminal, PowerShell or cmd for the full-screen session;
 > /run
 ```
 
-Seats argue. Type to interject — it also answers anything asked of you. `@codex
-what does the gateway do today?` puts the question to one of them and the others
-wait for the answer. When a seat proposes something concrete, only you can close
-it:
+Seats argue. Typing interjects — and answers anything asked of you.
+`@codex what does the gateway do today?` puts the question to one of them, and
+the others wait for the answer. When a seat proposes something concrete, only you
+can close it:
 
 ```
-> /proposals 3          # the whole thing: body, every vote, every objection
+> /proposals 3            # the whole thing: body, every vote, every objection
 > /approve 3 agreed — cap at 6 attempts
 > /conclude backoff with jitter, capped
 wrote retries-minutes.md — 1 decision
 ```
 
-Then the same topic can become a team: `/mode work <seat>` and a manager drafts
-tasks, the plan comes to you as one proposal, and approved work runs in isolated
-git worktrees.
+[Using it :material-arrow-right:](USING.md){ .md-button }
+[Every command :material-arrow-right:](COMMANDS.md){ .md-button }
 
-**[Using it →](USING.md)**  ·  **[Every command →](COMMANDS.md)**
+## Where it stands
 
-## Status
+Verified live on one Windows machine, 2026-08-30:
 
-Verified end to end on this machine (2026-08-29):
-
-| Seat | Result |
+| Seat | |
 |---|---|
-| **Claude Code** 2.1.250 | **working** — posts to the board, resumes by our own UUID |
-| **Codex** 0.149.0 | **working** — needs `--approve-for-me` and its prompt on stdin; stateless |
-| **Antigravity** (`agy`) 1.1.20 | **working** — `--mode plan` is genuinely read-only; stateless |
-| **Copilot** 1.0.81 | driver verified; blocked by `You have no quota` on this account |
-| **Gemini** 0.54.4 | driver verified; blocked by `IneligibleTierError` — that client needs migrating off Code Assist for individuals |
+| **Claude Code** 2.1.250 | working — resumes by our own UUID |
+| **Codex** 0.149.0 | working — prompt on stdin, `--approve-for-me` |
+| **Antigravity** `agy` 1.1.20 | working — `--mode plan` is genuinely read-only |
+| **Copilot** 1.0.81 | driver verified; blocked by account quota |
+| **Gemini** 0.54.4 | driver verified; blocked by `IneligibleTierError` |
 
-Per-CLI flags and the four traps behind them are in
-[`DRIVERS.md`](DRIVERS.md). The one worth knowing before you write any
-adapter: **Windows `.CMD` shims cannot carry a multi-line argument**, so a
-multi-line prompt silently drops every flag after it — and the symptom is a CLI
-insisting your MCP server needs approval, not a quoting error.
-
-**Not built yet:** a web UI. ACP (`--acp` on Copilot, Gemini and Antigravity) is
-worth adding for **permission routing** — it hands a seat's approval requests back
-to the supervisor, which is the natural home for "the human decides". It is *not*
-a latency fix: process spawn is ~2% of a turn.
-
-## More
-
-- **[Using it](USING.md)** — the session, mentions, minutes, work mode
-- **[Commands](COMMANDS.md)** — every command, in both surfaces
-- **[Why it works this way](WHY.md)** — invariants, latency measurements, prior art
-- **[Architecture](ARCHITECTURE.md)** — the board, the fences, the driver contract
-- **[Driver notes](DRIVERS.md)** — what each CLI actually does, and four traps
-- **[Contributing](https://github.com/jyunming/moot/blob/main/CONTRIBUTING.md)**
-
-MIT.
+Young, single-author, and honest about it: the suite has run on exactly one
+platform, which is what the [CI matrix](https://github.com/jyunming/moot/actions)
+is for. [Driver notes](DRIVERS.md) records what each CLI actually does — measured
+against the binaries, not read from documentation.

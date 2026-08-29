@@ -1,0 +1,72 @@
+/* A landing page that is mostly a wall of prose asks the reader to work out
+   what the thing is. These give the first screen a shape: a hero, the actual
+   product, then what it does. */
+
+:root {
+  --md-primary-fg-color:        #4c5b8c;
+  --md-primary-fg-color--dark:  #2f3a5c;
+  --md-accent-fg-color:         #6f7fbd;
+}
+
+.hero {
+  text-align: center;
+  padding: 2.4rem 1rem 1.2rem;
+}
+.hero h1 {
+  font-size: 3.4rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin: 0 0 .3rem;
+  line-height: 1;
+}
+.hero h3 {
+  font-weight: 500;
+  font-size: 1.35rem;
+  line-height: 1.35;
+  margin: 0 auto .9rem;
+  max-width: 34rem;
+  color: var(--md-default-fg-color--light);
+}
+.hero p {
+  max-width: 36rem;
+  margin: 0 auto 1.6rem;
+  color: var(--md-default-fg-color--light);
+}
+.hero .md-button { margin: .2rem .3rem; }
+
+/* The screenshot is the argument, so give it room and let it breathe. */
+.shot {
+  margin: 0 auto 2.6rem;
+  max-width: 62rem;
+}
+.shot img {
+  width: 100%;
+  border-radius: .6rem;
+  box-shadow: 0 .6rem 2.4rem rgba(0, 0, 0, .28);
+}
+
+/* Cards: same rhythm as the hero, no heavy borders. */
+.md-typeset .grid.cards > ul > li {
+  border: none;
+  border-radius: .6rem;
+  padding: 1.1rem 1.2rem;
+  background: var(--md-code-bg-color);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.md-typeset .grid.cards > ul > li:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 .4rem 1.2rem rgba(0, 0, 0, .16);
+}
+.md-typeset .grid.cards > ul > li > hr {
+  margin: .5rem 0 .7rem;
+  border-color: var(--md-default-fg-color--lightest);
+}
+.md-typeset .grid.cards .twemoji svg { fill: var(--md-accent-fg-color); }
+
+/* Home has no sidebars, so let the content use the width. */
+.md-content { max-width: 58rem; margin: 0 auto; }
+
+@media screen and (max-width: 44rem) {
+  .hero h1 { font-size: 2.4rem; }
+  .hero h3 { font-size: 1.1rem; }
+}
