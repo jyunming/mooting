@@ -222,8 +222,11 @@ def test_a_worker_that_finishes_without_reporting_is_not_left_stranded(team, tmp
 
 def _git(*args, cwd):
     import subprocess
-    return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True,
-                          text=True, encoding="utf-8", errors="replace")
+    try:
+        return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True,
+                              text=True, encoding="utf-8", errors="replace")
+    except FileNotFoundError:                    # no git at all: skip, do not error
+        pytest.skip("git unavailable")
 
 
 @pytest.fixture()
