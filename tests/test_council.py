@@ -346,15 +346,31 @@ def test_effort_resolves_topic_over_seat_over_council(board):
 
 # ------------------------------------------------ when the council asks the human
 
-def test_asking_a_human_does_not_stall_a_room_that_can_still_talk(board):
-    """A brainstorming council should not freeze because one seat asked you
-    something -- the others may still have things to say."""
+def test_a_question_to_a_human_stops_the_room(board):
+    """The room waits for whoever was asked. Talking over the person you just
+    asked means their answer lands in a conversation that has moved on without
+    the fact only they had."""
     topic = open_debate(board)
     board.ask(topic, "claude", "human", "Where does the gateway config live?")
 
     sup = Supervisor(board, {})
-    assert sup._eligible(topic), "other seats should still be free to speak"
-    assert sup._blocking_reason(topic) is None
+    reason = sup._blocking_reason(topic)
+    assert reason and "waiting on you" in reason
+
+    board.post(topic, "human", "ops/gateway.yaml", count_turn=False)
+    assert sup._blocking_reason(topic) is None, "answering should release the room"
+
+
+def test_a_question_to_an_agent_narrows_the_round_to_them(board):
+    """Same rule, applied to a peer: nobody else speaks until they answer."""
+    topic = open_debate(board)
+    board.ask(topic, "claude", "gemini", "You read R08 — does that hold?")
+
+    sup = Supervisor(board, {})
+    assert sup._eligible(topic) == ["gemini"]
+
+    board.post(topic, "gemini", "No, p.114 says otherwise.")
+    assert set(sup._eligible(topic)) >= {"claude", "codex"}
 
 
 def test_the_unanswered_question_is_why_the_council_stopped(board):
@@ -502,3 +518,34 @@ def test_removing_a_seat_keeps_what_it_said(board):
     assert any(m["author"] == "codex" for m in board.transcript(topic))
     with pytest.raises(StoreError):
         board.agent("codex")
+
+
+def test_the_catchup_excerpt_is_bounded(board):
+    """A failed wake leaves the cursor unadvanced, so an unbounded excerpt grows
+    every attempt -- which is how a real prompt reached 44,845 chars and blew the
+    Windows command-line limit."""
+    topic = open_debate(board)
+    for i in range(60):
+        board.post(topic, "claude", f"message {i} " + "x" * 800, count_turn=False)
+
+    sup = Supervisor(board, {}, Caps(max_catchup_chars=4000))
+    prompt, _ = sup.build_prompt(topic, "codex")
+
+    assert len(prompt) < 12_000, f"excerpt not bounded: {len(prompt)}"
+    assert "left out" in prompt, "dropping history silently is worse than saying so"
+    assert "message 59" in prompt, "the newest exchange is what a seat needs"
+
+
+def test_an_oversized_argv_prompt_is_reported_as_itself(board):
+    """WinError 206 surfaces as FileNotFoundError, so an over-long prompt
+    otherwise reports as 'the CLI is not installed'."""
+    import asyncio
+    from agora.drivers.base import Seat
+    from agora.drivers.spawn import ClaudeDriver
+
+    d = ClaudeDriver("db")
+    seat = Seat(1, "t", "claude", "claude", None, {})
+    r = asyncio.run(d.wake(seat, "x" * 30_000))
+
+    assert not r.ok
+    assert "30,000 chars" in r.detail and "Windows caps" in r.detail

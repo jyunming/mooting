@@ -87,6 +87,13 @@ class Driver(abc.ABC):
     #: stdio_json | acp | spawn | none
     kind: str = "none"
 
+    #: Windows caps a command line at 32,767 characters, and a prompt delivered
+    #: as argv counts against it. Past that, CreateProcess raises
+    #: FileNotFoundError [WinError 206] -- which reads as "the CLI is not
+    #: installed" and sends you to debug entirely the wrong thing. Adapters that
+    #: can take the prompt on stdin are exempt.
+    max_argv_prompt: int = 24_000
+
     #: Wall-clock ceiling for one turn. A CLI that hangs must not hold a topic
     #: hostage -- on timeout the supervisor records the wake and moves on.
     timeout_s: float = 300.0

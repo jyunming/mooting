@@ -121,6 +121,11 @@ class SpawnDriver(Driver):
     async def wake(self, seat: Seat, prompt: str) -> WakeResult:
         session = seat.cli_session if self.stateful else None
         proposed = session or (self.new_session(seat) if self.stateful else None)
+        if not self.prompt_via_stdin and len(prompt) > self.max_argv_prompt:
+            return WakeResult.failure(
+                f"prompt is {len(prompt):,} chars; {self.binary} takes it as a "
+                f"command-line argument and Windows caps that near 32k. Lower "
+                f"Caps.max_catchup_chars, or trim the topic.")
         argv = self.argv(seat, prompt, proposed)
         argv[0] = self.resolve_binary()
         stdin = prompt if self.prompt_via_stdin else None
@@ -131,7 +136,13 @@ class SpawnDriver(Driver):
         except asyncio.TimeoutError:
             return WakeResult.failure(
                 f"{self.binary} exceeded {seat.timeout_s or self.timeout_s}s")
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
+            # WinError 206 is also a FileNotFoundError, and reporting it as "not on
+            # PATH" is how a too-long prompt disguises itself as a missing CLI.
+            if getattr(exc, "winerror", None) == 206:
+                return WakeResult.failure(
+                    f"command line too long for {self.binary} ({len(prompt):,} "
+                    f"chars of prompt)")
             return WakeResult.failure(f"{self.binary} is not on PATH")
 
         tail = (out[-4000:] + ("\n[stderr]\n" + err[-2000:] if err.strip() else ""))

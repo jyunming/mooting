@@ -81,6 +81,15 @@ class Caps:
     #: A real task runs for many minutes. The deliberation ceiling would kill
     #: legitimate work part-way through and leave a half-finished worktree.
     work_timeout_s: float = 1800.0
+    #: Ceiling on the catch-up excerpt in a wake prompt.
+    #:
+    #: Unbounded, this compounds into a doom loop: a failed wake leaves the seat's
+    #: cursor unadvanced, so the next attempt carries *more* history, which makes
+    #: failure likelier. Observed live -- an agy prompt reached 44,845 characters
+    #: and blew the Windows command-line limit, having grown across three failed
+    #: wakes. It is also simply expensive: nobody needs 45k characters of debate
+    #: replayed to say one thing.
+    max_catchup_chars: int = 12_000
     #: Consecutive silent turns across all seats that mean the debate is spent.
     quiet_rounds_to_settle: int = 1
 
@@ -521,9 +530,13 @@ class Supervisor:
                 if not outstanding:
                     return f"proposal #{p['id']} ({p['title']!r}) awaits a human decision"
 
-        # A question put to a human does not stop the room mid-flight -- the others
-        # may still have things to say, and a brainstorming council should not
-        # stall on one ask.
+        # A question waits for its answer. If a human was asked, nobody else
+        # speaks until they reply -- the alternative is a room that talks over the
+        # person it just asked, and by the time they answer the debate has moved
+        # on without the fact only they had.
+        for m in self.store.open_mentions(topic_id):
+            if self.store.is_human(m["target"]):
+                return f"{m['asker']} is waiting on you: {m['question'].strip()[:200]}"
         if not self._eligible(topic_id):
             return self._human_ask_reason(topic_id)
         return None
@@ -566,10 +579,17 @@ class Supervisor:
 
         ordered: list[str] = []
         # A mention buys priority, not budget: a capped seat is still not woken.
-        for m in self.store.open_mentions(topic_id):
+        asked = self.store.open_mentions(topic_id)
+        for m in asked:
             s = seats.get(m["target"])
             if s is not None and s["agent"] not in ordered and can_speak(s):
                 ordered.append(s["agent"])
+
+        # An outstanding question narrows the round to whoever was asked. Letting
+        # the others carry on means the answer arrives into a conversation that
+        # has already moved past the question.
+        if asked:
+            return ordered
 
         for s in seats.values():
             if s["agent"] in ordered or s["last_seen"] >= head:
@@ -646,11 +666,23 @@ class Supervisor:
         if msgs:
             lines.append("## Since you last spoke")
             lines.append("")
-            for m in msgs:
-                if m["author"] == agent:
+            # Newest first into a budget, then flipped back: when there is too much
+            # to replay, the recent exchange is what a seat needs to answer.
+            kept, spent, elided = [], 0, 0
+            for m in reversed([m for m in msgs if m["author"] != agent]):
+                body = m["body"].strip()
+                if spent + len(body) > self.caps.max_catchup_chars and kept:
+                    elided += 1
                     continue
+                kept.append((m, body))
+                spent += len(body)
+            if elided:
+                lines.append(f"_({elided} earlier message(s) left out — "
+                             f"`agora_read` for the full transcript.)_")
+                lines.append("")
+            for m, body in reversed(kept):
                 lines.append(f"**{m['author']}** ({m['kind']}):")
-                lines.append(m["body"].strip())
+                lines.append(body)
                 lines.append("")
         else:
             lines += ["## Since you last spoke", "", "_Nothing new -- you are opening._", ""]
