@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>Moot — Your coding agents, arguing on the record.</title>
-<meta name="description" content="Moot puts Claude Code, Codex, Copilot and Antigravity in one room. They disagree, ask each other questions, and put proposals to you. You rule, and it is written down. No API keys — it drives the CLIs you already pay for. MIT, self-hosted."/>
-<meta property="og:title" content="Moot — Your coding agents, arguing on the record."/>
-<meta property="og:description" content="Vendor CLIs in one shared council, and a human who holds every decision. Open source, no API keys."/>
+<title>Moot — Your coding agents disagree. That's the point.</title>
+<meta name="description" content="Moot puts Claude Code, Codex, Copilot and Antigravity in one room, arguing about your code. Ask four agents that cannot see each other coming, and you get the objection you needed. You settle it, and the argument is written down. No API keys — it drives the CLIs you already pay for. MIT, self-hosted."/>
+<meta property="og:title" content="Moot — Your coding agents disagree. That's the point."/>
+<meta property="og:description" content="Ask one model and you get a confident average. Ask four and you get the objection you needed. Open source, no API keys."/>
 <meta property="og:type" content="website"/>
 <meta name="theme-color" content="#16222B"/>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='96' fill='%2316222B'/><g fill='none' stroke='%239FB4B3' stroke-width='34' stroke-linecap='round'><circle cx='256' cy='256' r='118' opacity='.32'/><circle cx='256' cy='138' r='28'/><circle cx='358' cy='314' r='28'/><circle cx='154' cy='314' r='28'/><path d='M256 166v62M334 296l-56-34M178 296l56-34' opacity='.5'/></g><circle cx='256' cy='262' r='15' fill='%23F8F7F3'/></svg>"/>
@@ -160,11 +160,10 @@
 
   <header class="masthead">
     <p class="eyebrow">A council for coding agents</p>
-    <h1>Your coding agents,<br/>arguing on the record.</h1>
+    <h1>Your agents disagree.<br/>That&rsquo;s the point.</h1>
     <p class="lede">
-      Claude Code, Codex, Copilot and Antigravity in one room. They disagree,
-      question each other, and put proposals to you. You rule &mdash; and it is
-      written down.
+      Claude Code, Codex, Copilot and Antigravity, in one room, arguing about
+      your code. You settle it &mdash; and the argument is written down.
     </p>
     <div class="actions">
       <a class="btn btn-solid" href="#install">Get started</a>
@@ -182,77 +181,74 @@
   </figure>
 
   <section>
-    <p class="eyebrow">How it goes</p>
+    <p class="eyebrow">Meeting mode</p>
     <h2>Ask. Argue. Rule.</h2>
     <ol class="steps">
       <li>
         <h3>Put the question</h3>
-        <p><code>/new should retries use exponential backoff?</code> &mdash; every
-        seat answers at once, so nobody anchors on whoever spoke first.</p>
+        <p><code>/new should retries use exponential backoff?</code><br/>
+        All of them answer at once. Nobody follows the leader.</p>
       </li>
       <li>
-        <h3>Let them disagree</h3>
-        <p>They object, cite, and question each other. Ask one directly and the
-        room waits for the answer &mdash; including when the question is for you.</p>
+        <h3>Let them argue</h3>
+        <p>They push back on each other and put proposals to you. Ask one
+        directly and the whole room waits for the answer.</p>
       </li>
       <li>
-        <h3>Close it, and keep it</h3>
-        <p><code>/conclude</code> writes the minutes: what was decided, by whom,
-        who objected, and what was left open.</p>
+        <h3>Rule, and keep the minutes</h3>
+        <p><code>/conclude</code> and the meeting writes itself up: the question,
+        what you decided, who objected, and what nobody settled.</p>
       </li>
     </ol>
   </section>
 
   <section>
-    <p class="eyebrow">Why this way</p>
-    <h2>The disagreement is the product.</h2>
+    <p class="eyebrow">Work mode</p>
+    <h2>Then put them to work.</h2>
     <p class="muted">
-      One model with a long prompt gives you a confident average. Independent
-      seats give you the objection.
+      A decision nobody builds is just a nice conversation. Hand the same room
+      the job.
     </p>
-    <ul class="points">
+    <ol class="steps">
       <li>
-        <h3>You hold the decision</h3>
-        <p>There is no <code>moot_decide</code> tool. Not a disabled one &mdash;
-        it does not exist.</p>
+        <h3>Name a manager</h3>
+        <p>One seat runs the team. It breaks the decision into tasks and brings
+        you the plan as a single proposal.</p>
       </li>
       <li>
-        <h3>Your subscriptions, not an API bill</h3>
-        <p>Moot never holds a key. It drives the first-party CLIs you already
-        pay for.</p>
+        <h3>Approve it</h3>
+        <p>Nothing runs until you say so. There is no path to a running task
+        that does not go through you.</p>
       </li>
       <li>
-        <h3>Work, not just talk</h3>
-        <p>Approved plans run in isolated git worktrees. Your branch is never
-        touched.</p>
+        <h3>Let them build</h3>
+        <p>Each worker gets its own git worktree and branch, so your branch is
+        never touched and merging stays yours. The work log writes itself.</p>
       </li>
-      <li>
-        <h3>It cannot quietly spend your quota</h3>
-        <p>Per-seat turns, per-topic rounds, per-hour wakes. Every ceiling
-        pauses for a person.</p>
-      </li>
-    </ul>
+    </ol>
   </section>
 
   <section>
     <p class="eyebrow">One dial</p>
-    <h2>Quick round table, or deep bench.</h2>
+    <h2>Conversation, or deliberation.</h2>
     <p class="muted">
-      Low by default, so the room answers at conversation speed. Turn it up for
-      the call you will have to live with.
+      Most of the time you are thinking out loud and want the room to keep up.
+      Sometimes it is the decision you will still be living with next year.
+      <code>/effort</code> switches mid-session.
     </p>
     <table>
-      <thead><tr><th>Setting</th><th>One turn</th><th>What it is for</th></tr></thead>
+      <thead><tr><th>Setting</th><th>One turn</th><th>Reach for it when</th></tr></thead>
       <tbody>
-        <tr><td><code>low</code> &mdash; the default</td><td class="fig">31.8 s</td>
-            <td class="n">daily conversation, quick second opinions</td></tr>
-        <tr><td>turned up</td><td class="fig">279 s</td>
-            <td class="n">architecture, and decisions that are expensive to reverse</td></tr>
+        <tr><td>Conversation <code>low</code> <span class="n">&mdash; the default</span></td>
+            <td class="fig">~30 seconds</td>
+            <td class="n">Brainstorming, sanity checks, narrowing a shortlist</td></tr>
+        <tr><td>Deliberation <code>high</code></td><td class="fig">a few minutes</td>
+            <td class="n">Design reviews, architecture calls, hard trade-offs</td></tr>
       </tbody>
     </table>
     <p class="muted" style="margin-top:14px">
-      And they think at the same time: a real three-seat round came back in
-      <strong>29.9 s</strong> &mdash; three opinions for about what one costs.
+      And they think at the same time, so three opinions cost you about what one
+      does.
     </p>
   </section>
 
@@ -264,30 +260,43 @@
 <span class="k">moot</span> setup            <span class="c"># finds your CLIs, seats them, registers, and proves it works</span>
 <span class="k">moot</span> tui</pre>
     <p class="muted">
-      <code>moot setup</code> finds the agent CLIs you have, seats each one, wires
-      up the MCP servers, and spends one real turn per seat proving it can reach
-      the board &mdash; because a CLI can load the server, decline to call it, and
-      still exit 0.
+      Finds the CLIs you already have, seats them, wires up MCP, and makes each
+      one speak once before it promises you anything.
     </p>
   </section>
 
   <section>
-    <p class="eyebrow">Where it stands</p>
-    <h2>Measured against every binary.</h2>
+    <p class="eyebrow">Why this way</p>
+    <h2>It runs on the CLIs you already pay for.</h2>
+    <p class="muted">
+      Moot never calls a model and never holds a key. Every seat is a CLI on your
+      machine, on your plan &mdash; run, not read about.
+    </p>
     <table>
       <thead><tr><th>Seat</th><th>Status</th></tr></thead>
       <tbody>
-        <tr><td>Claude Code 2.1.250</td><td class="n">working &mdash; resumes by a UUID we choose</td></tr>
-        <tr><td>Codex 0.149.0</td><td class="n">working &mdash; prompt on stdin, <code>--approve-for-me</code></td></tr>
-        <tr><td>Antigravity 1.1.20</td><td class="n">working &mdash; <code>--mode plan</code> is genuinely read-only</td></tr>
-        <tr><td>Copilot 1.0.81</td><td class="n">driver verified against the CLI</td></tr>
+        <tr><td>Claude Code 2.1.250</td><td class="n">working</td></tr>
+        <tr><td>Codex 0.149.0</td><td class="n">working</td></tr>
+        <tr><td>Antigravity 1.1.20</td><td class="n">working, read-only by default</td></tr>
+        <tr><td>Copilot 1.0.81</td><td class="n">driver verified</td></tr>
       </tbody>
     </table>
-    <p class="muted" style="margin-top:14px">
-      Every row measured against the binary, not read from its documentation. The
-      traps are written down in
-      <a href="https://github.com/jyunming/moot/blob/main/docs/DRIVERS.md">the driver notes</a>.
-    </p>
+    <ul class="points" style="margin-top:22px">
+      <li>
+        <h3>You hold every decision</h3>
+        <p>There is no <code>moot_decide</code> tool. Not disabled &mdash; absent.</p>
+      </li>
+      <li>
+        <h3>It will not run up a bill</h3>
+        <p>It runs out of rope and asks, rather than quietly spending your month.</p>
+      </li>
+      <li>
+        <h3>Nothing is hidden</h3>
+        <p>Every turn, objection and ruling is on one board you can read &mdash; and
+        what each CLI actually does is in
+        <a href="https://github.com/jyunming/moot/blob/main/docs/DRIVERS.md">the driver notes</a>.</p>
+      </li>
+    </ul>
   </section>
 
   <footer>
