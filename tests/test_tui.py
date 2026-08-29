@@ -475,3 +475,95 @@ async def test_each_seat_gets_a_distinct_tinted_band(tmp_path, board):
             {"author": "agora", "kind": "system", "body": "paused"})
         sys_padded = [p for p in sys_parts if isinstance(p, Padding)]
         assert all(p.style.bgcolor is None for p in sys_padded)
+
+
+@pytest.mark.asyncio
+async def test_a_mention_with_punctuation_finds_the_seat_and_starts_them(tmp_path, board):
+    """"@agy, what do you think?" reported "'agy,' holds no seat on this topic",
+    and asking started nothing at all -- the @ branch returned before the wake."""
+    app = app_for(tmp_path, board)
+    started: list[str] = []
+    async with app.run_test() as pilot:
+        app.board.auto = True
+        app.drive = lambda: started.append("drive")     # don't spawn a real CLI
+        await type_line(pilot, app, "@codex, what do you think?")
+        await pilot.pause()
+
+    asks = board.open_mentions(app.board.topic_id)
+    assert [(a["asker"], a["target"]) for a in asks] == [("me", "codex")]
+    assert asks[0]["question"].endswith("what do you think?")
+    assert started, "asking a question must wake the council, not sit there"
+
+
+@pytest.mark.asyncio
+async def test_running_out_of_rounds_says_so(tmp_path, board):
+    """Silently doing nothing is indistinguishable from being ignored."""
+    app = app_for(tmp_path, board, max_rounds=1)
+    said: list[str] = []
+    async with app.run_test() as pilot:
+        app.board.auto = True
+        app.write_line = lambda item: said.append(str(item))
+        app.board.emit = app.write_line
+        app.drive = lambda: said.append("DRIVE")
+        await type_line(pilot, app, "anything")
+
+    text = " ".join(said)
+    assert "out of rounds" in text and "/rounds" in text
+    assert "DRIVE" not in text
+
+
+@pytest.mark.asyncio
+async def test_quoting_attaches_a_reply_and_shows_what_it_answers(tmp_path, board):
+    """Like a chat client: say which message you are answering."""
+    app = app_for(tmp_path, board)
+    mid = board.post(app.board.topic_id, "claude",
+                     "fresh-context review catches more requirement errors",
+                     count_turn=False)
+    async with app.run_test() as pilot:
+        app.board.auto = False
+        await type_line(pilot, app, f"/quote {mid}")
+        assert app.board._quoting == mid
+        await type_line(pilot, app, "only for wrong-behaviour bugs")
+
+        posted = board.transcript(app.board.topic_id)[-1]
+        assert posted["reply_to"] == mid
+        assert app.board._quoting is None, "the quote should not stick to the next one"
+
+        quoted = app._quoted_line(posted)
+        assert quoted is not None and "claude" in str(quoted)
+
+
+@pytest.mark.asyncio
+async def test_ansi_from_the_console_is_decoded_not_printed(tmp_path, board):
+    """Console styles with ANSI escapes; a Rich widget takes them literally, which
+    put black boxes behind the help text and corrupted the lines around it."""
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        log = app.query_one("#transcript", RichLog)
+        got: list = []
+        original = log.write
+        log.write = lambda item, *a, **k: (got.append(item), original(item, *a, **k))[1]
+        app.board.handle("/help")
+        await pilot.pause()
+
+    assert got, "help wrote nothing"
+    for item in got:
+        assert "\x1b" not in str(item), f"raw ANSI reached the widget: {item!r}"
+
+
+@pytest.mark.asyncio
+async def test_the_input_box_says_what_to_do_when_you_are_asked(tmp_path, board):
+    """The clearest place to say "answer here" is the box you would type into."""
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        box = app.query_one("#say", Input)
+        assert "type to speak" in box.placeholder
+
+        board.ask(app.board.topic_id, "claude", "me", "Where is the config?")
+        app.refresh_board()
+        await pilot.pause()
+
+        assert "answer" in box.placeholder and "claude" in box.placeholder
+        assert box.has_class("waiting")

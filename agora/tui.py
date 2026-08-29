@@ -66,9 +66,10 @@ SEAT_COLOURS = ("#7dcfff",   # sky
 
 
 #: How much of a seat's colour to mix into the background behind its messages.
-#: Low on purpose: the point is to group a reply visually, not to highlight it.
-#: Much above this and a four-way argument becomes a colour chart.
-TINT = 0.13
+#: Very low on purpose: the point is to group a reply, not to highlight it. 0.13
+#: read as a coloured block rather than a tint; this is a hint you notice only
+#: when scanning for who said what.
+TINT = 0.055
 
 
 def tint_for(colour: str, base: Color) -> str:
@@ -82,6 +83,20 @@ def tint_for(colour: str, base: Color) -> str:
         return base.blend(Color.parse(colour), TINT).hex
     except Exception:          # an unparseable colour must not cost you the message
         return ""
+
+
+def field(row, key, default=None):
+    """Read a column that may not be there.
+
+    Rows arrive from a few places -- a full sqlite3.Row, a dict built by a
+    caller -- and sqlite3.Row has no .get(). A renderer should not fall over
+    because one optional column is absent.
+    """
+    try:
+        value = row[key]
+    except (KeyError, IndexError):
+        return default
+    return default if value is None else value
 
 
 def seat_colours(names) -> dict:
@@ -147,6 +162,9 @@ class AgoraApp(App):
     }
     #status { height: 1; background: $boost; color: $text; padding: 0 1; }
     Input { border: round $accent; }
+    /* When the council is blocked on you, the box you would type into is the
+       thing that should be shouting -- not a line elsewhere on the screen. */
+    Input.waiting { border: round $warning; background: $warning 8%; }
     """
     BINDINGS = [
         ("ctrl+r", "run", "Run council"),
@@ -199,10 +217,19 @@ class AgoraApp(App):
     # ------------------------------------------------------------- rendering
 
     def write_line(self, item) -> None:
-        """Console.emit target. Takes a markup string or any Rich renderable, and
-        a list of either -- messages render as several pieces."""
+        """Console.emit target: a markup string, a Rich renderable, or a list.
+
+        Console styles its output with ANSI escapes, because that is what a plain
+        terminal understands. A Rich widget does not: the escapes went in as
+        literal control characters, which is what put black boxes behind the help
+        text and corrupted the lines around it. Anything carrying an escape is
+        decoded; anything else is treated as Rich markup, which is what the TUI's
+        own strings use.
+        """
         log = self.query_one("#transcript", RichLog)
         for part in (item if isinstance(item, list) else [item]):
+            if isinstance(part, str) and "\x1b" in part:
+                part = Text.from_ansi(part)
             log.write(part)
 
     def notify_turn(self, why: str) -> None:
@@ -220,6 +247,23 @@ class AgoraApp(App):
 
     def colour_for(self, name: str) -> str:
         return self._palette.get(name, "cyan")
+
+    def _quoted_line(self, m):
+        """A one-line echo of what this message is replying to.
+
+        Enough to know what is being answered without scrolling back, and no more
+        -- a full quote of a long argument would bury the reply to it.
+        """
+        ref = field(m, "reply_to")
+        if not ref:
+            return None
+        row = self.board.store.quoted(int(ref))
+        if row is None:
+            return None
+        preview = " ".join(row["body"].split())[:80]
+        return Text.assemble(("│ ", "dim"),
+                             (row["author"], f"dim {self.colour_for(row['author'])}"),
+                             (f": {preview}…", "dim italic"))
 
     def base_colour(self) -> Color:
         """The background actually behind the transcript, so tints follow the theme."""
@@ -258,11 +302,18 @@ class AgoraApp(App):
         # System notes and rulings are about the board rather than a person, so
         # they stay untinted -- that is what makes them read as not-a-seat.
         bg = Style() if system else self.tint_style(m["author"])
-        header = Text.assemble((m["author"], colour), (tag, "dim"), style=bg)
+        # The id is what /quote takes, so it has to be visible without being loud.
+        ident = field(m, "id")
+        header = Text.assemble((m["author"], colour), (tag, "dim"),
+                               (f"   #{ident}" if ident else "", "dim"), style=bg)
+        pieces = []
+        quoted = self._quoted_line(m)
+        if quoted is not None:
+            pieces.append(Padding(quoted, (0, 1), style=bg))
         rendered = Markdown(body) if body else Text("")
         # Padding, not a bare style: it extends the band across the full width, so
         # a reply is one block rather than a ragged right edge following the text.
-        return ["", Padding(header, (0, 1), style=bg),
+        return ["", Padding(header, (0, 1), style=bg), *pieces,
                 Padding(rendered, (0, 1), style=bg)]
 
     def _render_ask(self, asker: str, question: str) -> list:
@@ -271,8 +322,9 @@ class AgoraApp(App):
                               (asker, f"bold {self.colour_for(asker)}"),
                               (" is asking you", "bold magenta")),
                 Markdown(question.strip()),
-                Text("   Type your answer below — it clears the question and the "
-                     "council resumes.", "dim")]
+                Text("   ↓ Type your answer in the box at the bottom and press "
+                     "Enter. That clears the question and the council carries on.",
+                     "bold yellow")]
 
     def refresh_board(self) -> None:
         """One tick: drain new events into the log, then repaint state."""
@@ -360,10 +412,25 @@ class AgoraApp(App):
 
     def _paint_status(self) -> None:
         b = self.board
-        asks = len(b.pending_asks())
+        waiting = b.pending_asks()
+        asks = len(waiting)
         props = len(b.store.proposals(b.topic_id, status="open"))
         if not asks and not props:
             self._waiting = None
+
+        # The clearest place to say "answer here" is the box you would type in.
+        box = self.query_one("#say", Input)
+        if waiting:
+            box.placeholder = (f"▶ type your answer to {waiting[0]['asker']} here, "
+                               f"then Enter")
+            box.add_class("waiting")
+        elif props:
+            box.placeholder = "▶ /approve <id> <why>  or  /reject <id> <why>"
+            box.add_class("waiting")
+        else:
+            box.placeholder = "type to speak · @agent to ask one seat · /help"
+            box.remove_class("waiting")
+
         bits = [f"effort {b.effort()}",
                 "driving" if b.driving.is_set() else "idle",
                 f"auto {'on' if b.auto else 'off'}"]

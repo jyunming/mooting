@@ -44,6 +44,10 @@ agora console       # the line REPL — for mintty, SSH, or piping
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+**Quoting.** Every message shows a dim `#id`; `/quote 42` attaches your next
+message to it, and the reply renders with a one-line echo of what it answers —
+enough to know what is being addressed without scrolling back.
+
 **Answering and asking is just typing.** The input at the bottom is the only one:
 type to speak, start with `@name` to ask one seat, start with `/` for a command.
 Agent replies render as **markdown** — headings, lists and code as structure, not

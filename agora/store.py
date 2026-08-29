@@ -490,6 +490,10 @@ class Store:
             args.append(target)
         return self.q(sql + " ORDER BY id", args)
 
+    def quoted(self, message_id: int):
+        """The message a reply is attached to, if any."""
+        return self.q1("SELECT * FROM messages WHERE id = ?", (message_id,))
+
     def ask(self, topic_id: int, asker: str, target: str, question: str) -> int:
         """Explicit @: post the question and direct it at one seat."""
         if not self.seat(topic_id, target):

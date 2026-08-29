@@ -40,7 +40,7 @@ import threading
 import time
 from pathlib import Path
 
-from .store import Store, StoreError, connect, slugify
+from .store import MENTION_RE, Store, StoreError, connect, slugify
 
 try:  # optional, but the difference between usable and not
     from prompt_toolkit import PromptSession
@@ -65,6 +65,8 @@ COMMANDS = {
     "/reject": "<id> <why>",
     "/proposals": "what is waiting on you",
     "/tasks": "the work plan and where each task has got to",
+    "/quote": "<id> -- attach your next message to that one",
+    "/rounds": "<n> -- grant the council more rounds on this topic",
     "/seats": "who is here; /seats add <agent> | /seats rm <agent>",
     "/topic": "<slug> -- switch to another topic",
     "/new": "<what you want to discuss> -- opens a topic, same seats",
@@ -166,6 +168,8 @@ class Console:
         #: pick it up, you see the replies, you answer again. /auto off restores
         #: the explicit-only behaviour.
         self.auto = True
+        #: Message id this reply is attached to, set by /quote and cleared on post.
+        self._quoting: int | None = None
         #: Where command output goes. The REPL prints; the TUI writes to a widget.
         #: Both drive the same `handle()`, so a command cannot behave differently
         #: in one surface than the other -- two dispatchers would drift.
@@ -280,6 +284,7 @@ class Console:
             "proposals": self._proposals, "seats": self._seats, "topic": self._switch,
             "tasks": self._tasks, "new": self._new, "mode": self._mode,
             "manager": self._manager, "rm": self._rm, "reset": self._reset,
+            "quote": self._quote, "rounds": self._rounds,
         }.get(cmd)
         if cmd in {"approve", "reject"}:
             self._decide(cmd, rest)
@@ -293,31 +298,54 @@ class Console:
         if not self._require_topic():
             return True
         if line.startswith("@"):
-            target, _, question = line[1:].partition(" ")
-            if not question.strip():
+            # "@agy, what do you think?" -- punctuation after a name is normal
+            # writing, and taking it as part of the name produced the baffling
+            # "'agy,' holds no seat on this topic".
+            m = MENTION_RE.match(line)
+            target = m.group(1) if m else ""
+            question = line[m.end():].lstrip(" ,:;-–—") if m else ""
+            if not target or not question.strip():
                 self.emit(f"{RED}usage: @agent your question{RESET}")
                 return True
             try:
                 self.store.ask(self.topic_id, self.me, target, question.strip())
-                self.emit(f"{DIM}asked {target} — they answer next{RESET}")
             except StoreError as exc:
                 self.emit(f"{RED}{exc}{RESET}")
+                return True
+            self.emit(f"{DIM}asked {target}{RESET}")
+            # Falls through to the wake below. Returning here is why asking a
+            # question started nothing and the council just sat there.
+            self._after_post(asked=target)
             return True
 
         answered = self.pending_asks()
         # count_turn=False: a human joining never spends an agent's metered turn.
-        self.store.post(self.topic_id, self.me, line, count_turn=False)
+        self.store.post(self.topic_id, self.me, line, count_turn=False,
+                        reply_to=self._quoting)
+        self._quoting = None
         if answered:
             who = ", ".join(sorted({a["asker"] for a in answered}))
             self.emit(f"{DIM}answers {who}{RESET}")
-        if self.auto and not self.driving.is_set():
-            # What you just said is new board state, so every seat is behind again
-            # and the council has something to react to. Making you type /run here
-            # is what made this feel like a batch job rather than a conversation.
-            self._run("")
-        elif not self.driving.is_set():
-            self.emit(f"{DIM}council idle — /run when you want them to pick it up{RESET}")
+        self._after_post()
         return True
+
+    def _after_post(self, asked: str | None = None) -> None:
+        """Anything you say is new board state, so the council has something to
+        react to. Making you type /run here is what made this a batch job."""
+        if self.driving.is_set():
+            return
+        topic = self.store.topic(self.topic_id)
+        if topic["round"] + 1 >= topic["max_rounds"]:
+            # Out of rounds: say so rather than silently doing nothing, which is
+            # indistinguishable from being ignored.
+            self.emit(f"{DIM}this topic is out of rounds "
+                      f"({topic['round'] + 1}/{topic['max_rounds']}) — "
+                      f"/rounds 3 to grant more{RESET}")
+            return
+        if self.auto:
+            self._run("")
+        else:
+            self.emit(f"{DIM}/run when you want them to pick it up{RESET}")
 
     #: Grouped, because a flat alphabetical list of eighteen commands answers
     #: "what exists" and not "what do I do now" -- and the answer to the second is
@@ -326,6 +354,7 @@ class Console:
         ("Talking", [
             ("<anything>", "post it — and it clears any question waiting on you"),
             ("@agent <question>", "ask one seat; the others wait for their answer"),
+            ("/quote <id>", "attach your next message to that one, like a reply"),
         ]),
         ("Running the council", [
             ("/run", "start it (posting starts it too, unless /auto off)"),
@@ -348,6 +377,7 @@ class Console:
             ("/seats", "who is here, budget left, who owes an answer"),
             ("/seats add <agent>", "seat another CLI on this topic"),
             ("/seats rm <agent>", "remove one; what it already said stays"),
+            ("/rounds <n>", "grant more rounds when a topic runs out"),
             ("/tasks", "the work plan and where each task has got to"),
         ]),
         ("Clearing up", [
@@ -441,6 +471,40 @@ class Console:
                 self.emit(f"       {DIM}{t['branch']}{RESET}")
             if t["result"]:
                 self.emit(f"       {t['result'].strip()[:200]}")
+
+    def _quote(self, rest: str) -> None:
+        if not self._require_topic():
+            return
+        ref = rest.strip().lstrip("#")
+        if not ref.isdigit():
+            self.emit(f"{RED}usage: /quote <message id>{RESET}   "
+                      f"{DIM}ids are the dim #n beside each message{RESET}")
+            return
+        row = self.store.q1("SELECT * FROM messages WHERE id = ? AND topic_id = ?",
+                            (int(ref), self.topic_id))
+        if row is None:
+            self.emit(f"{RED}no message #{ref} on this topic{RESET}")
+            return
+        self._quoting = int(ref)
+        preview = " ".join(row["body"].split())[:90]
+        self.emit(f"{DIM}replying to #{ref} {row['author']}: {preview}…{RESET}")
+        self.emit(f"{DIM}type your reply, or /quote 0 to drop it{RESET}")
+        if ref == "0":
+            self._quoting = None
+
+    def _rounds(self, rest: str) -> None:
+        if not self._require_topic():
+            return
+        if not rest.strip().isdigit():
+            t = self.store.topic(self.topic_id)
+            self.emit(f"  round {t['round'] + 1} of {t['max_rounds']}   "
+                      f"{DIM}/rounds <n> to grant more{RESET}")
+            return
+        with self.store.tx() as c:
+            c.execute("UPDATE topics SET max_rounds = max_rounds + ? WHERE id = ?",
+                      (int(rest), self.topic_id))
+        t = self.store.topic(self.topic_id)
+        self.emit(f"{DIM}now round {t['round'] + 1} of {t['max_rounds']}{RESET}")
 
     def _seat_change(self, verb: str, agent: str) -> None:
         """Add or remove a seat on this topic.
