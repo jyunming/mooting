@@ -20,6 +20,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from moot.store import connect          # noqa: E402
 from moot.tui import MootApp            # noqa: E402
 
+#: One copy, in docs/. The marketing page reaches it with ../docs/assets/ rather
+#: than keeping its own -- two copies of a generated file drift the moment one is
+#: regenerated and the other is not.
 OUT = pathlib.Path(__file__).resolve().parent.parent / "docs" / "assets"
 
 
