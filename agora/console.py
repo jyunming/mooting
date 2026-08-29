@@ -35,6 +35,7 @@ deep on the branch worth it.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import threading
@@ -81,6 +82,7 @@ COMMANDS = {
     "/new": "<what you want to discuss> -- opens a topic, same seats",
     "/mode": "debate | discuss | work <agent> -- what kind of topic this is",
     "/manager": "<agent> -- reassign the manager (work topics only)",
+    "/capability": "<agent> execute <dir> -- let a seat edit files there",
     "/rm": "<slug> -- delete a topic; /rm yes for this one",
     "/reset": "clear every topic; add `yes` to confirm",
     "/help": "this list",
@@ -293,6 +295,7 @@ class Console:
             "proposals": self._proposals, "seats": self._seats, "topic": self._switch,
             "tasks": self._tasks, "new": self._new, "mode": self._mode,
             "manager": self._manager, "rm": self._rm, "reset": self._reset,
+            "capability": self._capability,
             "quote": self._quote, "rounds": self._rounds, "me": self._me,
             "minutes": self._minutes, "show": self._show,
             "conclude": self._conclude, "reopen": self._reopen,
@@ -392,6 +395,7 @@ class Console:
             ("/topic <slug>", "switch to another"),
             ("/mode debate|discuss", "argue to find the flaw / build together"),
             ("/mode work <agent>", "team mode; that seat plans and reviews"),
+            ("/capability <agent> execute <dir>", "let a seat edit files in that repo"),
             ("/seats", "who is here, budget left, who owes an answer"),
             ("/seats add <agent>", "seat one already registered"),
             ("/seats add <name> <cli>", "register a new seat and seat it"),
@@ -987,6 +991,62 @@ class Console:
             self.emit(f"{DIM}mode → {mode} — no roles; everyone argues on equal footing"
                       f"{RESET}")
         self.on_topic_change()
+
+    def _capability(self, rest: str) -> None:
+        """Grant or revoke a seat's ability to change files.
+
+        Kept as its own gesture rather than folded into /seats or /mode, because
+        it is the one escalation here that matters: a seat woken by a daemon with
+        write access is a different risk class from one you are watching. It still
+        takes two keys -- this, and an approved task on a work topic -- so
+        granting it does not by itself let anything run.
+        """
+        if not self._require_topic():
+            return
+        words = rest.split()
+        if len(words) < 2 or words[1] not in {"execute", "deliberate"}:
+            self.emit(f"{DIM}/capability <agent> execute <dir>   let it edit files "
+                      f"there{RESET}")
+            self.emit(f"{DIM}/capability <agent> deliberate      take that back"
+                      f"{RESET}")
+            for s_ in self.store.seats(self.topic_id):
+                if s_["kind"] in {"human", "external"}:
+                    continue
+                cfg_ = json.loads(dict(self.store.agent(s_["agent"]))["driver_cfg"])
+                where = cfg_.get("cwd", "")
+                self.emit(f"  {s_['agent']:<12} {cfg_.get('capability', 'deliberate')}"
+                          f"  {DIM}{where}{RESET}")
+            return
+
+        agent, level = words[0], words[1]
+        try:
+            meta = self.store.agent(agent)
+        except StoreError as exc:
+            self.emit(f"{RED}{exc}{RESET}")
+            return
+        cfg = json.loads(meta["driver_cfg"])
+
+        if level == "deliberate":
+            cfg.pop("capability", None)
+            self.store.add_agent(agent, meta["kind"], display=meta["display"],
+                                 driver=meta["driver"], driver_cfg=cfg)
+            self.emit(f"{DIM}{agent} can no longer change files{RESET}")
+            return
+
+        where = " ".join(words[2:]).strip() or cfg.get("cwd") or os.getcwd()
+        path = Path(where).expanduser()
+        if not path.is_dir():
+            self.emit(f"{RED}{path} is not a directory{RESET}")
+            self.emit(f"{DIM}name the repo it should work in: /capability {agent} "
+                      f"execute C:/path/to/repo{RESET}")
+            return
+        cfg["capability"] = "execute"
+        cfg["cwd"] = str(path.resolve())
+        self.store.add_agent(agent, meta["kind"], display=meta["display"],
+                             driver=meta["driver"], driver_cfg=cfg)
+        self.emit(f"{YELLOW}{agent} may now edit files in {path.resolve()}{RESET}")
+        self.emit(f"{DIM}only for a task you have approved on a work topic, and only "
+                  f"in its own git worktree{RESET}")
 
     def _manager(self, rest: str) -> None:
         if not self._require_topic():

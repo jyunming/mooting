@@ -17,6 +17,7 @@ pytest.importorskip("textual")
 
 from textual.widgets import DataTable, Input, RichLog, Static  # noqa: E402
 
+from agora.drivers import FakeDriver
 from agora.store import StoreError, connect                          # noqa: E402
 from agora.tui import AgoraApp                           # noqa: E402
 
@@ -1097,3 +1098,38 @@ async def test_the_hints_are_in_letter_order(tmp_path, board):
 
     at = [cmd for cmd, _why in app._hint_rows("@")]
     assert at == sorted(at)
+
+
+@pytest.mark.asyncio
+async def test_execute_can_be_granted_in_session_but_stays_two_keys(tmp_path, board):
+    """Granting write access is its own gesture, because it is the one escalation
+    that matters -- and it still does not by itself let anything run."""
+    import json
+    app = app_for(tmp_path, board)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    async with app.run_test() as pilot:
+        await type_line(pilot, app, f"/capability codex execute {repo}")
+        cfg = json.loads(board.agent("codex")["driver_cfg"])
+        assert cfg["capability"] == "execute"
+        assert cfg["cwd"] == str(repo.resolve())
+
+        # A directory that does not exist is refused rather than quietly accepted.
+        await type_line(pilot, app, "/capability claude execute C:/definitely/not/here")
+        assert "capability" not in json.loads(board.agent("claude")["driver_cfg"])
+
+        await type_line(pilot, app, "/capability codex deliberate")
+        assert "capability" not in json.loads(board.agent("codex")["driver_cfg"])
+
+        # The second key: a meeting topic never wakes a seat to execute, whatever
+        # its capability says.
+        from agora.supervisor import Supervisor
+        await type_line(pilot, app, f"/capability codex execute {repo}")
+        got: list[bool] = []
+        driver = FakeDriver(board,
+                            script=lambda st, seat, p: (got.append(seat.executing)
+                                                        or "ok"))
+        await Supervisor(board, {"codex": driver}).wake_seat(app.board.topic_id,
+                                                             "codex")
+        assert got == [False], "a meeting wake must never be an executing wake"

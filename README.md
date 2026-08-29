@@ -282,6 +282,25 @@ that disagreement is the product will **manufacture** disagreement to justify
 spending a turn. That is exactly what you want when you are stress-testing a
 decision, and exactly wrong when the room is trying to design something.
 
+## From a discussion to actual work
+
+A topic that has argued its way to an answer becomes a team without leaving the
+session:
+
+```
+> /capability Algae execute D:/proj    # Algae may edit files, in that repo
+> /mode work Santa                     # Santa plans and reviews
+> /run                                 # Santa drafts tasks, then stops
+> /proposals                           # the plan, as one proposal
+> /approve 9 go                        # only this releases any work
+> /run                                 # workers execute, in their own worktrees
+> /tasks                               # where each one got to
+> /conclude shipped                    # closes it and writes the minutes + work log
+```
+
+The seats keep the discussion behind them, so the manager plans from what was
+actually argued rather than from a fresh brief.
+
 ## Meeting mode and team mode
 
 `debate` and `discuss` argue about **what to do**. `work` does it:
