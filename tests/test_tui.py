@@ -508,8 +508,12 @@ async def test_running_out_of_rounds_says_so(tmp_path, board):
         await type_line(pilot, app, "anything")
 
     text = " ".join(said)
-    assert "out of rounds" in text and "/rounds" in text
-    assert "DRIVE" not in text
+    # You typing is the authorisation: one round is granted so the conversation
+    # you are sitting in continues, and only one, so it cannot run off unattended.
+    assert "granted one more" in text and "DRIVE" in text
+    assert board.topic("t")["max_rounds"] == 2
+    # ...and the seats get the turns to use it, or they stay capped and silent.
+    assert all(s["max_turns"] == 2 for s in board.seats(app.board.topic_id))
 
 
 @pytest.mark.asyncio
@@ -576,17 +580,37 @@ async def test_typing_a_slash_offers_the_commands(tmp_path, board):
     app = app_for(tmp_path, board)
     async with app.run_test() as pilot:
         await pilot.pause()
-        hint = app.query_one("#hint", Static)
+        from textual.widgets import OptionList
+        hint = app.query_one("#hint", OptionList)
         assert not hint.has_class("showing"), "the hint should cost nothing at rest"
+
+        def offered():
+            return [hint.get_option_at_index(i).id for i in range(hint.option_count)]
 
         app.query_one("#say", Input).value = "/se"
         await pilot.pause()
         assert hint.has_class("showing")
-        assert "/seats" in str(hint.content)
+        assert any(o.startswith("/seats") for o in offered())
 
-        app.query_one("#say", Input).value = "@c"
+        # A bare slash lists everything, so nothing has to be guessed.
+        app.query_one("#say", Input).value = "/"
         await pilot.pause()
-        assert "@claude" in str(hint.content) and "@codex" in str(hint.content)
+        assert hint.option_count > 10, f"only {hint.option_count} commands offered"
+
+        # Arrows walk it without taking the cursor out of the box.
+        assert hint.highlighted == 0
+        await pilot.press("down")
+        await pilot.pause()
+        await pilot.press("down")
+        await pilot.pause()
+        assert hint.highlighted == 2
+        assert app.focused is app.query_one("#say", Input)
+
+        # Tab takes the highlighted one, ready for its arguments.
+        chosen = offered()[2].split(" ")[0]
+        await pilot.press("tab")
+        await pilot.pause()
+        assert app.query_one("#say", Input).value == chosen + " "
 
         app.query_one("#say", Input).value = "just talking"
         await pilot.pause()
@@ -626,3 +650,25 @@ async def test_a_seat_can_be_created_and_renamed_from_the_session(tmp_path, boar
     assert board.seat(app.board.topic_id, "jyunming") is not None
     with pytest.raises(StoreError):
         board.agent("me")
+
+
+@pytest.mark.asyncio
+async def test_quoting_does_not_require_hunting_for_an_id(tmp_path, board):
+    """The thing you want to answer is almost always the last thing said."""
+    app = app_for(tmp_path, board)
+    first = board.post(app.board.topic_id, "claude", "fresh context catches more",
+                       count_turn=False)
+    last = board.post(app.board.topic_id, "codex", "only for wrong behaviour",
+                      count_turn=False)
+    async with app.run_test() as pilot:
+        await type_line(pilot, app, "/quote")            # the latest, from anyone
+        assert app.board._quoting == last
+
+        await type_line(pilot, app, "/quote claude")     # that seat's latest
+        assert app.board._quoting == first
+
+        await type_line(pilot, app, f"/quote {last}")    # or an explicit id
+        assert app.board._quoting == last
+
+        await type_line(pilot, app, "/quote 0")          # and off again
+        assert app.board._quoting is None

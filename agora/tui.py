@@ -42,7 +42,9 @@ from textual.color import Color
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, Footer, Header, Input, RichLog, Static
+from textual.widgets import (DataTable, Footer, Header, Input, OptionList, RichLog,
+                             Static)
+from textual.widgets.option_list import Option
 
 from .console import Console
 from .store import StoreError, connect
@@ -163,8 +165,8 @@ class AgoraApp(App):
     #status { height: 1; background: $boost; color: $text; padding: 0 1; }
     /* Grows only while you are typing a command, so it never costs space when
        you are reading. */
-    #hint { height: auto; max-height: 8; background: $panel; padding: 0 1;
-            color: $text-muted; display: none; }
+    #hint { height: auto; max-height: 10; background: $panel; border: none;
+            padding: 0 1; display: none; }
     #hint.showing { display: block; }
     Input { border: round $accent; }
     /* When the council is blocked on you, the box you would type into is the
@@ -199,7 +201,7 @@ class AgoraApp(App):
             with Vertical(id="side"):
                 yield DataTable(id="seats", cursor_type="none", zebra_stripes=True)
                 yield DataTable(id="work", cursor_type="none", zebra_stripes=True)
-        yield Static("", id="hint")
+        yield OptionList(id="hint")
         yield Static("", id="status")
         yield Input(placeholder="type to speak · @agent to ask one seat · /help",
                     id="say")
@@ -494,40 +496,86 @@ class AgoraApp(App):
 
     # -------------------------------------------------------------- behaviour
 
-    def on_input_changed(self, event: Input.Changed) -> None:
-        """Show what the thing you are half-way through typing could become.
-
-        Discovering commands by reading /help and remembering them is a poor deal
-        when the screen can just say. Only ever a hint -- it never completes for
-        you, because guessing wrong mid-sentence is worse than not helping.
-        """
-        text = event.value
-        hint = self.query_one("#hint", Static)
-        rows: list[str] = []
-
+    def _hint_rows(self, text: str) -> list[tuple[str, str]]:
+        """(what would be typed, how it reads) for the text so far."""
+        rows: list[tuple[str, str]] = []
         if text.startswith("/"):
             typed = text.split(" ")[0]
-            for heading, entries in self.board.HELP:
+            for _heading, entries in self.board.HELP:
                 for cmd, why in entries:
                     name = cmd.split(" ")[0]
                     if name.startswith("/") and name.startswith(typed):
-                        rows.append(f"[cyan]{cmd:<26}[/cyan] [dim]{why}[/dim]")
+                        rows.append((cmd, why))
         elif text.startswith("@") and " " not in text:
             for name in self.board.seat_names():
                 if name.startswith(text[1:]):
-                    rows.append(f"[cyan]@{name:<25}[/cyan] [dim]ask this seat "
-                                f"directly[/dim]")
+                    rows.append((f"@{name}", "ask this seat directly"))
+        return rows
 
-        if rows:
-            hint.update(chr(10).join(rows[:7]))
-            hint.add_class("showing")
-        else:
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Offer what the half-typed thing could become, arrow-navigable.
+
+        A hint you cannot browse still requires knowing what exists. `/` alone
+        lists everything, ↑/↓ walk it, and Tab takes the highlighted one -- while
+        the cursor stays in the box, because being thrown into a menu to pick a
+        command and back again is worse than typing it.
+        """
+        rows = self._hint_rows(event.value)
+        hint = self.query_one("#hint", OptionList)
+        hint.clear_options()
+        if not rows:
             hint.remove_class("showing")
+            return
+        hint.add_options([
+            Option(Text.assemble((f"{cmd:<26}", "bold cyan"), (why, "dim")), id=cmd)
+            for cmd, why in rows
+        ])
+        hint.highlighted = 0
+        hint.add_class("showing")
+
+    def _accept_hint(self) -> bool:
+        """Put the highlighted command in the box, ready for its arguments."""
+        hint = self.query_one("#hint", OptionList)
+        if not hint.has_class("showing") or hint.highlighted is None:
+            return False
+        chosen = hint.get_option_at_index(hint.highlighted).id or ""
+        # Only the command itself; the <angle brackets> are documentation, and
+        # leaving them in the box would mean deleting them before typing.
+        box = self.query_one("#say", Input)
+        box.value = chosen.split(" ")[0] + " "
+        box.cursor_position = len(box.value)
+        hint.remove_class("showing")
+        return True
+
+    def on_key(self, event) -> None:
+        """↑/↓ walk the hints and Tab takes one, without moving focus.
+
+        Handled here rather than by focusing the list: the Input owns the cursor,
+        and handing focus away mid-sentence loses your place.
+        """
+        hint = self.query_one("#hint", OptionList)
+        if not hint.has_class("showing"):
+            return
+        if event.key in ("down", "up"):
+            count = hint.option_count
+            if count:
+                cur = hint.highlighted or 0
+                hint.highlighted = (cur + (1 if event.key == "down" else -1)) % count
+            event.prevent_default()
+            event.stop()
+        elif event.key == "tab":
+            if self._accept_hint():
+                event.prevent_default()
+                event.stop()
+        elif event.key == "escape":
+            hint.remove_class("showing")
+            event.prevent_default()
+            event.stop()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         line = event.value.strip()
         event.input.value = ""
-        self.query_one("#hint", Static).remove_class("showing")
+        self.query_one("#hint", OptionList).remove_class("showing")
         if not line:
             return
         if line.startswith("/") or line.startswith("@"):

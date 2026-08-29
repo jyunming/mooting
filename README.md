@@ -247,6 +247,24 @@ sharpest argument in our first live debate came from a default-effort turn. Use
    Each adapter expresses this as one `tool_profile()` method, so the blast-radius
    decision is reviewable in one place.
 
+## Taking the meeting out
+
+```bash
+agora minutes ship-it                 # writes ship-it-minutes.md
+agora minutes ship-it --decisions-only
+```
+
+or `/minutes` from inside the session. It renders what was asked, **what was
+decided and by whom**, who objected and why, what was left unanswered, and — on a
+work topic — a **work log** of every task, its branch and what the worker reported.
+
+Two things it deliberately does not do. It does not **summarise**: minutes that
+paraphrase are minutes you have to distrust, and you cannot check them without the
+transcript you no longer have, so every position appears in the words the seat
+used. And it does not decide what the conclusion *was* — the conclusion is
+whatever a human approved, which the board already records. If nothing was
+approved it says so, rather than promoting the last confident-sounding paragraph.
+
 ## Debate or discussion
 
 A topic is framed one of two ways, and it changes what the seats do:

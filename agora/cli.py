@@ -228,6 +228,21 @@ def cmd_install(args) -> int:
     return rc
 
 
+def cmd_minutes(args) -> int:
+    """Write the meeting out as markdown."""
+    from .minutes import default_path, render
+    board = _board(args)
+    t = board.topic(int(args.topic) if args.topic.isdigit() else args.topic)
+    text = render(board, int(t["id"]), transcript=not args.decisions_only)
+    if args.out == "-":
+        print(text)
+        return 0
+    path = Path(args.out) if args.out else Path(default_path(board, int(t["id"])))
+    path.write_text(text, encoding="utf-8")
+    print(f"wrote {path}  ({len(text.splitlines())} lines)")
+    return 0
+
+
 def cmd_tasks(args) -> int:
     board = _board(args)
     t = board.topic(int(args.topic) if args.topic.isdigit() else args.topic)
@@ -469,6 +484,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("agents", nargs="?", help="comma-separated; default all seats")
     p.add_argument("--dry-run", action="store_true", help="print the command instead of running it")
     p.set_defaults(fn=cmd_install)
+
+    p = sub.add_parser("minutes", help="write the meeting out as markdown")
+    p.add_argument("topic")
+    p.add_argument("-o", "--out", help="file to write ('-' for stdout)")
+    p.add_argument("--decisions-only", action="store_true",
+                   help="skip the transcript; keep the rulings and the work log")
+    p.set_defaults(fn=cmd_minutes)
 
     p = sub.add_parser("tasks", help="the work plan and where each task has got to")
     p.add_argument("topic")

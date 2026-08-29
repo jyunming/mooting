@@ -69,8 +69,9 @@ COMMANDS = {
     "/reject": "<id> <why>",
     "/proposals": "what is waiting on you",
     "/tasks": "the work plan and where each task has got to",
-    "/quote": "<id> -- attach your next message to that one",
+    "/quote": "reply to the last message; or /quote <seat> | <id>",
     "/me": "<name> -- what the council calls you",
+    "/minutes": "write this meeting out as markdown, decisions and all",
     "/rounds": "<n> -- grant the council more rounds on this topic",
     "/seats": "who is here; /seats add <agent> | /seats rm <agent>",
     "/topic": "<slug> -- switch to another topic",
@@ -290,6 +291,7 @@ class Console:
             "tasks": self._tasks, "new": self._new, "mode": self._mode,
             "manager": self._manager, "rm": self._rm, "reset": self._reset,
             "quote": self._quote, "rounds": self._rounds, "me": self._me,
+            "minutes": self._minutes,
         }.get(cmd)
         if cmd in {"approve", "reject"}:
             self._decide(cmd, rest)
@@ -341,12 +343,15 @@ class Console:
             return
         topic = self.store.topic(self.topic_id)
         if topic["round"] + 1 >= topic["max_rounds"]:
-            # Out of rounds: say so rather than silently doing nothing, which is
-            # indistinguishable from being ignored.
-            self.emit(f"{DIM}this topic is out of rounds "
-                      f"({topic['round'] + 1}/{topic['max_rounds']}) — "
-                      f"/rounds 3 to grant more{RESET}")
-            return
+            # You typing is the authorisation. The cap exists to stop a loop
+            # running away unattended, not to make you ask permission to continue
+            # a conversation you are sitting in -- so one round is granted, and
+            # only one, so it still cannot run off on its own.
+            self.store.grant_rounds(self.topic_id, 1)
+            topic = self.store.topic(self.topic_id)
+            self.emit(f"{DIM}was out of rounds — granted one more "
+                      f"(round {topic['round'] + 1}/{topic['max_rounds']}); "
+                      f"/rounds <n> for more{RESET}")
         if self.auto:
             self._run("")
         else:
@@ -359,7 +364,8 @@ class Console:
         ("Talking", [
             ("<anything>", "post it — and it clears any question waiting on you"),
             ("@agent <question>", "ask one seat; the others wait for their answer"),
-            ("/quote <id>", "attach your next message to that one, like a reply"),
+            ("/quote", "reply to the last thing anyone said"),
+            ("/quote <seat>", "reply to that seat's latest, or /quote <id>"),
             ("/me <name>", "what the council calls you"),
         ]),
         ("Running the council", [
@@ -386,6 +392,7 @@ class Console:
             ("/seats rm <agent>", "remove one; what it already said stays"),
             ("/rounds <n>", "grant more rounds when a topic runs out"),
             ("/tasks", "the work plan and where each task has got to"),
+            ("/minutes [file]", "write this meeting out as markdown"),
         ]),
         ("Clearing up", [
             ("/rm [slug] yes", "delete a topic (omit slug for this one)"),
@@ -495,25 +502,72 @@ class Console:
         self.emit(f"{DIM}{old} → {new}, everywhere on the board{RESET}")
         self.on_topic_change()
 
+    def _minutes(self, rest: str) -> None:
+        """Take the meeting out of the board: what was asked, what was decided,
+        who objected, and what came of it."""
+        if not self._require_topic():
+            return
+        from pathlib import Path as _Path
+
+        from .minutes import default_path, render
+        text = render(self.store, self.topic_id)
+        path = _Path(rest.strip() or default_path(self.store, self.topic_id))
+        try:
+            path.write_text(text, encoding="utf-8")
+        except OSError as exc:
+            self.emit(f"{RED}could not write {path}: {exc}{RESET}")
+            return
+        decided = [p for p in self.store.proposals(self.topic_id)
+                   if p["status"] in {"approved", "rejected"}]
+        self.emit(f"{DIM}wrote {path.resolve()} — {len(text.splitlines())} lines, "
+                  f"{len(decided)} decision(s){RESET}")
+
     def _quote(self, rest: str) -> None:
+        """Attach your next message to one already said.
+
+        Hunting for an id is the wrong ask: the thing you want to answer is
+        almost always the last thing someone said, so a bare /quote takes that,
+        /quote <seat> takes that seat's latest, and an id is there when you need
+        to reach further back.
+        """
         if not self._require_topic():
             return
         ref = rest.strip().lstrip("#")
-        if not ref.isdigit():
-            self.emit(f"{RED}usage: /quote <message id>{RESET}   "
-                      f"{DIM}ids are the dim #n beside each message{RESET}")
-            return
-        row = self.store.q1("SELECT * FROM messages WHERE id = ? AND topic_id = ?",
-                            (int(ref), self.topic_id))
-        if row is None:
-            self.emit(f"{RED}no message #{ref} on this topic{RESET}")
-            return
-        self._quoting = int(ref)
-        preview = " ".join(row["body"].split())[:90]
-        self.emit(f"{DIM}replying to #{ref} {row['author']}: {preview}…{RESET}")
-        self.emit(f"{DIM}type your reply, or /quote 0 to drop it{RESET}")
-        if ref == "0":
+
+        if ref in {"0", "off", "none"}:
             self._quoting = None
+            self.emit(f"{DIM}not replying to anything{RESET}")
+            return
+
+        row = None
+        if not ref:
+            row = self.store.q1(
+                "SELECT * FROM messages WHERE topic_id = ? AND author != ? "
+                "AND kind IN ('say','propose','object','support') "
+                "ORDER BY id DESC LIMIT 1", (self.topic_id, self.me))
+            if row is None:
+                self.emit(f"{DIM}nobody has said anything to reply to yet{RESET}")
+                return
+        elif ref.isdigit():
+            row = self.store.q1("SELECT * FROM messages WHERE id = ? AND topic_id = ?",
+                                (int(ref), self.topic_id))
+            if row is None:
+                self.emit(f"{RED}no message #{ref} on this topic{RESET}")
+                return
+        else:
+            row = self.store.q1(
+                "SELECT * FROM messages WHERE topic_id = ? AND author = ? "
+                "ORDER BY id DESC LIMIT 1", (self.topic_id, ref.lstrip("@")))
+            if row is None:
+                self.emit(f"{RED}{ref!r} has not said anything here{RESET}")
+                self.emit(f"{DIM}/quote            the last thing anyone said{RESET}")
+                self.emit(f"{DIM}/quote <seat>     that seat's latest{RESET}")
+                self.emit(f"{DIM}/quote <id>       the dim #n beside a message{RESET}")
+                return
+
+        self._quoting = int(row["id"])
+        preview = " ".join(row["body"].split())[:90]
+        self.emit(f"{DIM}replying to #{row['id']} {row['author']}: {preview}…{RESET}")
 
     def _rounds(self, rest: str) -> None:
         if not self._require_topic():
@@ -523,11 +577,10 @@ class Console:
             self.emit(f"  round {t['round'] + 1} of {t['max_rounds']}   "
                       f"{DIM}/rounds <n> to grant more{RESET}")
             return
-        with self.store.tx() as c:
-            c.execute("UPDATE topics SET max_rounds = max_rounds + ? WHERE id = ?",
-                      (int(rest), self.topic_id))
+        self.store.grant_rounds(self.topic_id, int(rest))
         t = self.store.topic(self.topic_id)
-        self.emit(f"{DIM}now round {t['round'] + 1} of {t['max_rounds']}{RESET}")
+        self.emit(f"{DIM}now round {t['round'] + 1} of {t['max_rounds']}, "
+                  f"and every seat has {rest} more turn(s){RESET}")
 
     def _seat_change(self, verb: str, agent: str, kind: str = "") -> None:
         """Add or remove a seat on this topic.

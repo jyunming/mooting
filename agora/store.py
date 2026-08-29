@@ -384,6 +384,19 @@ class Store:
             return self.q("SELECT * FROM topics WHERE status = ? ORDER BY id DESC", (status,))
         return self.q("SELECT * FROM topics ORDER BY id DESC")
 
+    def grant_rounds(self, topic_id: int, n: int) -> None:
+        """More rounds, and the per-seat turns to use them.
+
+        Raising one without the other is the trap: a seat that has spent its turns
+        stays capped however many rounds you add, so the council looks alive and
+        says nothing.
+        """
+        with self.tx() as c:
+            c.execute("UPDATE topics SET max_rounds = max_rounds + ? WHERE id = ?",
+                      (n, topic_id))
+            c.execute("UPDATE seats SET max_turns = max_turns + ? WHERE topic_id = ?",
+                      (n, topic_id))
+
     def set_topic_status(self, topic_id: int, status: str, actor: str, note: str = "") -> None:
         with self.tx() as c:
             closed = "datetime('now')" if status in {"resolved", "aborted"} else "NULL"
