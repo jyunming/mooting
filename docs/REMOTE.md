@@ -159,6 +159,9 @@ question to one seat and the others wait for the answer.
 - A proposal arrives with **Approve / Reject** buttons. The reason is the reply
   it asks you for, and the button carries the proposal id, so a sign-off cannot
   land on the wrong one.
+- That happens for proposals opened **while the bot is running** — the chat picks
+  up from the board's head and never replays. `/proposals 7` fetches any proposal
+  by number, buttons included, whenever it was opened.
 - `/minutes` sends the write-up as a file; `/minutes decisions` returns the
   decisions as text; `/conclude` ends the meeting and delivers both.
 - Send a file to the chat and it is attached to the topic. Text goes into every

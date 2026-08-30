@@ -355,6 +355,21 @@ def explain_start_failure(exc) -> list[str] | None:
 RULE_PREFIX = "rule"
 
 
+def proposal_ref(text: str) -> int | None:
+    """`/proposals 3` typed in a chat, or None when it is not that.
+
+    Buttons only reach a chat through the pump, and the pump starts at the
+    board's head so it never replays. A proposal opened before the bot was
+    started -- or during a council held at the terminal -- therefore had no way
+    to get its buttons, and `/proposals 3` rendered as flat text like every
+    other command. This is the way back to them.
+
+    Pure, so it can be tested without faking aiogram.
+    """
+    m = re.fullmatch(r"/proposals?(?:@\S+)?\s+#?(\d+)", text.strip(), re.I)
+    return int(m.group(1)) if m else None
+
+
 def rule_callback(action: str, pid: int) -> str:
     if action not in {"ok", "no", "full"}:
         raise ValueError(f"unknown ruling action {action!r}")
@@ -925,6 +940,16 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             return await say(msg.chat.id,
                              f"You are not paired here. Request `{pid}` is "
                              f"waiting for a member to approve it.")
+        # Ask for a proposal by number and it comes back with its buttons,
+        # whenever it was opened.
+        want = proposal_ref(msg.text)
+        if want is not None:
+            try:
+                pr = store.proposal(want)
+            except StoreError as exc:
+                return await say(msg.chat.id, str(exc))
+            return await say_proposal(msg.chat.id, pr)
+
         slug = topic_here(msg.chat.id)
         if slug:
             # Pairing says they may take part; taking part needs a seat. Without

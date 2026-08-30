@@ -375,6 +375,27 @@ def test_forgetting_the_token_leaves_the_board_alone(tmp_path, monkeypatch):
 
 # ------------------------------------------------------- ruling from a chat
 
+def test_asking_for_a_proposal_by_number_gets_the_buttons_back():
+    """The pump starts at the board's head and never replays, so a proposal
+    opened before the bot started -- or while the council ran at the terminal --
+    could never show its buttons. Asking for it by number is the way back."""
+    from mooting.telegram import proposal_ref
+
+    assert proposal_ref("/proposals 3") == 3
+    assert proposal_ref("/proposal 3") == 3
+    assert proposal_ref("/proposals #3") == 3
+    # Telegram appends the bot name to commands in group chats.
+    assert proposal_ref("/proposals@mooting_bot 12") == 12
+    assert proposal_ref("  /PROPOSALS 7  ") == 7
+
+    # The bare listing keeps its plain-text form, and neighbouring commands are
+    # not swallowed.
+    assert proposal_ref("/proposals") is None
+    assert proposal_ref("/proposals all") is None
+    assert proposal_ref("/propose something") is None
+    assert proposal_ref("hello") is None
+
+
 def test_a_button_carries_which_proposal_it_meant():
     """`/approve 3` typed from memory on a phone is how a ruling lands on the
     wrong proposal. The button carries the id, so it cannot."""

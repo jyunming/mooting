@@ -195,6 +195,10 @@ Tap **✓ Approve** and the bot asks for the reason before it records anything:
 own callback, so your sign-off cannot land on the wrong proposal however far the
 chat has scrolled.
 
+Proposals arrive this way while the bot is running. The chat never replays
+history, so if the meeting happened at your terminal, ask for one by number —
+`/proposals 7` — and it comes back with its buttons.
+
 **Files go both ways.** Send a document to the chat and it attaches to the topic.
 `/minutes` sends the write-up back as a file. `/conclude` ends the meeting and
 delivers both.

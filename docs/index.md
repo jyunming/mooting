@@ -146,6 +146,10 @@ Tap **Approve** and the bot asks for the reason before recording anything. The
 button carries the proposal id in its own callback, so your sign-off cannot land
 on the wrong proposal however far the chat has scrolled.
 
+Proposals arrive this way while the bot is running. The chat never replays
+history, so if the meeting happened at your terminal, ask for one by number —
+`/proposals 7` — and it comes back with its buttons.
+
 Send a document to the chat and it attaches to the topic. `/minutes` sends the
 write-up back as a file. Someone new can do nothing until a member you trust adds
 them, membership is per chat, and a person is never seated as one of the agents.
