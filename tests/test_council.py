@@ -773,3 +773,39 @@ def test_attaching_something_that_is_not_there_says_so(board, tmp_path):
     topic = open_debate(board)
     with pytest.raises(StoreError):
         board.attach(topic, tmp_path / "nope.md", "human")
+
+
+def test_a_pause_quotes_the_part_addressed_to_you():
+    """Reported from a phone as "those don't seem to be a question", and they
+    were not -- they were the opening paragraph of a turn aimed at another seat.
+
+    One message naming two seats writes a mention row for each, and both store
+    the whole body, so quoting from the top showed whichever seat was addressed
+    first under a heading saying somebody was waiting on *you*."""
+    from mooting.supervisor import addressed_to
+
+    body = (
+        "@Santa Direct response on both points:\n\n"
+        "1. **On hyperscalers/fabless:** I concede that fabless giants do not "
+        "run production mask calibration.\n\n"
+        "**Final takeaway for @Jeremy:**\n"
+        "- **Rarity:** Very rare (~a few thousand globally)."
+    )
+
+    mine = addressed_to(body, "Jeremy")
+    assert mine.startswith("Final takeaway for @Jeremy"), mine
+    assert "hyperscalers" not in mine, "quoted somebody else's paragraph"
+    assert "**" not in mine, "markup leaked into a quotation that is italicised"
+
+    # The same body, for the other seat, quotes their part instead.
+    theirs = addressed_to(body, "Santa")
+    assert theirs.startswith("@Santa Direct response"), theirs
+
+
+def test_a_pause_falls_back_when_you_were_never_named():
+    """A seat can direct a turn at somebody without writing their name, so the
+    excerpt has to degrade to the opening rather than to nothing."""
+    from mooting.supervisor import addressed_to
+
+    body = "@Kevin - answering directly. I concede point 3 substantially."
+    assert addressed_to(body, "Jeremy").startswith("@Kevin - answering")

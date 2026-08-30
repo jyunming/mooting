@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import pathlib
+import re
 import subprocess
 from pathlib import Path
 from dataclasses import dataclass
@@ -176,6 +177,27 @@ def snippet(text: str, limit: int = 200) -> str:
     if space > limit * 0.6:          # only back up to a word break if it is near
         cut = cut[:space]
     return cut.rstrip(" ,.;:—-") + "…"
+
+
+def addressed_to(text: str, target: str, limit: int = 200) -> str:
+    """The part of a turn that is actually aimed at `target`.
+
+    One message naming two seats records a mention for each, and both rows store
+    the whole body (`store._record_mentions`). Quoting from the top therefore
+    showed the opening line -- which was addressed to somebody else -- under a
+    heading saying this person was waiting on you. Reported from a phone as
+    "those don't seem to be a question", and they were not: they were another
+    seat's paragraph.
+
+    Quoting from where the person is named gives them the part that is theirs.
+    """
+    m = re.search(rf"@{re.escape(target)}\b", text)
+    if m:
+        # From the start of that line, so "Final takeaway for @Jeremy" keeps
+        # its lead-in instead of opening mid-sentence on the name itself.
+        text = text[text.rfind(chr(10), 0, m.start()) + 1:]
+    # Emphasis markers are noise inside a quotation that is already italic.
+    return snippet(re.sub(r"[*_`]{1,3}", "", text), limit)
 
 
 class Supervisor:
@@ -677,7 +699,8 @@ class Supervisor:
         # on without the fact only they had.
         for m in self.store.open_mentions(topic_id):
             if self.store.is_human(m["target"]):
-                return f"{m['asker']} is waiting on you: {snippet(m['question'])}"
+                return (f"{m['asker']} is waiting on you: "
+                        f"{addressed_to(m['question'], m['target'])}")
         if not self._eligible(topic_id):
             return self._human_ask_reason(topic_id)
         return None
@@ -692,7 +715,8 @@ class Supervisor:
         """
         for m in self.store.open_mentions(topic_id):
             if self.store.is_human(m["target"]):
-                return f"{m['asker']} is waiting on you: {snippet(m['question'])}"
+                return (f"{m['asker']} is waiting on you: "
+                        f"{addressed_to(m['question'], m['target'])}")
         return None
 
     def _eligible(self, topic_id: int) -> list[str]:
