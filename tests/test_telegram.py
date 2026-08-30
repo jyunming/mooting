@@ -375,6 +375,39 @@ def test_forgetting_the_token_leaves_the_board_alone(tmp_path, monkeypatch):
 
 # ------------------------------------------------------- ruling from a chat
 
+def test_a_decision_reaches_the_chat_however_it_was_taken(board):
+    """A proposal approved at the terminal used to be invisible from a phone:
+    `event_text` rendered messages and new proposals and dropped decisions, so
+    somebody following along watched a proposal arrive and never learned what
+    happened to it."""
+    from mooting.telegram import event_text
+
+    tid = board.open_topic("t", "T", "b", "jeremy", seats=["jeremy", "santa"])
+    pid = board.propose(tid, "santa", "Cap retries at 6", "body")
+    head = board.head()
+    board.decide(pid, "jeremy", approve=True, rationale="agreed, cap at 6")
+
+    said = [event_text(board, ev) for ev in board.events_since(head, tid)]
+    said = [x for x in said if x]
+    assert any("approved" in x and "jeremy" in x for x in said), said
+    assert any("agreed, cap at 6" in x for x in said), said
+
+
+def test_a_decision_with_no_reason_still_announces(board):
+    """`/approve 4` with no words is legal, and used to render a trailing dash."""
+    from mooting.telegram import event_text
+
+    tid = board.open_topic("t2", "T2", "b", "jeremy", seats=["jeremy", "santa"])
+    pid = board.propose(tid, "santa", "Something", "body")
+    head = board.head()
+    board.decide(pid, "jeremy", approve=False, rationale="")
+
+    said = [x for x in (event_text(board, ev)
+                        for ev in board.events_since(head, tid)) if x]
+    line = next(x for x in said if "rejected" in x)
+    assert not line.rstrip().endswith("—"), line
+
+
 def test_asking_for_a_proposal_by_number_gets_the_buttons_back():
     """The pump starts at the board's head and never replays, so a proposal
     opened before the bot started -- or while the council ran at the terminal --

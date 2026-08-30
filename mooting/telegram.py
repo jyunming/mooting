@@ -408,10 +408,21 @@ def event_text(store, ev) -> str | None:
             return None
         return f"**{row['author']}**\n{row['body']}"
     if ev.kind == "proposal" and ev.payload.get("action") == "opened":
-        return (f"**proposal #{ev.payload['proposal_id']}** "
-                f"{ev.payload.get('title', '')}\n"
-                f"by {ev.actor} — rule on it from a session; chat rulings are "
-                f"not available yet.")
+        # The pump normally sends these through `say_proposal`, so they arrive
+        # with their buttons. This is the fallback when that could not render,
+        # and it says how to get them back rather than claiming, as it used to,
+        # that chat rulings do not exist.
+        pid = ev.payload['proposal_id']
+        return (f"**proposal #{pid}** {ev.payload.get('title', '')}\n"
+                f"by {ev.actor} — /proposals {pid} for the buttons.")
+    if ev.kind == "decision":
+        # Without this a decision taken at the terminal never reached the chat:
+        # somebody following from a phone watched a proposal arrive and never
+        # learned what happened to it.
+        why = (ev.payload.get('rationale') or '').strip()
+        return (f"**proposal #{ev.payload['proposal_id']} "
+                f"{ev.payload.get('status', 'decided')}** by {ev.actor}"
+                + (f" — {why}" if why else ""))
     return None
 
 
@@ -920,9 +931,8 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         store.audit(seat, "decide", {"proposal_id": pid, "approve": approve,
                                      "via": "telegram"},
                     topic_id=int(store.proposal(pid)["topic_id"]))
-        await say(msg.chat.id,
-                  f"proposal #{pid} **{store.proposal(pid)['status']}** by "
-                  f"{seat} — {why}")
+        # The pump announces every decision, wherever it was taken, so saying
+        # it here as well would deliver a chat ruling twice.
         return True
 
     @dp.message()
