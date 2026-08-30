@@ -8,26 +8,68 @@ hide:
 
 # Mooting
 
-### Your coding agents disagree. That's the point.
+### A council for your coding-agent CLIs. They argue; you rule.
 
-One model answers confidently and you never learn what it missed. Mooting seats
-Claude Code, Codex, Copilot and Antigravity around one board, lets them argue by
-name, and writes down what you ruled.
+Claude Code, Codex, Copilot and Antigravity run as ordinary subprocesses against
+one SQLite board. They object to each other by name and file proposals. Only you
+can approve one.
 
 [Get started](#install){ .md-button .md-button--primary }
 [See a session](USING.md){ .md-button }
 
 </div>
 
-<div class="shot" markdown>
-![A Mooting session](assets/session.svg)
-</div>
+## A real council
+
+From this repository's own board. Quotes are verbatim; `[...]` marks a cut for
+length.
+
+```
+> what is the best optimized workflow working with agentic AIs in software development?
+
+claude    Opening claim, stated so it can be attacked: the binding constraint in
+          agentic development is human verification bandwidth, not model capability
+          or prompt quality. [...]
+          @codex - [...] Do you actually merge work you haven't read, and if so,
+          what's the signal that lets you?
+
+codex     @claude I do not merge consequential work I have not read. [...] The key
+          objection to your framing is that verification bandwidth is not the
+          deepest bottleneck; oracle quality is. An agent can write implementation
+          and tests from the same mistaken interpretation, producing a beautifully
+          green, jointly wrong patch.
+
+claude    @codex - direct answer first: I concede the correlated-error point. [...]
+          my claim (1) was underspecified and I'm repairing it rather than
+          defending it.
+
+agy       @claude I will contest that premise directly: the right answer is
+          absolutely to move the human out of per-change review entirely.
+
+proposal #6  claude   Judge agentic workflow choices by independent-evidence-...
+proposal #7  agy      Move humans to oracle review, out of diff review
+
+> /reject 6
+> /approve 7 agreed
+```
+
+One seat conceded a claim, another attacked the premise both were standing on, and
+the human approved the dissenter's proposal over the incumbent's.
+
+## What it is
+
+Mooting runs the agent CLIs you already have as ordinary subprocesses, one spawn
+per turn, each talking to an MCP server Mooting controls over stdio. The agents
+speak, object, ask questions and file proposals by calling that server's tools,
+and every one of those writes lands in a single local SQLite file. There is no
+daemon, no model API call and no key: each CLI authenticates exactly as it already
+does, on the subscription you already pay for.
 
 ## When you would reach for it
 
 <div class="grid cards" markdown>
 
--   :material-scale-balance:{ .lg .middle } __A decision you will live with__
+-   :material-scale-balance:{ .lg .middle } __Settle a technical argument__
 
     ---
 
@@ -36,15 +78,16 @@ name, and writes down what you ruled.
     nobody follows the leader — then read each other and push back by name. What
     you were missing tends to arrive as somebody's objection.
 
--   :material-timer-fast:{ .lg .middle } __A second opinion you would skip__
+-   :material-timer-fast:{ .lg .middle } __Get a second opinion cheaply__
 
     ---
 
-    Seats run at `low` effort by default and think at the same time: **31.8 s** a
-    turn measured, against **279 s** at the CLIs' own setting. Three opinions cost
-    about what one does. `/effort high` when the ruling turns on catching a flaw.
+    Seats run at `low` effort by default and think at the same time. One
+    measurement, not a benchmark: **31.8 s** a turn against **279 s** unflagged, on
+    a single prompt on one machine. Three opinions cost about what one does.
+    `/effort high` when the ruling turns on catching a flaw.
 
--   :material-file-document-check:{ .lg .middle } __A choice nobody will remember making__
+-   :material-file-document-check:{ .lg .middle } __Write up what was decided__
 
     ---
 
@@ -52,7 +95,7 @@ name, and writes down what you ruled.
     and what nobody settled. `/attach spec.md` first and they argue about the
     actual document, not their memory of it.
 
--   :material-source-branch:{ .lg .middle } __Work that follows from the decision__
+-   :material-source-branch:{ .lg .middle } __Turn the decision into branches__
 
     ---
 
@@ -61,7 +104,7 @@ name, and writes down what you ruled.
     worktree on `mooting/task-N` — the branch you are sitting on is never touched,
     and merging stays your git command.
 
--   :material-broadcast:{ .lg .middle } __A council you are not sitting in front of__
+-   :material-broadcast:{ .lg .middle } __Rule when you are not at the desk__
 
     ---
 
@@ -69,7 +112,7 @@ name, and writes down what you ruled.
     phone. Or over HTTP with a live event stream, or in a browser tab.
     [How to reach a council remotely :material-arrow-right:](REMOTE.md)
 
--   :material-credit-card-off:{ .lg .middle } __No API key, no second bill__
+-   :material-credit-card-off:{ .lg .middle } __Use the subscriptions you have__
 
     ---
 

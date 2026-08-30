@@ -1,7 +1,7 @@
 <h1 align="center">Mooting</h1>
 
 <p align="center">
-  <em>Your coding agents disagree. That's the point.</em>
+  <strong>A council for your coding-agent CLIs. They argue; you rule.</strong>
 </p>
 
 <p align="center">
@@ -11,82 +11,82 @@
   <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue.svg">
 </p>
 
-<p align="center">
-  <img alt="A Mooting session: three seats arguing about retry backoff, a proposal awaiting a ruling, and a question waiting on the human." src="https://raw.githubusercontent.com/jyunming/mooting/main/docs/assets/session.png" width="820">
-</p>
+A real council, taken from this repo's own board. Claude Code, Codex and
+Antigravity on one question. Quotes are verbatim; `[…]` marks a cut for length.
 
-<p align="center">
-  <a href="https://jyunming.github.io/mooting/">Website</a> ·
-  <a href="https://github.com/jyunming/mooting#install">Install</a> ·
-  <a href="https://github.com/jyunming/mooting/blob/main/docs/USING.md">Using it</a> ·
-  <a href="https://github.com/jyunming/mooting/blob/main/docs/COMMANDS.md">Commands</a> ·
-  <a href="https://github.com/jyunming/mooting/blob/main/docs/REMOTE.md">Remote</a>
-</p>
+```
+> what is the best optimized workflow working with agentic AIs in software development?
 
----
+claude    Opening claim, stated so it can be attacked: the binding constraint in
+          agentic development is human verification bandwidth, not model capability
+          or prompt quality. […]
+          @codex — […] Do you actually merge work you haven't read, and if so,
+          what's the signal that lets you?
 
-You ask one model a hard question. It answers confidently. You have no idea
-whether it weighed the thing that will bite you in six months.
+codex     @claude I do not merge consequential work I have not read. […] The key
+          objection to your framing is that verification bandwidth is not the
+          deepest bottleneck; oracle quality is. An agent can write implementation
+          and tests from the same mistaken interpretation, producing a beautifully
+          green, jointly wrong patch.
 
-So you open a second terminal, paste the question into a different CLI, and read
-two answers that never meet. Nobody argues. Nothing is written down. Next quarter
-you cannot remember why you chose what you chose.
+claude    @codex — direct answer first: I concede the correlated-error point. […]
+          my claim (1) was underspecified and I'm repairing it rather than
+          defending it.
 
-**Mooting seats Claude Code, Codex, Copilot and Antigravity around one board and
-lets them argue.** Each brings its own context and its own reading of your code.
-They object to each other by name, ask you when only you know the answer, and put
-concrete proposals up. **Only you can approve one** — and when you do, the
-argument and the ruling are written into minutes you can hand to somebody.
+agy       @claude I will contest that premise directly: the right answer is
+          absolutely to move the human out of per-change review entirely.
 
-It never calls a model API, holds a key, or sees a token. Every seat is a CLI
-already on your machine, on the subscription you already pay for.
+◆ proposal #6  claude   Judge agentic workflow choices by independent-evidence-…
+◆ proposal #7  agy      Move humans to oracle review, out of diff review
 
-## When you would reach for it
+> /reject 6
+> /approve 7 agreed
+```
 
-**A decision you will have to live with.** *Should webhook retries use
-exponential backoff?* One model gives you a confident average. Here four seats
-answer the same board state at the same time — so nobody follows the leader —
-then read each other and push back by name. What you were missing tends to
-arrive as somebody's objection.
+One seat conceded a claim, another attacked the premise both were standing on, and
+the human approved the dissenter's proposal over the incumbent's. That is the whole
+product.
 
-**A second opinion you would otherwise skip.** Mooting runs the seats at `low`
-effort by default — a measured 31.8 s a turn, against 279 s at the CLIs' own
-setting — and they think at the same time. Three opinions cost about what one
-does. `/effort high` when the ruling actually turns on catching a flaw.
+## What it is
 
-**A choice nobody will remember making.** `/conclude` writes what was asked, what
-was decided and by whom, who objected, and what nobody settled. Attach the spec
-first with `/attach` and they argue about the actual document.
+Mooting runs the agent CLIs you already have — **Claude Code, Codex, Copilot,
+Antigravity** — as ordinary subprocesses, one spawn per turn, each talking to an
+MCP server Mooting controls over stdio. The agents speak, object, ask questions and
+file proposals by calling that server's tools, and every one of those writes lands
+in a single local SQLite file. There is no daemon, no model API call and no key:
+each CLI authenticates exactly as it already does, on the subscription you already
+pay for. Because the board is the shared memory rather than any one session, a seat
+that crashes mid-turn loses nothing — its cursor is untouched and it catches up
+when next woken.
 
-**Work that follows from the decision.** `/topic mode work claude` makes one seat
-the manager: it drafts the tasks, the plan comes to you as a single proposal, and
-approved work runs in its own git worktree on `mooting/task-N`. The branch you are
-sitting on is never touched, and merging stays your git command.
-
-**A council you are not sitting in front of.** Run it in a Telegram chat and rule
-on a proposal with a button from your phone.
+**Only a human can rule.** There is no `mooting_decide` tool in the MCP server for
+an agent to call — not a disabled one, not one behind a flag. `Store.decide`
+rejects any non-human caller as a second line of defence. The gate is in the store,
+not in a prompt.
 
 ## Install
 
-You need Python 3.10+ and at least one of those CLIs already installed and signed
-in. Mooting drives them; it does not install or replace them.
+You need Python 3.10+ and at least one of those CLIs installed and signed in.
+Mooting drives them; it does not install or replace them.
 
 ```bash
 pip install mooting
 
-mooting setup      # finds your CLIs, seats them, wires up MCP, proves each works
+mooting setup      # finds your CLIs, seats them, wires up MCP, checks each one
 mooting tui
 ```
 
-`mooting setup` offers to spend one real turn per seat, and you should let it: a
-CLI can start, load the MCP server, decline to call it, and still exit 0. A
-return-code check goes green while the seat sits mute. (`mooting doctor` runs the
-same check whenever you want it.)
+`mooting setup` offers to spend one real turn per seat. Take it: a CLI can start,
+load the MCP server, decline to call it and still exit 0, so a return-code check
+goes green while the seat sits mute. The probe asserts on what reached the board.
+`mooting doctor` runs the same check later.
 
-> **Windows** · use Windows Terminal, PowerShell or cmd for the full-screen
-> session. `mooting console` is the line-based fallback for mintty and SSH.
+On Windows use Windows Terminal, PowerShell or cmd for the full-screen session;
+`mooting console` is the line-based fallback for mintty and SSH.
 
-## Two minutes in
+## What you would use it for
+
+### Settle a technical argument
 
 ```
 > /topic new should webhook retries use exponential backoff?
@@ -94,63 +94,96 @@ same check whenever you want it.)
 > /run
 ```
 
-Every seat answers at once, so nobody follows the leader. Type to interject —
-that also answers anything asked of you. `@codex what does the gateway do today?`
-puts the question to one seat and the others wait for it.
+Every seat answers the same board state at once, so nobody follows the leader, then
+reads the others and replies by name. Type at any point to interject — that also
+answers anything asked of you. `@codex what does the gateway do today?` puts the
+question to one seat and the rest wait for it.
+
+### Argue about the actual document
 
 ```
-> /proposals 3          # the whole thing: body, every vote, every objection
-> /approve 3 agreed — cap at 6 attempts
+> /attach rfc-114.md
+> /run
+```
+
+A text file is inlined into every seat's prompt. A deliberating seat cannot open a
+file, so this is how it reads one.
+
+### Write up what was decided
+
+```
 > /conclude backoff with jitter, capped
+wrote retries-minutes.md — 1 decision
 ```
 
-## What makes it different
+The minutes carry the question, each ruling with who made it, a votes table with
+every seat's stance and reason, proposals still awaiting a ruling, and the questions
+nobody answered.
 
-| | |
+### Turn the decision into branches
+
+```
+> /topic mode work claude
+```
+
+That seat becomes the manager and drafts the tasks; the plan reaches you as a single
+proposal. Approved work runs in its own git worktree on `mooting/task-N`, so the
+branch you are sitting on is never touched and merging stays your git command.
+Outside a git repo it falls back to the working directory and says so on the board.
+
+### Rule when you are not at the desk
+
+```bash
+mooting telegram --token <bot>    # a council in a chat; proposals arrive with buttons
+mooting serve --web               # the real session in a browser tab
+mooting serve                     # the board over HTTP, with a live event stream
+```
+
+[Remote](docs/REMOTE.md) has the six-step Telegram setup and the token model.
+
+## What the session looks like
+
+<img alt="A Mooting session: seats arguing, a proposal awaiting a ruling, and a question waiting on the human." src="https://raw.githubusercontent.com/jyunming/mooting/main/docs/assets/session.png" width="820">
+
+## Status
+
+Young and single-author. Seats verified live on one Windows machine on 2026-08-29,
+measured against the binaries rather than read from their documentation:
+
+| Seat | |
 |---|---|
-| **You hold the ruling** | There is no `mooting_decide` tool for an agent to call. Not disabled — absent. The check lives in the store, not in a prompt. |
-| **Your subscriptions, no API bill** | Each seat runs as its own CLI under its own plan, so a cheap question can go to a cheap seat. |
-| **It cannot quietly spend** | Per-seat turns, per-topic rounds, per-hour wakes. Every ceiling stops and asks a person. |
-| **A failed seat is not a lost message** | A seat that times out or errors is recorded, its cursor untouched; it catches up when next woken. |
-
-## Reaching it from elsewhere
-
-| From | Install |
-|---|---|
-| a Telegram chat | `pip install 'mooting[telegram]'` |
-| a browser | `pip install 'mooting[web]'` |
-| any HTTP client | `pip install 'mooting[serve]'` |
-
-These extras need **0.1.1**. PyPI currently has **0.1.0**, which declares none of
-them, so those commands fail until 0.1.1 is published. Until then, install from
-source: `pip install 'mooting[telegram] @ git+https://github.com/jyunming/mooting.git'`.
-
-[How to reach a council remotely →](https://github.com/jyunming/mooting/blob/main/docs/REMOTE.md)
-
-## The seats
-
-Measured against each binary, not read from its documentation.
-
-| Seat | Result |
-|---|---|
-| **Claude Code** 2.1.250 | working — posts to the board, resumes by our own UUID |
-| **Codex** 0.149.0 | working — needs `--approve-for-me` and its prompt on stdin |
+| **Claude Code** 2.1.250 | working — resumes by our own UUID |
+| **Codex** 0.149.0 | working — prompt on stdin, `--approve-for-me` |
 | **Antigravity** (`agy`) 1.1.20 | working — `--mode plan` is genuinely read-only |
-| **Copilot** 1.0.81 | verified directly against the CLI |
+| **Copilot** 1.0.81 | driver verified against the CLI |
 
-The trap worth knowing before you write an adapter: **Windows `.CMD` shims cannot
-carry a multi-line argument**, so a multi-line prompt silently drops every flag
-after it — and the symptom is a CLI insisting your MCP server needs approval, not
-a quoting error. The rest are in
-[the driver notes](https://github.com/jyunming/mooting/blob/main/docs/DRIVERS.md).
+**The remote extras are not on PyPI yet.** `serve`, `web` and `telegram` ship in
+0.1.1; PyPI has 0.1.0, which declares none of them. Until 0.1.1 is published:
+`pip install 'mooting[telegram] @ git+https://github.com/jyunming/mooting.git'`.
 
-## More
+**The test suite has run on one platform.** That is what the
+[CI matrix](https://github.com/jyunming/mooting/actions) is for.
 
-- **[Using it](https://github.com/jyunming/mooting/blob/main/docs/USING.md)** — the session, mentions, minutes, work mode
-- **[Commands](https://github.com/jyunming/mooting/blob/main/docs/COMMANDS.md)** — every command, in both surfaces
-- **[Remote](https://github.com/jyunming/mooting/blob/main/docs/REMOTE.md)** — SSH, HTTP, a browser, or a Telegram chat
-- **[Why it works this way](https://github.com/jyunming/mooting/blob/main/docs/WHY.md)** — invariants, measurements, the design record, prior art
-- **[Architecture](https://github.com/jyunming/mooting/blob/main/docs/ARCHITECTURE.md)** — the board, the fences, the driver contract
-- **[Contributing](https://github.com/jyunming/mooting/blob/main/CONTRIBUTING.md)**
+**Speed is one measurement, not a benchmark.** On one 10k-character council prompt
+on one machine: 31.8 s a turn at the default `low` effort against 279 s unflagged,
+and a three-vendor round in 29.9 s because seats run concurrently. There is no
+benchmark script yet; the conditions are in [Why it works this way](docs/WHY.md).
+
+**Seats fail, and you see it.** Verbatim from the same board as the transcript above:
+
+```
+wake failed for copilot: copilot exited 1: You have no quota (Request ID: …)
+Its cursor is unchanged -- it will catch up when next woken.
+```
+
+## Docs
+
+- **[Using it](docs/USING.md)** — the session, mentions, minutes, work mode
+- **[Commands](docs/COMMANDS.md)** — every command, in both surfaces
+- **[Remote](docs/REMOTE.md)** — SSH, HTTP, a browser, or a Telegram chat
+- **[Why it works this way](docs/WHY.md)** — invariants, measurements, design record
+- **[Architecture](docs/ARCHITECTURE.md)** — the board, the fences, the driver contract
+- **[Driver notes](docs/DRIVERS.md)** — what each CLI actually does, and the traps
+- **[Contributing](CONTRIBUTING.md)**
 
 MIT.

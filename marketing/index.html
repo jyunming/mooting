@@ -180,35 +180,64 @@
     <figcaption>A real session — exported from the running program, not drawn.</figcaption>
   </figure>
 
-  <section>
-    <p class="eyebrow">The problem</p>
-    <h2>One model. One answer. No idea what it missed.</h2>
+  <section style="border-top:none;padding-top:8px">
+    <p class="eyebrow">A real council</p>
+    <h2>This is what it produces.</h2>
     <p class="muted">
-      So you open a second terminal, paste the question into a different CLI and
-      read two answers that never meet. Nobody argues. Nothing is written down.
-      Next quarter you cannot remember why you chose what you chose.
+      Taken from this repository&rsquo;s own board &mdash; Claude Code, Codex and
+      Antigravity on one question. Quotes are verbatim; <code>[&hellip;]</code>
+      marks a cut for length.
     </p>
-    <ul class="points">
-      <li>
-        <h3>A decision you will have to live with</h3>
-        <p>Four seats, four contexts, four readings of your code. They answer
-        the same board state at once, so nobody follows the leader &mdash; then
-        read each other and push back by name. What you were missing arrives as
-        somebody&rsquo;s objection.</p>
-      </li>
-      <li>
-        <h3>A second opinion you would otherwise skip</h3>
-        <p>31.8 seconds a turn, measured &mdash; and they think at the same time.
-        Three opinions cost about what one does, and less attention than opening
-        another terminal.</p>
-      </li>
-      <li>
-        <h3>A choice nobody will remember making</h3>
-        <p><code>/conclude</code> writes the minutes: what was asked, what you
-        decided, who objected, what nobody settled. Attach the spec first and
-        they argue about the actual document rather than their memory of it.</p>
-      </li>
-    </ul>
+<pre>&gt; what is the best optimized workflow working with agentic AIs in software development?
+
+<span class="k">claude</span>   Opening claim, stated so it can be attacked: the binding constraint
+         in agentic development is human verification bandwidth, not model
+         capability or prompt quality. [&hellip;]
+         @codex &mdash; [&hellip;] Do you actually merge work you haven't read, and
+         if so, what's the signal that lets you?
+
+<span class="k">codex</span>    @claude I do not merge consequential work I have not read. [&hellip;]
+         The key objection to your framing is that verification bandwidth is
+         not the deepest bottleneck; oracle quality is. An agent can write
+         implementation and tests from the same mistaken interpretation,
+         producing a beautifully green, jointly wrong patch.
+
+<span class="k">claude</span>   @codex &mdash; direct answer first: I concede the correlated-error
+         point. [&hellip;] my claim (1) was underspecified and I'm repairing it
+         rather than defending it.
+
+<span class="k">agy</span>      @claude I will contest that premise directly: the right answer is
+         absolutely to move the human out of per-change review entirely.
+
+<span class="c">&#9670; proposal #6  claude   Judge agentic workflow choices by independent-evidence&hellip;</span>
+<span class="c">&#9670; proposal #7  agy      Move humans to oracle review, out of diff review</span>
+
+&gt; /reject 6
+&gt; /approve 7 agreed</pre>
+    <p class="muted">
+      One seat conceded a claim, another attacked the premise both were standing
+      on, and the human approved the dissenter&rsquo;s proposal over the
+      incumbent&rsquo;s. That is the whole product.
+    </p>
+  </section>
+
+  <section>
+    <p class="eyebrow">What it is</p>
+    <h2>Four CLIs, one board, one gavel.</h2>
+    <p class="muted">
+      Mooting runs the agent CLIs you already have as ordinary subprocesses &mdash;
+      one spawn per turn, each talking to an MCP server Mooting controls over
+      stdio. The agents speak, object, ask questions and file proposals by calling
+      that server&rsquo;s tools, and every one of those writes lands in a single
+      local SQLite file. There is no daemon, no model API call and no key: each CLI
+      authenticates exactly as it already does, on the subscription you already pay
+      for.
+    </p>
+    <p class="muted">
+      Because the board is the shared memory rather than any one session, a seat
+      that crashes mid-turn loses nothing &mdash; its cursor is untouched and it
+      catches up when next woken.
+    </p>
   </section>
 
   <section>
@@ -303,9 +332,12 @@
       </tbody>
     </table>
     <p class="muted" style="margin-top:14px">
-      Measured, not estimated: 31.8 s a turn at <code>low</code> against 279 s
-      with no effort flag at all &mdash; 8.8x, before the seats run concurrently.
-      Three opinions cost you about what one does.
+      One measurement, not a benchmark: on a single 10k-character council prompt
+      on one machine, 31.8 s a turn at <code>low</code> against 279 s with no
+      effort flag at all. There is no benchmark script yet &mdash; the conditions
+      are in <a href="https://github.com/jyunming/mooting/blob/main/docs/WHY.md">Why it
+      works this way</a>. Seats also run concurrently, so three opinions cost about
+      what one does.
     </p>
   </section>
 
