@@ -163,7 +163,7 @@ async def test_a_new_topic_can_be_opened_without_leaving(tmp_path, board):
     app = app_for(tmp_path, board)
     async with app.run_test() as pilot:
         app.board.auto = False
-        await type_line(pilot, app, "/new Should retries use exponential backoff?")
+        await type_line(pilot, app, "/topic new Should retries use exponential backoff?")
         await pilot.pause()
 
         assert app.board.topic["slug"] == "should-retries-use-exponential-backoff"
@@ -180,7 +180,7 @@ async def test_switching_topic_does_not_leave_the_old_transcript_behind(tmp_path
     async with app.run_test() as pilot:
         app.board.auto = False
         await pilot.pause()
-        await type_line(pilot, app, "/new A different question")
+        await type_line(pilot, app, "/topic new A different question")
         await pilot.pause()
         # The cursor was reset, so the next tick must not replay history either.
         app.refresh_board()
@@ -196,17 +196,17 @@ async def test_a_role_only_exists_on_a_work_topic(tmp_path, board):
     async with app.run_test() as pilot:
         app.board.auto = False
 
-        await type_line(pilot, app, "/manager claude")     # refused: not a work topic
+        await type_line(pilot, app, "/topic manager claude")     # refused: not a work topic
         assert not board.is_manager(app.board.topic_id, "claude")
 
-        await type_line(pilot, app, "/mode work")          # refused: names nobody
+        await type_line(pilot, app, "/topic mode work")          # refused: names nobody
         assert board.topic("t")["mode"] == "debate"
 
-        await type_line(pilot, app, "/mode work claude")   # sets both at once
+        await type_line(pilot, app, "/topic mode work claude")   # sets both at once
         assert board.topic("t")["mode"] == "work"
         assert board.is_manager(app.board.topic_id, "claude")
 
-        await type_line(pilot, app, "/mode discuss")       # and the role goes back
+        await type_line(pilot, app, "/topic mode discuss")       # and the role goes back
         assert board.topic("t")["mode"] == "discuss"
         assert not board.is_manager(app.board.topic_id, "claude")
 
@@ -218,9 +218,9 @@ async def test_deleting_a_topic_needs_confirming(tmp_path, board):
     board.open_topic("keeper", "Another", "b", "me", seats=("claude", "me"))
     async with app.run_test() as pilot:
         app.board.auto = False
-        await type_line(pilot, app, "/rm t")
+        await type_line(pilot, app, "/topic rm t")
         assert board.topic("t"), "a bare /rm must not delete anything"
-        await type_line(pilot, app, "/rm t yes")
+        await type_line(pilot, app, "/topic rm t yes")
         await pilot.pause()
 
     with pytest.raises(Exception):
@@ -233,7 +233,7 @@ async def test_deleting_the_topic_you_are_on_lands_you_somewhere(tmp_path, board
     board.open_topic("keeper", "Another", "b", "me", seats=("claude", "me"))
     async with app.run_test() as pilot:
         app.board.auto = False
-        await type_line(pilot, app, "/rm yes")
+        await type_line(pilot, app, "/topic rm yes")
         await pilot.pause()
         assert app.board.topic["slug"] == "keeper"
         assert "keeper" in str(app.sub_title), "the view did not follow"
@@ -263,7 +263,7 @@ async def test_the_session_opens_on_an_empty_board(tmp_path, board):
         assert app.board.topic_id is None
         assert "no topic" in str(app.sub_title)
 
-        await type_line(pilot, app, "/new Should retries back off?")
+        await type_line(pilot, app, "/topic new Should retries back off?")
         await pilot.pause()
 
         assert app.board.topic["slug"] == "should-retries-back-off"
@@ -283,7 +283,7 @@ async def test_clearing_the_board_leaves_you_inside_it(tmp_path, board):
         assert app.board.topic_id is None
         assert "no topic" in str(app.sub_title)
 
-        await type_line(pilot, app, "/new A brand new question")
+        await type_line(pilot, app, "/topic new A brand new question")
         await pilot.pause()
         assert app.board.topic["slug"] == "brand-new-question"
 
@@ -778,11 +778,11 @@ async def test_an_open_proposal_is_visible_when_you_open_the_topic(tmp_path, boa
 
         text = " ".join(str(w) for w in written)
         assert f"proposal #{pid}" in text
-        assert f"/approve {pid}" in text, "it must say how to rule on it"
+        assert f"/approve {pid}" in text, "it must say how to sign off on it"
 
         # And the status bar and input both say something is waiting.
         app.refresh_board()
-        assert "awaiting your ruling" in str(app.query_one("#status", Static).content)
+        assert "awaiting your sign-off" in str(app.query_one("#status", Static).content)
         assert "/approve" in app.query_one("#say", Input).placeholder
 
 
@@ -998,8 +998,14 @@ async def test_clicking_a_proposal_row_opens_it(tmp_path, board):
     said: list[str] = []
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.write_line = lambda item: said.append(str(item))
-        app.board.emit = app.write_line
+
+        def capture(item):
+            for piece in (item if isinstance(item, list) else [item]):
+                # a body is a rich Markdown; its source text is `markup`
+                said.append(str(getattr(piece, "markup", None)
+                                or getattr(piece, "plain", piece)))
+        app.write_line = capture
+        app.board.emit = capture
         app._open_work_row(str(pid))
 
     text = " ".join(said)
@@ -1155,3 +1161,96 @@ async def test_the_refresh_timer_survives_a_modal(tmp_path, board):
         app.refresh_board()          # and works again afterwards
         assert "seat" in str(app.query_one("#seats", DataTable).columns[
             list(app.query_one("#seats", DataTable).columns)[0]].label)
+
+
+@pytest.mark.asyncio
+async def test_the_seat_panel_never_shows_a_turn_budget_that_cannot_be_reached(
+        tmp_path, board):
+    """A seat speaks at most once a round, so a turn allowance above the round
+    count can never be spent. The old `/rounds n` added n to both rounds and
+    turns, which started from different numbers -- leaving boards that read
+    `0/13` on a topic that stops after 10 rounds, with nothing to explain it."""
+    app = app_for(tmp_path, board)
+    tid = app.board.topic_id
+    with board.tx() as c:
+        c.execute("UPDATE topics SET max_rounds = 10 WHERE id = ?", (tid,))
+        c.execute("UPDATE seats SET max_turns = 13 WHERE topic_id = ?", (tid,))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one("#seats", DataTable)
+        budgets = {str(table.get_cell_at((r, 2))) for r in range(table.row_count)}
+
+    assert "0/13" not in budgets, f"showed an unreachable budget: {budgets}"
+    assert "0/10" in budgets, f"expected the binding cap, got {budgets}"
+
+
+@pytest.mark.asyncio
+async def test_reopening_a_session_that_is_waiting_on_you_still_says_so(tmp_path, board):
+    """The `YOUR TURN` banner was set only by the live event that raised the
+    question. Reopen the session and it vanished -- leaving the word `idle` on a
+    council that had stopped and could not continue without you."""
+    app = app_for(tmp_path, board)
+    # the question is already on the board before the session paints -- exactly
+    # what you come back to after closing the TUI
+    board.ask(app.board.topic_id, "claude", "me", "Which gateway do you mean?")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app._waiting, "a fresh session showed no sign it was blocked on you"
+        status = str(app.query_one("#status", Static).render())
+        assert "YOUR TURN" in status, status
+        assert app.query_one("#say", Input).placeholder.startswith("▶"), \
+            "the box you type in did not say it was waiting for an answer"
+
+
+@pytest.mark.asyncio
+async def test_your_own_reply_appears_in_the_transcript_like_anyone_else(tmp_path, board):
+    """The live path dropped your messages on the grounds that you had just
+    typed them -- but only `/` lines are echoed, so a plain reply vanished
+    entirely. A transcript of a discussion you took part in has to include you."""
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        rendered = []
+        app.write_line = lambda parts: rendered.append(parts)
+
+        await type_line(pilot, app, "the gateway uses a fixed 30s, no cap")
+        await pilot.pause()
+
+    flat = []
+    for parts in rendered:
+        for piece in (parts if isinstance(parts, list) else [parts]):
+            inner = getattr(piece, "renderable", piece)
+            # a body is a rich Markdown; its source text is `markup`
+            flat.append(str(getattr(inner, "markup", None)
+                            or getattr(inner, "plain", inner)))
+    joined = " ".join(flat)
+    assert "the gateway uses a fixed 30s" in joined, \
+        f"your own message never reached the log: {joined[:300]}"
+    assert "me" in joined, "your message was shown without an author"
+    assert "> the gateway" not in joined, "speech was echoed as well as rendered"
+
+
+@pytest.mark.asyncio
+async def test_opening_a_proposal_renders_its_markdown(tmp_path, board):
+    """Double-clicking a proposal used to run the *console* renderer, which
+    emits plain strings because the console cannot draw anything else. A body
+    full of tables and bold arrived as raw characters -- in the one place a
+    person is actually deciding something."""
+    from rich.markdown import Markdown
+
+    app = app_for(tmp_path, board)
+    pid = board.propose(app.board.topic_id, "claude", "Cap at 6 attempts",
+                        "**Do this.**\n\n| n | wait |\n|---|---|\n| 1 | 1s |\n")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        shown = []
+        app.write_line = lambda parts: shown.append(parts)
+        app._open_work_row(f"#{pid}")
+
+    flat = [piece for parts in shown
+            for piece in (parts if isinstance(parts, list) else [parts])]
+    assert any(isinstance(p, Markdown) for p in flat), \
+        f"the proposal body was not rendered as markdown: {[type(p).__name__ for p in flat]}"

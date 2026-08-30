@@ -6,17 +6,19 @@ server-of-record and no daemon requirement: if nothing else is running, the boar
 is still readable and writable, which is what lets a failed wake degrade to
 catch-up-on-next-turn instead of deadlocking a topic.
 
-Encoding: this runs on a machine whose console codepage is cp950 and whose
-council will carry Chinese text from day one. Every text boundary in this project
-is pinned to UTF-8 explicitly. Mojibake at a protocol boundary reads as protocol
-corruption and costs a day to diagnose.
+Encoding: every text boundary here is pinned to UTF-8 explicitly rather than
+left to the platform default. A console that decodes a UTF-8 pipe as something
+else produces garbled text that reads like protocol corruption, and diagnosing
+that costs a day.
 """
 
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
+import shutil
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -62,8 +64,8 @@ def slugify(title: str, taken: Iterable[str] = ()) -> str:
     is the thing they actually have; the slug is a convenience for typing, so it
     is computed rather than demanded.
 
-    Non-alphanumerics become separators and everything else is kept, so a Chinese
-    title keeps its characters instead of slugifying to nothing.
+    Non-alphanumerics become separators and everything else is kept, so a title
+    in a non-Latin script keeps its characters instead of slugifying to nothing.
     """
     text = title.strip().lower()
     for noise in _LEADING_NOISE:
@@ -93,6 +95,55 @@ def slugify(title: str, taken: Iterable[str] = ()) -> str:
     return f"{slug}-{n}"
 
 
+def agenda_points(topic) -> list[str]:
+    """A topic's agenda as a list of points.
+
+    Empty when the brief is only an echo of the title: `open_topic` seeds it that
+    way, so "has an agenda" cannot mean "brief is set" -- it means somebody wrote
+    something the title does not already say.
+
+    Lives here rather than in either UI because both the session and the shell
+    set agendas, and two copies of this rule would drift the first time one
+    changed.
+    """
+    title = (topic["title"] or "").strip()
+    brief = (topic["brief"] or "").strip()
+    if not brief or brief == title:
+        return []
+    return [ln.lstrip("-").strip() for ln in brief.splitlines() if ln.strip()]
+
+
+def agenda_text(points) -> str:
+    """Points back into the stored form."""
+    return "\n".join("- " + p.strip() for p in points if p.strip())
+
+
+def split_points(text: str) -> list[str]:
+    """`a; b; c` into three points. One line is all a session input gives you,
+    so `;` is how a list gets typed at all."""
+    return [seg.strip() for seg in text.split(";") if seg.strip()]
+
+
+def looks_like_text(path: Path) -> bool:
+    """Can this be put in a prompt as characters?
+
+    A NUL byte in the first block is the classic test and it is the right one
+    here: the question is not "what format is this" but "will inlining it
+    produce text or noise". Decoding as UTF-8 answers the rest.
+    """
+    try:
+        head = path.open("rb").read(8192)
+    except OSError:
+        return False
+    if b"\x00" in head:
+        return False
+    try:
+        head.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
 class StoreError(RuntimeError):
     pass
 
@@ -111,12 +162,45 @@ class Event:
     created_at: str
 
 
-def default_db_path() -> Path:
-    """Board location. Env override first, then the repo-local `.mooting/` dir."""
+#: Boards live together under the home directory, one per working directory.
+#: Scattering a `.mooting/` into every folder you ever ran this from means a
+#: council you cannot find again unless you remember where you were standing.
+HOME_BOARDS = Path.home() / ".mooting" / "boards"
+
+
+def board_key(directory: Path) -> str:
+    """A readable, collision-free directory name for one working directory.
+
+    The folder's own name is what makes it recognisable when you look in
+    ~/.mooting/boards; the digest is what stops two checkouts called `api` from
+    sharing a board.
+    """
+    full = directory.resolve()
+    # normcase, not lower(): Windows and macOS treat C:\Dev and C:\dev as one
+    # directory and must key to one board, while on Linux they are genuinely two
+    # and must not be merged. normcase is exactly that distinction.
+    canonical = os.path.normcase(str(full))
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", os.path.normcase(full.name)).strip("-.") or "root"
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:8]
+    return f"{name}-{digest}"
+
+
+def default_db_path(cwd: Path | None = None) -> Path:
+    """Where this directory's board lives.
+
+    Explicit beats local beats central: `$MOOTING_DB` wins outright, a
+    `.mooting/` that already exists here is honoured so a deliberately
+    project-local board keeps working, and otherwise the board is the one this
+    directory owns under the home directory.
+    """
     env = os.environ.get("MOOTING_DB")
     if env:
         return Path(env)
-    return Path.cwd() / ".mooting" / "board.db"
+    here = cwd or Path.cwd()
+    local = here / ".mooting" / "board.db"
+    if local.exists():
+        return local
+    return HOME_BOARDS / board_key(here) / "board.db"
 
 
 class Store:
@@ -180,12 +264,31 @@ class Store:
         self._conn.executescript(SCHEMA.read_text(encoding="utf-8"))
         # CREATE TABLE IF NOT EXISTS cannot add a column to a board that already
         # exists, so new columns are migrated explicitly. Cheap and idempotent.
+        # `asking` defaults to 1 so rows written before the distinction existed
+        # keep blocking, which is what the topics holding them expect.
         for table, column, ddl in (("topics", "mode", "TEXT NOT NULL DEFAULT 'debate'"),
                                    ("topics", "effort", "TEXT"),
+                                   ("mentions", "asking", "INTEGER NOT NULL DEFAULT 1"),
                                    ("tasks", "base_sha", "TEXT")):
             cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+                if (table, column) == ("mentions", "asking"):
+                    self._backfill_asking()
+
+    def _backfill_asking(self) -> None:
+        """Decide, for mentions written before the column existed, which were asks.
+
+        `ask` posts a body that opens with `@target `, while a name found by
+        reading prose sits anywhere else in the paragraph. Taking the column's
+        default instead would leave every historical topic paused on somebody's
+        summary -- which is the behaviour the column was added to end.
+        """
+        self._conn.execute(
+            "UPDATE mentions SET asking = 0 "
+            "WHERE question NOT LIKE '@' || target || ' %' "
+            "  AND question NOT LIKE '@' || target || ',%'"
+        )
 
     # ------------------------------------------------------------------- events
 
@@ -401,6 +504,22 @@ class Store:
             return self.q("SELECT * FROM topics WHERE status = ? ORDER BY id DESC", (status,))
         return self.q("SELECT * FROM topics ORDER BY id DESC")
 
+    def set_rounds(self, topic_id: int, n: int) -> None:
+        """Make this topic run to `n` rounds.
+
+        Turns move with it. A seat speaks at most once a round, so a seat capped
+        below the round count is a seat that goes quiet half way through a
+        meeting that is still running -- and from the outside that looks like the
+        agent failing, not like a budget. Never reduces a budget somebody raised
+        on purpose: rounds are the binding cap anyway.
+        """
+        if n < 1:
+            raise StoreError("a topic runs for at least one round")
+        with self.tx() as c:
+            c.execute("UPDATE topics SET max_rounds = ? WHERE id = ?", (n, topic_id))
+            c.execute("UPDATE seats SET max_turns = MAX(max_turns, ?) WHERE topic_id = ?",
+                      (n, topic_id))
+
     def grant_rounds(self, topic_id: int, n: int) -> None:
         """More rounds, and the per-seat turns to use them.
 
@@ -458,6 +577,315 @@ class Store:
             closed = "datetime('now')" if status in {"resolved", "aborted"} else "NULL"
             c.execute(f"UPDATE topics SET status = ?, closed_at = {closed} WHERE id = ?", (status, topic_id))
             self._emit(c, topic_id, "topic", actor, {"action": status, "note": note})
+
+    # ----------------------------------------------------------------- settings
+
+    def setting(self, key: str, default: str | None = None) -> str | None:
+        row = self.q1("SELECT value FROM settings WHERE key = ?", (key,))
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str | None) -> None:
+        """Remember, or forget when `value` is None."""
+        with self.tx() as c:
+            if value is None:
+                c.execute("DELETE FROM settings WHERE key = ?", (key,))
+            else:
+                c.execute(
+                    "INSERT INTO settings (key, value, updated_at) "
+                    "VALUES (?, ?, datetime('now')) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
+                    "updated_at = excluded.updated_at", (key, value))
+
+    def seat_human(self, topic_id: int, seat: str) -> bool:
+        """Give a human a seat on this topic if they have not got one.
+
+        A person who pairs into a chat can rule -- `decide` asks only whether
+        they are human -- but could not *speak*, because `post` requires a seat
+        and pairing grants none. So the second person in a room could approve a
+        plan and not say why, which is the wrong way round.
+
+        Human only, and idempotent. Seating an agent is a decision about whose
+        subscription gets spent, and it stays deliberate.
+        """
+        if not self.is_human(seat):
+            raise NotAuthorised(
+                f"{seat!r} is not a human seat; seating an agent spends its "
+                f"subscription and stays a deliberate act")
+        if self.seat(topic_id, seat) is not None:
+            return False
+        topic = self.topic(topic_id)
+        with self.tx() as c:
+            c.execute("INSERT INTO seats (topic_id, agent, role, max_turns) "
+                      "VALUES (?, ?, 'participant', ?)",
+                      (topic_id, seat, topic["max_rounds"]))
+            self._emit(c, topic_id, "seat", seat, {"action": "joined"})
+        return True
+
+    # ------------------------------------------------------------- driving
+
+    #: Who is driving a topic, and since when. A setting rather than a table: it
+    #: is one fact, and it should vanish the moment nobody holds it.
+    DRIVE_KEY = "drive.holder"
+
+    #: A claim older than this is assumed abandoned. A browser tab closed
+    #: mid-round would otherwise hold the lock for ever, and a council nobody
+    #: can start is worse than one two people race for.
+    DRIVE_STALE_S = 900.0
+
+    def take_drive(self, topic_id: int, who: str) -> str | None:
+        """Claim the right to drive. Returns the current holder if refused.
+
+        Sessions are separate processes -- two browser tabs are two `mooting
+        tui` -- so "am I already driving" cannot be a variable inside one of
+        them. It has to be on the board, which is the only thing they share.
+        """
+        import time
+
+        raw = self.setting(f"{self.DRIVE_KEY}.{topic_id}")
+        if raw:
+            held = json.loads(raw)
+            if held["who"] != who and time.time() - held["at"] < self.DRIVE_STALE_S:
+                return held["who"]
+        self.set_setting(f"{self.DRIVE_KEY}.{topic_id}",
+                         json.dumps({"who": who, "at": time.time()}))
+        return None
+
+    def release_drive(self, topic_id: int, who: str) -> None:
+        """Give it up. Only the holder may, so a late release cannot steal it."""
+        raw = self.setting(f"{self.DRIVE_KEY}.{topic_id}")
+        if raw and json.loads(raw).get("who") == who:
+            self.set_setting(f"{self.DRIVE_KEY}.{topic_id}", None)
+
+    # ------------------------------------------------------------- API tokens
+
+    #: One token per human seat. Kept as settings rather than a table because
+    #: that is all it is -- a secret bound to a name -- and a table would invite
+    #: the idea that tokens are things with a lifecycle.
+    TOKEN_PREFIX = "api.token."
+
+    def grant_token(self, seat: str, token: str | None = None) -> str:
+        """Issue an API token for a human seat.
+
+        Human only, and checked here rather than at the edge. `Store.decide`
+        refuses a non-human because locally identity comes from the operating
+        system; over a socket the token *is* the identity, so a token on an
+        agent seat would be a way to rule as one.
+        """
+        import secrets as _secrets
+
+        if not self.is_human(seat):
+            raise NotAuthorised(
+                f"{seat!r} is not a human seat; a token is an identity, and one "
+                f"on an agent seat would be a way to rule as that agent")
+        token = token or _secrets.token_urlsafe(24)
+        self.set_setting(f"{self.TOKEN_PREFIX}{seat}", token)
+        return token
+
+    def revoke_token(self, seat: str) -> None:
+        self.set_setting(f"{self.TOKEN_PREFIX}{seat}", None)
+
+    def seat_for_token(self, token: str) -> str | None:
+        """Whose token this is, or None.
+
+        Compared in constant time against every issued token: a plain `==` over
+        a secret leaks its prefix to anyone willing to measure, and there are
+        never many seats.
+        """
+        import secrets as _secrets
+
+        if not token:
+            return None
+        for row in self.q("SELECT key, value FROM settings WHERE key LIKE ?",
+                          (f"{self.TOKEN_PREFIX}%",)):
+            if _secrets.compare_digest(row["value"], token):
+                seat = row["key"][len(self.TOKEN_PREFIX):]
+                # A seat can stop being human -- renamed, replaced -- after a
+                # token was issued. The check that matters is the current one.
+                return seat if self.is_human(seat) else None
+        return None
+
+    def token_holders(self) -> list[str]:
+        return [r["key"][len(self.TOKEN_PREFIX):]
+                for r in self.q("SELECT key FROM settings WHERE key LIKE ? "
+                                "ORDER BY key", (f"{self.TOKEN_PREFIX}%",))]
+
+    def audit(self, actor: str, action: str, detail: dict | None = None,
+              topic_id: int | None = None) -> None:
+        """Record that something was done from outside this machine.
+
+        Locally the board is the audit: a message has an author, a ruling has a
+        decider. Over a socket the *route* matters too -- an approval that
+        arrived by HTTP is a different fact from one typed at the terminal, and
+        after the event only the board can say which it was.
+        """
+        with self.tx() as c:
+            self._emit(c, topic_id, "remote", actor,
+                       {"action": action, **(detail or {})})
+
+    # ------------------------------------------------------------------ pairing
+
+    def pairing(self, chat_id: str, user_id: str, channel: str = "telegram"):
+        return self.q1("SELECT * FROM pairings WHERE channel = ? AND chat_id = ? "
+                       "AND user_id = ?", (channel, str(chat_id), str(user_id)))
+
+    def pair_request(self, chat_id: str, user_id: str, display: str = "",
+                     channel: str = "telegram") -> int:
+        """Record an unknown sender. Inert until somebody approves them."""
+        with self.tx() as c:
+            c.execute(
+                "INSERT OR IGNORE INTO pairings (channel, chat_id, user_id, display) "
+                "VALUES (?, ?, ?, ?)",
+                (channel, str(chat_id), str(user_id), display))
+        row = self.pairing(chat_id, user_id, channel)
+        return int(row["id"])
+
+    def pair_approve(self, pairing_id: int, seat: str, by: str) -> sqlite3.Row:
+        """Bind a chat identity to a seat.
+
+        The seat must be a human one. Approving a chat user onto an agent seat
+        would let a person speak as an agent, and worse, would put a non-human
+        name on something only a human may do.
+        """
+        row = self.q1("SELECT * FROM pairings WHERE id = ?", (pairing_id,))
+        if row is None:
+            raise StoreError(f"no pairing request {pairing_id}")
+        if not self.is_human(seat):
+            raise NotAuthorised(
+                f"`{seat}` is not a human seat; pairing a person onto an agent "
+                f"seat would let them act as one")
+        with self.tx() as c:
+            c.execute("UPDATE pairings SET seat = ?, status = 'approved' WHERE id = ?",
+                      (seat, pairing_id))
+            self._emit(c, None, "pairing", by,
+                       {"pairing_id": pairing_id, "seat": seat, "action": "approved"})
+        return self.q1("SELECT * FROM pairings WHERE id = ?", (pairing_id,))
+
+    def seat_name_for(self, display: str, fallback: str = "guest") -> str:
+        """A human seat named after a person, created if it is not there.
+
+        Approving somebody should not also require inventing a name for them.
+        Their own display name is the name they already answer to.
+        """
+        # First name, unless that is too short to be a name -- "A Colleague"
+        # gave the seat `A`, which is nobody. Then the whole thing, joined.
+        # `\w` under Unicode, not `[A-Za-z]`: a name in a non-Latin script is
+        # still a name, and `slugify` above already keeps one for that reason.
+        # An ASCII-only filter turns such a name into `guest`.
+        words = [re.sub(r"[^\w-]+", "", w, flags=re.UNICODE)
+                 for w in (display or "").split()]
+        words = [w for w in words if w]
+        base = ""
+        if words:
+            base = words[0] if len(words[0]) >= 3 else "".join(words)
+        base = base or fallback
+        name, n = base, 2
+        while True:
+            # Case-insensitively: `Santa` beside an agent called `santa` is two
+            # seats one letter apart, and an @mention could mean either.
+            existing = self.q1("SELECT * FROM agents WHERE LOWER(name) = LOWER(?)",
+                               (name,))
+            if existing is None:
+                self.add_agent(name, "human", display=display or name)
+                return name
+            if existing["kind"] == "human":
+                return existing["name"]
+            name, n = f"{base}{n}", n + 1
+
+    def pair_deny(self, pairing_id: int, by: str) -> None:
+        with self.tx() as c:
+            c.execute("UPDATE pairings SET status = 'denied' WHERE id = ?", (pairing_id,))
+            self._emit(c, None, "pairing", by,
+                       {"pairing_id": pairing_id, "action": "denied"})
+
+    def pairings(self, status: str | None = None) -> list[sqlite3.Row]:
+        if status:
+            return self.q("SELECT * FROM pairings WHERE status = ? ORDER BY id", (status,))
+        return self.q("SELECT * FROM pairings ORDER BY id")
+
+    def seat_for_chat(self, chat_id: str, user_id: str,
+                      channel: str = "telegram") -> str | None:
+        """The seat this person may speak as here, or None if they may not."""
+        row = self.pairing(chat_id, user_id, channel)
+        if row is None or row["status"] != "approved" or not row["seat"]:
+            return None
+        return row["seat"]
+
+    # -------------------------------------------------------------- attachments
+
+    #: Inlined into the prompt beyond this and a seat's own turn gets crowded
+    #: out by its source material. The rest stays on disk with its path given.
+    ATTACHMENT_INLINE = 6_000
+
+    def attach(self, topic_id: int, src: Path | str, by: str, note: str = "",
+               name: str | None = None) -> int:
+        """Copy a file next to the board and record it against a topic."""
+        src = Path(src).expanduser()
+        if not src.is_file():
+            raise StoreError(f"no such file: {src}")
+        name = name or src.name
+        dest_dir = self.path.parent / "attachments" / self.topic(topic_id)["slug"]
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / name
+        n = 2
+        while dest.exists() and dest.read_bytes() != src.read_bytes():
+            dest = dest_dir / f"{src.stem}-{n}{src.suffix}"
+            n += 1
+        shutil.copy2(src, dest)
+
+        with self.tx() as c:
+            cur = c.execute(
+                "INSERT INTO attachments (topic_id, name, path, bytes, is_text, "
+                "note, added_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (topic_id, dest.name, str(dest.resolve()), dest.stat().st_size,
+                 int(looks_like_text(dest)), note, by))
+            aid = int(cur.lastrowid)
+            self._emit(c, topic_id, "attachment", by,
+                       {"attachment_id": aid, "name": dest.name})
+        return aid
+
+    def attachments(self, topic_id: int) -> list[sqlite3.Row]:
+        return self.q("SELECT * FROM attachments WHERE topic_id = ? ORDER BY id",
+                      (topic_id,))
+
+    def detach(self, attachment_id: int, by: str) -> str:
+        """Forget an attachment. The copy on disk is left alone -- deleting a
+        file somebody handed us is not this function's business."""
+        row = self.q1("SELECT * FROM attachments WHERE id = ?", (attachment_id,))
+        if row is None:
+            raise StoreError(f"no attachment {attachment_id}")
+        with self.tx() as c:
+            c.execute("DELETE FROM attachments WHERE id = ?", (attachment_id,))
+            self._emit(c, int(row["topic_id"]), "attachment", by,
+                       {"attachment_id": attachment_id, "action": "removed"})
+        return row["name"]
+
+    def rename_topic(self, topic_id: int, title: str, actor: str) -> str:
+        """Give a topic a better name, and return the handle it now answers to.
+
+        The slug follows the title only when it was derived from it in the first
+        place. Somebody who chose a handle deliberately keeps it -- re-deriving
+        would silently break the thing they type to get here.
+        """
+        row = self.topic(topic_id)
+        title = title.strip()
+        if not title:
+            raise StoreError("a topic needs a title")
+        slug = row["slug"]
+        if slug == slugify(row["title"]):
+            taken = [t["slug"] for t in self.topics() if t["id"] != topic_id]
+            slug = slugify(title, taken)
+        with self.tx() as c:
+            c.execute("UPDATE topics SET title = ?, slug = ? WHERE id = ?",
+                      (title, slug, topic_id))
+            self._emit(c, topic_id, "topic", actor, {"action": "renamed", "title": title})
+        return slug
+
+    def set_brief(self, topic_id: int, brief: str, actor: str) -> None:
+        """Rewrite a topic's agenda. Recorded, because what the council was asked
+        to settle is part of the record -- changing it mid-meeting matters."""
+        with self.tx() as c:
+            c.execute("UPDATE topics SET brief = ? WHERE id = ?", (brief, topic_id))
+            self._emit(c, topic_id, "topic", actor, {"action": "agenda"})
 
     # -------------------------------------------------------------------- seats
 
@@ -592,19 +1020,31 @@ class Store:
         """
         seated = {s["agent"] for s in self.q(
             "SELECT agent FROM seats WHERE topic_id = ?", (topic_id,))}
-        targets = {t for t in (explicit or []) if t in seated}
-        targets |= {m for m in MENTION_RE.findall(body) if m in seated}
+        # An explicit target came through `ask`; the rest were found by reading
+        # the prose. Only the first is a question somebody is waiting on -- a
+        # seat writing "final takeaway for @you" is addressing you, not asking,
+        # and used to stop the council all the same.
+        asked = {t for t in (explicit or []) if t in seated}
+        named = {m for m in MENTION_RE.findall(body) if m in seated}
+        targets = asked | named
         targets.discard(asker)                      # @-ing yourself is a no-op
         for target in sorted(targets):
             conn.execute(
-                """INSERT INTO mentions (topic_id, message_id, asker, target, question)
-                   VALUES (?,?,?,?,?)""",
-                (topic_id, message_id, asker, target, question[:2000]),
+                """INSERT INTO mentions
+                       (topic_id, message_id, asker, target, question, asking)
+                   VALUES (?,?,?,?,?,?)""",
+                (topic_id, message_id, asker, target, question[:2000],
+                 1 if target in asked else 0),
             )
         return sorted(targets)
 
-    def open_mentions(self, topic_id: int, target: str | None = None) -> list[sqlite3.Row]:
+    def open_mentions(self, topic_id: int, target: str | None = None, *,
+                      only_asks: bool = False) -> list[sqlite3.Row]:
+        """Outstanding mentions. `only_asks` keeps just the ones somebody is
+        actually waiting on, which is what may stop a council."""
         sql = "SELECT * FROM mentions WHERE topic_id = ? AND answered_by IS NULL"
+        if only_asks:
+            sql += " AND asking = 1"
         args: list[Any] = [topic_id]
         if target:
             sql += " AND target = ?"
@@ -944,9 +1384,14 @@ def connect(path: Path | str | None = None, *, init: bool = False) -> Store:
         # Silently creating a board turned a wrong --db or a wrong working
         # directory into "nothing set up yet", which reads like a fresh install
         # rather than a mistake.
+        if path is not None or os.environ.get("MOOTING_DB"):
+            # A path somebody named and got wrong. The working directory is not
+            # the story, and naming it just sends them looking in the wrong place.
+            raise StoreError(f"no board at {target} — you asked for that path")
         raise StoreError(
-            f"no board at {target}. Run `mooting init` here, or point --db / "
-            f"$MOOTING_DB at an existing one.")
+            f"no board yet for {Path.cwd()}\n"
+            f"  it would live at {target}\n"
+            f"  `mooting tui` opens one; `mooting init` creates it without opening")
     store = Store(path)
     store.init_schema()
     return store

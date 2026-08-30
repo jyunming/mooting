@@ -19,6 +19,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import pathlib
+import re
 import subprocess
 from pathlib import Path
 from dataclasses import dataclass
@@ -28,6 +30,64 @@ from .drivers.base import Driver, Seat, WakeResult
 from .store import Store
 
 log = logging.getLogger("mooting.supervisor")
+
+
+def _attachment_section(store, topic_id: int, budget: int) -> list[str]:
+    """Source material, put where every seat can actually reach it.
+
+    Text is inlined rather than merely pointed at, because a deliberating seat
+    cannot open files: codex runs it in an empty sandbox on purpose, and the
+    others have no reason to go looking. A path alone would be readable by the
+    one execute-capable seat and invisible to everyone else, which is the worst
+    of both -- the council would argue about a document only one member had.
+
+    The path is given as well, so a seat that *can* open it may.
+    """
+    rows = store.attachments(topic_id)
+    if not rows:
+        return []
+    lines = ["## Attached", ""]
+    spent = 0
+    for a in rows:
+        head = f"**{a['name']}** ({a['bytes']:,} bytes)"
+        if a["note"]:
+            head += f" — {a['note']}"
+        lines += [head, f"`{a['path']}`", ""]
+        if not a["is_text"]:
+            lines += ["_Not text; open it from that path if you can._", ""]
+            continue
+        try:
+            body = pathlib.Path(a["path"]).read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            lines += [f"_Could not be read back: {exc}_", ""]
+            continue
+        room = budget - spent
+        if room <= 0:
+            lines += ["_Not inlined: the attachment budget for this turn is "
+                      "spent. Open it from the path above._", ""]
+            continue
+        if len(body) > room:
+            body = body[:room]
+            lines += ["```", body, "```",
+                      f"_Truncated at {room:,} characters; the whole file is at "
+                      f"the path above._", ""]
+        else:
+            lines += ["```", body, "```", ""]
+        spent += len(body)
+    return lines
+
+
+def _agenda_of(topic) -> str:
+    """The topic's agenda, or nothing when it is only an echo of the title.
+
+    `/new` seeds the brief with the title so a topic is never empty, which means
+    "has an agenda" is not the same as "brief is set" -- it means somebody wrote
+    something the title does not already say.
+    """
+    brief = (topic["brief"] or "").strip()
+    return "" if brief == (topic["title"] or "").strip() else brief
+
+
 
 #: How the room is framed to a seat. This is the whole difference between the two
 #: topic modes, and it is a real one: told that disagreement is the product, a
@@ -93,8 +153,51 @@ class Caps:
     #: wakes. It is also simply expensive: nobody needs 45k characters of debate
     #: replayed to say one thing.
     max_catchup_chars: int = 12_000
+    #: Ceiling on inlined attachment text per turn. Source material that crowds
+    #: out the argument is worse than a path the seat has to ask about.
+    max_attachment_chars: int = 8_000
     #: Consecutive silent turns across all seats that mean the debate is spent.
     quiet_rounds_to_settle: int = 1
+
+
+def snippet(text: str, limit: int = 200) -> str:
+    """A quotable one-liner from somebody's whole turn.
+
+    `text[:200]` cut mid-word and kept the newlines, which mattered more than it
+    sounds: the chat wraps this reason in italics, and Telegram-HTML is built
+    per line, so a span that opened in one paragraph and closed in another
+    matched nothing and arrived as literal underscores around a message that
+    stopped mid-word.
+    """
+    flat = " ".join(text.split())
+    if len(flat) <= limit:
+        return flat
+    cut = flat[:limit]
+    space = cut.rfind(" ")
+    if space > limit * 0.6:          # only back up to a word break if it is near
+        cut = cut[:space]
+    return cut.rstrip(" ,.;:—-") + "…"
+
+
+def addressed_to(text: str, target: str, limit: int = 400) -> str:
+    """The part of a turn that is actually aimed at `target`.
+
+    One message naming two seats records a mention for each, and both rows store
+    the whole body (`store._record_mentions`). Quoting from the top therefore
+    showed the opening line -- which was addressed to somebody else -- under a
+    heading saying this person was waiting on you. Reported from a phone as
+    "those don't seem to be a question", and they were not: they were another
+    seat's paragraph.
+
+    Quoting from where the person is named gives them the part that is theirs.
+    """
+    m = re.search(rf"@{re.escape(target)}\b", text)
+    if m:
+        # From the start of that line, so "Final takeaway for @Jeremy" keeps
+        # its lead-in instead of opening mid-sentence on the name itself.
+        text = text[text.rfind(chr(10), 0, m.start()) + 1:]
+    # Emphasis markers are noise inside a quotation that is already italic.
+    return snippet(re.sub(r"[*_`]{1,3}", "", text), limit)
 
 
 class Supervisor:
@@ -594,9 +697,10 @@ class Supervisor:
         # speaks until they reply -- the alternative is a room that talks over the
         # person it just asked, and by the time they answer the debate has moved
         # on without the fact only they had.
-        for m in self.store.open_mentions(topic_id):
+        for m in self.store.open_mentions(topic_id, only_asks=True):
             if self.store.is_human(m["target"]):
-                return f"{m['asker']} is waiting on you: {m['question'].strip()[:200]}"
+                return (f"{m['asker']} is waiting on you: "
+                        f"{addressed_to(m['question'], m['target'])}")
         if not self._eligible(topic_id):
             return self._human_ask_reason(topic_id)
         return None
@@ -609,9 +713,10 @@ class Supervisor:
         would bury the one thing that needs a person, which is the failure this
         whole feature exists to prevent.
         """
-        for m in self.store.open_mentions(topic_id):
+        for m in self.store.open_mentions(topic_id, only_asks=True):
             if self.store.is_human(m["target"]):
-                return f"{m['asker']} is waiting on you: {m['question'].strip()[:200]}"
+                return (f"{m['asker']} is waiting on you: "
+                        f"{addressed_to(m['question'], m['target'])}")
         return None
 
     def _eligible(self, topic_id: int) -> list[str]:
@@ -695,12 +800,17 @@ class Supervisor:
         turns_left = min(row["max_turns"], self.caps.max_turns_per_seat) - row["turns_used"]
 
         lines = [
-            f"You are **{agent}**, holding a seat on an Mooting council.",
+            f"You are **{agent}**, holding a seat on a Mooting council.",
             "",
             f"## Topic: {topic['title']}  (`{topic['slug']}`, round {topic['round'] + 1}/{topic['max_rounds']})",
             "",
-            topic["brief"],
-            "",
+            # An agenda is worth naming as one. A seat handed a bare question
+            # answers the question; a seat handed the points to settle works
+            # through them, which is the difference between a chat and a meeting.
+            *(["### Agenda", "", _agenda_of(topic), ""]
+              if _agenda_of(topic) else []),
+            *_attachment_section(self.store, topic_id,
+                                 self.caps.max_attachment_chars),
             f"**Council:** {seats}",
             f"**Your budget:** {turns_left} turn(s) left.",
             "",

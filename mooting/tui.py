@@ -32,6 +32,8 @@ That last point is only safe because no `tx()` block ever awaits. See `Store.tx`
 from __future__ import annotations
 
 import json
+import os
+import uuid
 import logging
 from pathlib import Path
 
@@ -152,6 +154,9 @@ class Board(Console):
         if not agent:
             self.emit("[red]usage: /nudge <agent>[/red]")
             return
+        agent = self._seat_named(agent)
+        if agent is None:
+            return
         self.app_ref.nudge(agent)
         self.emit(f"[dim]waking {agent}…[/dim]")
 
@@ -262,6 +267,9 @@ class MootApp(App):
         self.cursor = 0
         #: Set when the council is blocked on you; cleared when you answer.
         self._waiting: str | None = None
+        #: Identifies this session to the drive lock. Per process, because that
+        #: is what a browser tab is when the session is served.
+        self._session_id = f"{os.getpid()}-{uuid.uuid4().hex[:6]}"
         self._palette: dict[str, str] = {}
         self._tints: dict[str, str] = {}
         #: What you have typed, newest last, walked with ↑/↓ when no hint is open.
@@ -482,7 +490,7 @@ class MootApp(App):
             self.query_one("#seats", DataTable).clear()
             self.query_one("#work", DataTable).clear()
             self.query_one("#status", Static).update(
-                "no topic  |  /new <what you want to discuss>  |  /help")
+                "no topic  |  /topic new <what you want to discuss>  |  /help")
             return
         try:
             for ev in store.events_since(self.cursor, self.board.topic_id):
@@ -500,8 +508,15 @@ class MootApp(App):
         if ev.kind == "message":
             row = store.q1("SELECT * FROM messages WHERE id = ?",
                            (ev.payload.get("message_id"),))
-            if row is None or (row["author"] == self.board.me and row["kind"] != "ruling"):
+            if row is None:
                 return None
+            if row["author"] == self.board.me:
+                # Your own words used to be dropped here, on the grounds that you
+                # had just typed them. But only `/` lines are echoed, so a plain
+                # reply vanished -- the one message in the room with no author,
+                # no colour and no place in the order. A transcript of a
+                # discussion you took part in has to include you.
+                return self._render_message(row)
             if self.board.me in (ev.payload.get("mentions") or []):
                 self.notify_turn(f"{row['author']} asked you a question")
                 return self._render_ask(row["author"], row["body"])
@@ -554,7 +569,12 @@ class MootApp(App):
                 budget = f"{said} said" if said else "—"
                 state = f"asked ×{owed}" if owed else "—"
             else:
-                budget = f"{s['turns_used']}/{s['max_turns']}"
+                # The cap that actually binds. A seat speaks at most once a
+                # round, so a turn allowance above the round count can never be
+                # spent -- and showing 0/13 on a topic that stops at 10 rounds
+                # is a number the seat will never reach, with nothing to say why.
+                rounds = self.board.store.topic(self.board.topic_id)["max_rounds"]
+                budget = f"{s['turns_used']}/{min(s['max_turns'], rounds)}"
             table.add_row(who, state, budget)
 
     def _paint_work(self) -> None:
@@ -583,6 +603,14 @@ class MootApp(App):
         props = len(b.store.proposals(b.topic_id, status="open"))
         if not asks and not props:
             self._waiting = None
+        elif not self._waiting:
+            # `notify_turn` only fires on a live event, so reopening a session
+            # that is already waiting on you showed no banner at all -- just the
+            # word "idle", which reads as "nothing is happening" when in fact the
+            # council has stopped and cannot continue until you answer. Recover
+            # it from the board instead of from an event that already happened.
+            self._waiting = (f"{waiting[0]['asker']} is waiting on your answer"
+                             if waiting else "a proposal is waiting on your ruling")
 
         # The clearest place to say "answer here" is the box you would type in.
         box = self.query_one("#say", Input)
@@ -600,12 +628,16 @@ class MootApp(App):
         topic = b.store.topic(b.topic_id)
         bits = [f"round {topic['round'] + 1}/{topic['max_rounds']}",
                 f"effort {b.effort()}",
-                "driving" if b.driving.is_set() else "idle",
+                # "idle" is true of the subprocesses and misleading about the
+                # room: a council stopped for an answer is not idling, it is
+                # blocked on you.
+                ("driving" if b.driving.is_set()
+                 else "waiting on you" if (asks or props) else "idle"),
                 f"auto {'on' if b.auto else 'off'}"]
         if asks:
             bits.append(f"[magenta]{asks} question(s) for you[/magenta]")
         if props:
-            bits.append(f"[yellow]{props} awaiting your ruling[/yellow]")
+            bits.append(f"[yellow]{props} awaiting your sign-off[/yellow]")
         line = "  |  ".join(bits)
         status = self.query_one("#status", Static)
         if self._waiting:
@@ -626,7 +658,7 @@ class MootApp(App):
             log.write(mk("[dim]Nothing on the board yet.[/dim]"))
             log.write("")
             log.write(mk("[bold]Start one[/bold] — just say what you want to discuss:"))
-            log.write(mk("  [cyan]/new the workflow optimization in agentic AI development"
+            log.write(mk("  [cyan]/topic new the workflow optimization in agentic AI development"
                       "[/cyan]"))
             log.write("")
             log.write(mk("[dim]Then type any detail the council needs, and [/dim]"
@@ -729,9 +761,18 @@ class MootApp(App):
         if not ref.isdigit():
             return
         if self.board.store.topic(self.board.topic_id)["mode"] == "work":
-            self.board.handle(f"/tasks")
-        else:
+            self.board.handle("/tasks")
+            return
+        # `/proposals <id>` is the console's renderer: plain strings, because the
+        # console has no way to draw anything else. Opening a proposal here went
+        # through it, so a body full of tables and bold arrived as raw markdown
+        # characters -- in the one place a person is deciding something.
+        try:
+            pr = self.board.store.proposal(int(ref))
+        except (StoreError, ValueError):
             self.board.handle(f"/proposals {ref}")
+            return
+        self.write_line(self._render_proposal(pr))
 
     def on_input_changed(self, event: Input.Changed) -> None:
         """Offer what the half-typed thing could become, arrow-navigable.
@@ -865,7 +906,10 @@ class MootApp(App):
         self._history_at = None
         if not line:
             return
-        if line.startswith("/") or line.startswith("@"):
+        if line.startswith("/"):
+            # Commands are not board messages, so the echo is the only record of
+            # them. Anything else -- speech, an @question -- now renders as the
+            # message it becomes, and echoing it too would show it twice.
             self.write_line(mk(f"[dim]> {escape(line)}[/dim]"))
         try:
             if not self.board.handle(line):
@@ -885,16 +929,33 @@ class MootApp(App):
         from .supervisor import Caps, Supervisor
 
         store = self.drive_store
+        # Served over the web, each browser tab is its own `mooting tui`
+        # process, so two viewers pressing Run would start two supervisors on
+        # one board and wake every seat twice against one budget.
+        holder = store.take_drive(self.board.topic_id, self._session_id)
+        if holder is not None:
+            self.write_line(mk(f"[yellow]— already being driven by another "
+                               f"session[/yellow]"))
+            self.board.driving.clear()
+            return
         try:
             if store.topic(self.board.topic_id)["status"] == "paused":
                 store.set_topic_status(self.board.topic_id, "open", self.board.me,
                                        "resumed from the tui")
-            sup = Supervisor(store, build_drivers(store), Caps(effort=self.board.effort()))
+            # The per-seat budget lives on the seat row, and `/rounds` writes it
+            # there. Leaving Caps at its default put a second, invisible ceiling
+            # of 6 on top: a seat granted 10 turns stopped at 6 and reported
+            # having none left while the panel still showed 7/10.
+            budget = max((s["max_turns"] for s in store.seats(self.board.topic_id)),
+                         default=Caps.max_turns_per_seat)
+            sup = Supervisor(store, build_drivers(store),
+                             Caps(effort=self.board.effort(), max_turns_per_seat=budget))
             reason = await sup.run_topic(self.board.topic_id)
             self.write_line(mk(f"\n[dim]— council stopped: {escape(reason)}[/dim]"))
         except Exception as exc:
             self.write_line(mk(f"\n[red]— council failed: {escape(str(exc))}[/red]"))
         finally:
+            store.release_drive(self.board.topic_id, self._session_id)
             self.board.driving.clear()
 
     @work(group="nudge")

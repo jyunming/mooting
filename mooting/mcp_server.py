@@ -131,7 +131,10 @@ def mooting_say(topic: str, body: str) -> str:
     own CLI is not read by the council. Make one point, with evidence, and stop.
 
     Writing `@name` puts that councillor next in line to respond, so use it when
-    you want a specific person's answer rather than the room's.
+    you want a specific person's answer rather than the room's. It does not stop
+    the council: addressing part of your argument to somebody, or summarising for
+    them, leaves everyone free to carry on. Use `mooting_ask` when you genuinely
+    cannot continue without their answer.
     """
     tid = _topic_id(topic)
     try:
@@ -181,7 +184,11 @@ def mooting_ask(topic: str, agent: str, question: str) -> str:
 
     This is an @mention with a guaranteed target: it posts your question to the
     board and puts that seat next in line to answer, ahead of the normal rotation.
-    Writing `@name` inside `mooting_say` does the same thing.
+
+    It is also the only thing that will *stop* the council: if you ask a human,
+    the room waits for their reply rather than talking past them. Naming somebody
+    with `@name` inside `mooting_say` gives them priority without stopping
+    anyone, so reserve this for when the answer is genuinely blocking.
 
     Use it when someone else holds the knowledge the argument turns on -- the seat
     that read the sources, or owns the subsystem. It buys them priority, not extra
@@ -255,7 +262,7 @@ def mooting_tasks(topic: str) -> str:
 
 @mcp.tool()
 def mooting_task_update(task_id: int, status: str, result: str = "") -> str:
-    """Report on your task, or rule on someone else's if you are the manager.
+    """Report on your task, or sign off on someone else's if you are the manager.
 
     As the worker: `in_progress`, `done`, or `blocked`. Say concretely what you
     changed and where, or precisely what stopped you -- your report is all the

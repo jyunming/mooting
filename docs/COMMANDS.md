@@ -3,11 +3,13 @@
 Two surfaces, one dispatch. `mooting <command>` runs from the shell; `/command` runs
 inside `mooting tui` or `mooting console`.
 
-They are not equivalent. Everything needed to open a topic, run rounds, rule on a
-proposal and export minutes exists in both. Retuning a topic once it is open is
-session-only: `/mode`, `/manager`, `/seats`, `/capability`, `/effort`, `/rounds`,
-`/stop`, `/reopen` and `/me` change the board and have no shell name yet. Scripts
-that need those should drive `mooting console` on stdin.
+They are not equivalent. Opening a topic, setting its agenda, running rounds,
+signing off on a proposal and exporting minutes all exist in both — enough to drive a
+council over SSH. Retuning a topic once it is open is session-only: `/topic mode`,
+`/topic manager`, `/seats`, `/capability`, `/effort`, `/rounds`, `/stop`,
+`/reopen` and `/me` change the board and have no shell name yet. Scripts that
+need those should drive `mooting console` on stdin. See
+[Remote](REMOTE.md) for driving a council from another machine.
 
 ---
 
@@ -21,9 +23,12 @@ The input at the bottom is the only one. The first character decides what it doe
 | `@codex what about X?` | asks one seat; the others wait for its answer |
 | `/command` | everything below |
 
-Typing `/` lists the commands; `↑`/`↓` walk them, `Tab` or `Enter` takes one,
-`Esc` dismisses. With no list open, `↑`/`↓` walk what you typed before — kept
-across sessions.
+In `mooting tui`, typing `/` lists the commands as you type; `↑`/`↓` walk the
+list, `Tab` or `Enter` takes one, `Esc` dismisses. With no list open, `↑`/`↓`
+walk what you typed before — kept across sessions on disk.
+
+`mooting console` completes the same commands on `Tab` instead (needs a real
+terminal — see [Using it](USING.md)), and its input history lasts only that run.
 
 ### Talking
 
@@ -44,13 +49,14 @@ across sessions.
 | `/effort low\|medium\|high` | how hard everyone thinks; `low` is ~9x faster |
 | `/auto on\|off` | whether posting wakes the council |
 | `/nudge <agent>` | wake one seat by hand |
-| `/rounds <n>` | grant more rounds, and the per-seat turns to use them |
+| `/rounds <n>` | run this topic to n rounds in total; turns follow |
+| `/rounds +<n>` | n more rounds than it has now |
 
 ### Deciding — only you can
 
 | | |
 |---|---|
-| `/proposals` | what is waiting on your ruling |
+| `/proposals` | what is waiting on your sign-off |
 | `/proposals <id>` | the whole proposal: body, every vote, every objection |
 | `/approve <id> <why>` | accept it |
 | `/reject <id> <why>` | refuse it |
@@ -63,13 +69,21 @@ across sessions.
 
 | | |
 |---|---|
-| `/new <what to discuss>` | opens one; the handle is derived from what you type |
-| `/topic <slug>` | switch to another |
-| `/mode debate` | argue to find the flaw (default) |
-| `/mode discuss` | build on each other |
-| `/mode work <agent>` | team mode; that seat plans and reviews |
-| `/manager <agent>` | reassign the manager (work topics only) |
-| `/rm [slug] yes` | delete a topic — omit the slug for this one |
+| `/topic new <what to discuss>` | opens one; the handle is derived from what you type |
+| `/topic agenda` | show what this meeting is to settle |
+| `/topic agenda <a>; <b>; <c>` | set it — semicolons become separate points |
+| `/topic agenda +<line>` | add one more point to what is there |
+| `/topic agenda clear` | drop it; back to the bare title |
+| `/attach <file>` | feed a document in; text is inlined into every prompt |
+| `/attach` | list them; `/attach rm <id>` removes one |
+| `/topic` | where you are, the agenda, and what else is open |
+| `/topic switch <slug>` | move to another topic |
+| `/topic rename <slug> <title>` | rename any topic, not just this one |
+| `/topic mode debate` | argue to find the flaw (default) |
+| `/topic mode discuss` | build on each other |
+| `/topic mode work <agent>` | team mode; that seat plans and reviews |
+| `/topic manager <agent>` | reassign the manager (work topics only) |
+| `/topic rm [slug] yes` | delete a topic — omit the slug for this one |
 | `/reset yes` | clear every topic; seats are kept |
 
 ### Seats
@@ -92,7 +106,7 @@ task row opens it in the transcript.
 |---|---|
 | `/tasks` | the work plan and where each task has got to |
 | `/minutes` | write the meeting out as markdown |
-| `/minutes decisions` | the rulings and work log, without the transcript |
+| `/minutes decisions` | the decisions and work log, without the transcript |
 
 ---
 
@@ -125,6 +139,17 @@ mooting ls [--status open]                 # every topic
 mooting show <topic>                       # title, brief, seats, full transcript
 mooting topic rm <slug> --yes              # delete one
 mooting reset [--all] --yes                # clear every topic (--all drops seats too)
+mooting attach <topic> <file> [--note W]    # feed a document to a council
+mooting attach <topic>                     # list them; --rm <id> removes one
+mooting serve [--port 4173] [--token T]    # the board over HTTP; loopback only
+mooting serve --web                        # the whole session, in a browser
+mooting serve --grant <seat>               # a token that may speak and sign off as it
+mooting serve --revoke <seat>              # withdraw it
+mooting telegram --token <bot> --chat <id> # run a council in a Telegram chat
+mooting telegram                           #   the token is remembered after
+                                           #   the first successful start
+mooting telegram --forget-token            #   remove it
+mooting pair [--approve <id> --seat <s>]   # who may act as which seat in a chat
 ```
 
 `--brief -` reads from stdin, for a long one.
@@ -169,7 +194,7 @@ mooting console [topic]    # the line REPL — mintty, SSH, or piping
 mooting watch <topic>      # read-only live tail, for a second terminal
 ```
 
-Both open on an **empty board**; `/new` works from inside. With no topic named
+Both open on an **empty board**; `/topic new` works from inside. With no topic named
 they pick the most recent open one.
 
 ---

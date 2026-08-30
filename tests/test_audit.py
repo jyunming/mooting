@@ -9,6 +9,7 @@ as the bug.
 from __future__ import annotations
 
 import asyncio
+import os
 import pathlib
 
 import pytest
@@ -311,3 +312,208 @@ def test_codex_can_deliberate_outside_a_git_repo(tmp_path):
     # ...but an executing seat runs in the user's own tree, where codex refusing
     # to touch an unversioned directory is the right answer.
     assert "--skip-git-repo-check" not in driver.argv(seat_for(True), "p", None)
+
+
+# ------------------------------------------------- where the board lives
+
+def test_a_board_belongs_to_its_directory_not_to_a_dotfile(tmp_path, monkeypatch):
+    """Scattering `.mooting/` into every folder you ever ran from means councils
+    you cannot find again. Boards live together under the home directory, one
+    per working directory."""
+    from mooting import store as store_mod
+
+    monkeypatch.delenv("MOOTING_DB", raising=False)
+    monkeypatch.setattr(store_mod, "HOME_BOARDS", tmp_path / "home" / "boards")
+
+    proj = tmp_path / "someproject"
+    proj.mkdir()
+    got = store_mod.default_db_path(proj)
+    assert got.parent.parent == tmp_path / "home" / "boards", got
+    assert "someproject" in got.parent.name, "the folder is unrecognisable in ~/.mooting"
+
+    # two checkouts sharing a name must not share a board
+    other = tmp_path / "elsewhere" / "someproject"
+    other.mkdir(parents=True)
+    assert store_mod.default_db_path(other) != got
+
+    # ...and one directory must resolve to one board however it is spelled,
+    # wherever the filesystem is case-insensitive
+    if os.path.normcase("A") == "a":
+        assert store_mod.board_key(proj) == store_mod.board_key(
+            proj.parent / proj.name.upper())
+
+
+def test_an_existing_local_board_still_wins(tmp_path, monkeypatch):
+    """Somebody who deliberately made a project-local board keeps it. The
+    central location is the default, not a confiscation."""
+    from mooting import store as store_mod
+
+    monkeypatch.delenv("MOOTING_DB", raising=False)
+    monkeypatch.setattr(store_mod, "HOME_BOARDS", tmp_path / "home" / "boards")
+
+    proj = tmp_path / "proj"
+    (proj / ".mooting").mkdir(parents=True)
+    assert store_mod.default_db_path(proj).parent.parent == tmp_path / "home" / "boards", \
+        "an empty .mooting/ should not count as a board"
+
+    (proj / ".mooting" / "board.db").write_bytes(b"")
+    assert store_mod.default_db_path(proj) == proj / ".mooting" / "board.db"
+
+
+def test_a_named_path_that_is_wrong_still_refuses(tmp_path, monkeypatch):
+    """Auto-creating is for the directory's own board. A path someone typed and
+    got wrong must not silently become an empty board somewhere unexpected."""
+    monkeypatch.delenv("MOOTING_DB", raising=False)
+    with pytest.raises(StoreError):
+        connect(tmp_path / "nope" / "typo.db")
+
+
+# ------------------------------------------- asyncio teardown noise
+
+def test_teardown_noise_is_silenced_but_real_errors_are_not(monkeypatch):
+    """A loop closed with a subprocess transport still open prints
+    `ValueError: I/O operation on closed pipe` from `__del__` -- harmless, since
+    the CLI has already exited, but it lands on a full-screen session and reads
+    like a crash. Suppressing it must not suppress anything else."""
+    import sys
+    from types import SimpleNamespace
+    from mooting.cli import quiet_asyncio_teardown
+
+    seen = []
+    monkeypatch.setattr(sys, "unraisablehook", lambda u: seen.append(u))
+    quiet_asyncio_teardown()
+
+    def unraisable(qualname, exc):
+        fn = lambda: None
+        fn.__qualname__ = qualname
+        return SimpleNamespace(object=fn, exc_type=type(exc), exc_value=exc,
+                               exc_traceback=None, err_msg=None)
+
+    sys.unraisablehook(unraisable("_ProactorBasePipeTransport.__del__",
+                                  ValueError("I/O operation on closed pipe")))
+    sys.unraisablehook(unraisable("BaseSubprocessTransport.__del__",
+                                  RuntimeError("Event loop is closed")))
+    assert seen == [], "known teardown noise still reached the terminal"
+
+    # anything else gets through: a different message, a different object,
+    # and a real failure that happens to mention a pipe
+    sys.unraisablehook(unraisable("_ProactorBasePipeTransport.__del__",
+                                  ValueError("something else entirely")))
+    sys.unraisablehook(unraisable("Store.__del__",
+                                  ValueError("I/O operation on closed pipe")))
+    assert len(seen) == 2, f"a real error was swallowed: {len(seen)} of 2 reported"
+
+
+def test_an_agenda_can_be_set_from_the_shell(tmp_path, monkeypatch, capsys):
+    """Remote use is the reason this exists: over SSH you could already open a
+    topic and start the council, but the agenda -- the step that makes it a
+    meeting rather than a question -- was reachable only from a session."""
+    from mooting.cli import main
+    from mooting.store import agenda_points, connect
+
+    db = tmp_path / "board.db"
+    board = connect(db, init=True)
+    board.add_agent("me", "human")
+    board.add_agent("kevin", "claude", driver="spawn")
+    board.open_topic("reno", "Renovation", "Renovation", "me", seats=("kevin", "me"))
+    board.close()
+
+    def run(*argv):
+        assert main(["--db", str(db), "--as", "me", "topic", "agenda", *argv]) == 0
+        return capsys.readouterr().out
+
+    def points():
+        b = connect(db)
+        try:
+            return agenda_points(b.topic("reno"))
+        finally:
+            b.close()
+
+    run("reno", "what budget; which rooms")
+    assert points() == ["what budget", "which rooms"]
+
+    run("reno", "and the timeline")            # adds, does not replace
+    assert points() == ["what budget", "which rooms", "and the timeline"]
+
+    run("reno", "--set", "only the budget")    # replaces
+    assert points() == ["only the budget"]
+
+    out = run("reno")                          # shows, changes nothing
+    assert "only the budget" in out and points() == ["only the budget"]
+
+    run("reno", "--clear")
+    assert points() == []
+
+
+# ------------------------------------------------------ two sessions, one board
+
+def test_only_one_session_may_drive_a_topic(tmp_path):
+    """Served over the web, each browser tab is its own `mooting tui` process.
+    Two viewers pressing Run would start two supervisors on one board and wake
+    every seat twice against one budget, so the lock lives on the board -- the
+    only thing separate processes share."""
+    board = connect(tmp_path / "board.db", init=True)
+    board.add_agent("me", "human")
+    tid = board.open_topic("t", "T", "T", "me", seats=("me",))
+
+    assert board.take_drive(tid, "tab-1") is None, "the first claim was refused"
+    assert board.take_drive(tid, "tab-2") == "tab-1", "a second session drove too"
+    assert board.take_drive(tid, "tab-1") is None, "the holder was locked out"
+
+    # a release from somebody who does not hold it cannot steal it
+    board.release_drive(tid, "tab-2")
+    assert board.take_drive(tid, "tab-2") == "tab-1"
+
+    board.release_drive(tid, "tab-1")
+    assert board.take_drive(tid, "tab-2") is None
+    board.close()
+
+
+def test_an_abandoned_claim_does_not_hold_the_topic_for_ever(tmp_path, monkeypatch):
+    """A browser tab closed mid-round would otherwise keep the lock, and a
+    council nobody can start is worse than one two people race for."""
+    import json
+    import time
+
+    board = connect(tmp_path / "board.db", init=True)
+    board.add_agent("me", "human")
+    tid = board.open_topic("t", "T", "T", "me", seats=("me",))
+
+    board.take_drive(tid, "gone")
+    # rewind the claim past the staleness horizon
+    board.set_setting(f"{board.DRIVE_KEY}.{tid}",
+                      json.dumps({"who": "gone",
+                                  "at": time.time() - board.DRIVE_STALE_S - 1}))
+    assert board.take_drive(tid, "here") is None, "a dead claim held the topic"
+    board.close()
+
+
+def test_setup_and_init_agree_about_where_a_board_lives(tmp_path, monkeypatch):
+    """`init` centralises boards under the home directory. `setup` kept its own
+    local path, so the two commands disagreed about where your council was --
+    and which one you had run decided the answer."""
+    from mooting import setup as setup_mod
+    from mooting.store import default_db_path
+
+    monkeypatch.delenv("MOOTING_DB", raising=False)
+    monkeypatch.chdir(tmp_path)
+    # Without this the test writes a real board into the developer's own
+    # ~/.mooting/boards on every run -- fourteen of them had accumulated before
+    # anybody noticed, because a passing test leaves no reason to look.
+    monkeypatch.setattr("mooting.store.HOME_BOARDS", tmp_path / "home-boards")
+    monkeypatch.setattr(setup_mod, "_found", lambda: [("claude", "claude")])
+    monkeypatch.setattr(setup_mod, "install_seat", lambda *a, **k: (True, "stub"))
+    monkeypatch.setattr(setup_mod, "_ask", lambda *a, **k: (a[1] if len(a) > 1 else ""))
+    monkeypatch.setattr("mooting.doctor.run_doctor",
+                        lambda *a, **k: _noop_coroutine())
+
+    assert setup_mod.run(None, assume_yes=True) == 0
+    made = default_db_path()
+    assert made.exists(), "setup put the board somewhere else"
+    assert (tmp_path / "home-boards") in made.parents,         "the board escaped the test's sandbox and landed in a real home directory"
+    assert not (tmp_path / ".mooting").exists(), \
+        "setup littered the working directory"
+
+
+async def _noop_coroutine():
+    return None

@@ -148,11 +148,10 @@ class Driver(abc.ABC):
     ) -> tuple[int, str, str]:
         """Run a CLI to completion with UTF-8 pinned in both directions.
 
-        The default codepage on this machine is cp950 and council traffic is
-        Chinese from day one. Decoding a UTF-8 subprocess pipe as cp950 produces
-        mojibake that reads like protocol corruption, so the encoding is forced
-        here rather than left to the platform default -- and `errors="replace"`
-        keeps a stray byte from raising instead of degrading.
+        Decoding a UTF-8 subprocess pipe as the platform default produces
+        garbled text that reads like protocol corruption, so the encoding is
+        forced here rather than left to chance -- and `errors="replace"` keeps a
+        stray byte from raising instead of degrading.
         """
         env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
         # Without this, every wake flashes a console window on Windows -- and a

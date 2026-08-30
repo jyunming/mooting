@@ -25,7 +25,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+# The council does not need a web server; only `mooting serve` does, so the
+# core install stays as small as it was.
+serve = ["aiohttp>=3.9"]
+telegram = ["aiogram>=3"]
+web = ["textual-serve>=1"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "aiohttp>=3.9", "aiogram>=3",
+       "textual-serve>=1"]
 
 [project.urls]
 Homepage = "https://jyunming.github.io/mooting/"

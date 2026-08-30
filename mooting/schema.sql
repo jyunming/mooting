@@ -145,6 +145,10 @@ CREATE TABLE IF NOT EXISTS mentions (
     asker       TEXT NOT NULL,
     target      TEXT NOT NULL,
     question    TEXT NOT NULL DEFAULT '',
+    -- 1 when somebody explicitly asked (`mooting_ask`), 0 for a bare `@name`
+    -- inside an argument. Only an ask stops the council waiting on a human:
+    -- being named is priority, being asked is a block.
+    asking      INTEGER NOT NULL DEFAULT 1,
     answered_by INTEGER REFERENCES messages(id),   -- the reply that discharged it
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -179,3 +183,51 @@ CREATE TABLE IF NOT EXISTS tasks (
     updated_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_topic ON tasks(topic_id, status);
+
+-- Source material fed to a council: a spec, a log, an image, a CSV.
+--
+-- The file is copied next to the board rather than referenced where it lay,
+-- because a council is a record: minutes that cite a document nobody can open
+-- six months later are minutes of nothing. Copying also means the board plus
+-- its directory is the whole artefact.
+CREATE TABLE IF NOT EXISTS attachments (
+    id          INTEGER PRIMARY KEY,
+    topic_id    INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,              -- as the human named it
+    path        TEXT NOT NULL,              -- absolute, under the board's dir
+    bytes       INTEGER NOT NULL,
+    is_text     INTEGER NOT NULL DEFAULT 0, -- can it be inlined into a prompt
+    note        TEXT NOT NULL DEFAULT '',   -- why it was attached
+    added_by    TEXT NOT NULL REFERENCES agents(name),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_topic ON attachments(topic_id);
+
+-- Who, in a chat, is allowed to act as which seat.
+--
+-- Taken from openclaw's pairing: an unknown sender is inert until somebody who
+-- already has authority approves them. It is the same fence as `Store.decide`,
+-- moved to the edge -- locally a caller's identity comes from the operating
+-- system, and a chat has no operating system to ask.
+CREATE TABLE IF NOT EXISTS pairings (
+    id          INTEGER PRIMARY KEY,
+    channel     TEXT NOT NULL DEFAULT 'telegram',
+    chat_id     TEXT NOT NULL,              -- the room; allowlisted separately
+    user_id     TEXT NOT NULL,              -- the person
+    display     TEXT NOT NULL DEFAULT '',   -- what they call themselves there
+    seat        TEXT REFERENCES agents(name),
+    status      TEXT NOT NULL DEFAULT 'pending',   -- pending | approved | denied
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(channel, chat_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_pairings_status ON pairings(status);
+
+-- Small facts about this board that are not about a topic: a bot token, a
+-- default, a channel setting. Kept here rather than in a config file so a board
+-- is one artefact -- copy the file and everything about that council comes with
+-- it, including how it reaches its chat.
+CREATE TABLE IF NOT EXISTS settings (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);

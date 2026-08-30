@@ -35,6 +35,7 @@ nav:
   - Why it works this way: WHY.md
   - Architecture: ARCHITECTURE.md
   - Driver notes: DRIVERS.md
+  - Remote: REMOTE.md
 
 extra_css:
   - stylesheets/extra.css

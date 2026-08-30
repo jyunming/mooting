@@ -37,12 +37,14 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import sys
 import threading
 import time
 from pathlib import Path
 
-from .store import MENTION_RE, Store, StoreError, connect, slugify
+from .store import (MENTION_RE, Store, StoreError, agenda_text, connect,
+                    slugify, split_points)
 
 #: CLIs a seat can be created against from inside the session.
 AGENT_KINDS = frozenset({"claude", "codex", "copilot", "gemini", "agy"})
@@ -66,27 +68,35 @@ COMMANDS = {
     "/asks": "questions waiting on you",
     "/auto": "on | off -- whether posting wakes the council (default on)",
     "/nudge": "wake one seat by hand",
-    "/approve": "<id> <why> -- rule on a proposal (only you can)",
+    "/approve": "<id> <why> -- sign off on a proposal (only you can)",
     "/reject": "<id> <why>",
     "/proposals": "what is waiting on you; /proposals <id> for the whole thing",
     "/show": "<id> -- a message in full, however far back it scrolled",
     "/tasks": "the work plan and where each task has got to",
     "/quote": "reply to the last message; or /quote <seat> | <id>",
     "/me": "<name> -- what the council calls you",
-    "/minutes": "write the meeting out; /minutes decisions for the rulings only",
+    "/minutes": "write the meeting out; /minutes decisions for the decisions only",
     "/conclude": "<your closing words> -- close the meeting and write the minutes",
     "/reopen": "resume a meeting you concluded",
     "/rounds": "<n> -- grant the council more rounds on this topic",
     "/seats": "who is here; /seats add <agent> | /seats rm <agent>",
-    "/topic": "<slug> -- switch to another topic",
-    "/new": "<what you want to discuss> -- opens a topic, same seats",
-    "/mode": "debate | discuss | work <agent> -- what kind of topic this is",
-    "/manager": "<agent> -- reassign the manager (work topics only)",
+    "/attach": "<file> -- feed a document to this council; /attach alone lists",
+    "/topic": "new | switch | rename | agenda | mode | manager | rm | list",
+    "/topic new": "<title> -- open a topic, same seats",
+    "/topic agenda": "<point>; <point> -- what this meeting is to settle",
+    "/topic rename": "<slug> <new title> -- rename any topic",
     "/capability": "<agent> execute <dir> -- let a seat edit files there",
-    "/rm": "<slug> -- delete a topic; /rm yes for this one",
     "/reset": "clear every topic; add `yes` to confirm",
     "/help": "this list",
     "/quit": "leave (the board keeps everything)",
+}
+
+#: Commands that used to be top level and now live under `/topic`. Kept so the
+#: session answers "where did it go" instead of "unknown", which is the one
+#: question a rename actually creates. Muscle memory outlives a changelog.
+MOVED = {
+    "new": "topic new", "agenda": "topic agenda", "mode": "topic mode",
+    "manager": "topic manager", "rm": "topic rm", "rename": "topic rename",
 }
 
 BANNER = f"""{BOLD}mooting console{RESET}  --  everything the council says, in one place
@@ -223,7 +233,7 @@ class Console:
         if asks:
             bits.append(f"{asks} question(s) for you")
         if props:
-            bits.append(f"{props} proposal(s) to rule on")
+            bits.append(f"{props} proposal(s) waiting on you")
         return "  |  ".join(bits)
 
     # ----------------------------------------------------------------- threads
@@ -263,7 +273,14 @@ class Console:
         try:
             if store.topic(self.topic_id)["status"] == "paused":
                 store.set_topic_status(self.topic_id, "open", self.me, "resumed from console")
-            sup = Supervisor(store, build_drivers(store), Caps(effort=self.effort()))
+            # The per-seat budget lives on the seat row, and `/rounds` writes it
+            # there. Leaving Caps at its default put a second, invisible ceiling
+            # of 6 on top: a seat granted 10 turns stopped at 6 and reported
+            # having none left while the panel still showed 7/10.
+            budget = max((s["max_turns"] for s in store.seats(self.topic_id)),
+                         default=Caps.max_turns_per_seat)
+            sup = Supervisor(store, build_drivers(store),
+                             Caps(effort=self.effort(), max_turns_per_seat=budget))
             reason = asyncio.run(sup.run_topic(self.topic_id))
             self.emit(f"\n{DIM}— council stopped: {reason}{RESET}")
             for a in store.open_mentions(self.topic_id, self.me):
@@ -292,9 +309,9 @@ class Console:
             "help": self._help, "run": self._run, "stop": self._stop,
             "effort": self._effort, "asks": self._asks, "nudge": self._nudge,
             "auto": self._auto,
-            "proposals": self._proposals, "seats": self._seats, "topic": self._switch,
-            "tasks": self._tasks, "new": self._new, "mode": self._mode,
-            "manager": self._manager, "rm": self._rm, "reset": self._reset,
+            "proposals": self._proposals, "seats": self._seats, "topic": self._topic,
+            "tasks": self._tasks,
+            "reset": self._reset,
             "capability": self._capability,
             "quote": self._quote, "rounds": self._rounds, "me": self._me,
             "minutes": self._minutes, "show": self._show,
@@ -304,7 +321,15 @@ class Console:
             self._decide(cmd, rest)
             return True
         if fn is None:
-            self.emit(f"{RED}unknown /{cmd}{RESET} — /help")
+            if cmd in MOVED:
+                # Show the line they meant, arguments and all, so it can be
+                # retyped without translating anything.
+                now = f"/{MOVED[cmd]}" + (f" {rest}" if rest else "")
+                self.emit(f"{YELLOW}/{cmd} is now {BOLD}/{MOVED[cmd]}{RESET}"
+                          f"{YELLOW} — topic commands are grouped{RESET}")
+                self.emit(f"  {DIM}{now}{RESET}")
+            else:
+                self.emit(f"{RED}unknown /{cmd}{RESET} — /help")
             return True
         return fn(rest) is not False
 
@@ -385,16 +410,23 @@ class Console:
         ("Deciding — only you can", [
             ("/approve <id> <why>", "accept a proposal"),
             ("/reject <id> <why>", "refuse it"),
-            ("/proposals", "what is waiting on your ruling"),
+            ("/proposals", "what is waiting on your sign-off"),
             ("/proposals <id>", "the whole proposal: body, votes, objections"),
             ("/show <id>", "one message in full, however far back it scrolled"),
             ("/asks", "questions waiting on your answer"),
         ]),
         ("Topics", [
-            ("/new <what to discuss>", "opens one here; the handle is derived"),
-            ("/topic <slug>", "switch to another"),
-            ("/mode debate|discuss", "argue to find the flaw / build together"),
-            ("/mode work <agent>", "team mode; that seat plans and reviews"),
+            ("/topic new <what to discuss>", "opens one here; the handle is derived"),
+            ("/topic agenda <a>; <b>", "the points this meeting is to settle"),
+            ("/topic agenda clear", "start the agenda over"),
+            ("/attach <file>", "feed a document to the council; text is inlined"),
+            ("/attach", "what is attached; /attach rm <id> removes one"),
+            ("/topic", "where you are, the agenda, and what else is open"),
+            ("/topic switch <slug>", "move to another topic"),
+            ("/topic rename <slug> <title>", "rename any topic"),
+            ("/topic rm <slug>", "delete one; /topic rm yes for this one"),
+            ("/topic mode debate|discuss", "argue to find the flaw / build together"),
+            ("/topic mode work <agent>", "team mode; that seat plans and reviews"),
             ("/capability <agent> execute <dir>", "let a seat edit files in that repo"),
             ("/seats", "who is here, budget left, who owes an answer"),
             ("/seats add <agent>", "seat one already registered"),
@@ -405,7 +437,7 @@ class Console:
             ("/conclude <closing words>", "close the meeting and write its minutes"),
             ("/reopen", "resume a meeting you concluded"),
             ("/minutes", "write the meeting out as markdown"),
-            ("/minutes decisions", "the rulings and work log, without the transcript"),
+            ("/minutes decisions", "the decisions and work log, without the transcript"),
         ]),
         ("Clearing up", [
             ("/rm [slug] yes", "delete a topic (omit slug for this one)"),
@@ -509,10 +541,14 @@ class Console:
         if not rows:
             self.emit(f"{DIM}no tasks — this is not a work topic, or nothing is planned{RESET}")
             return
+        from .minutes import commits_on
         for t in rows:
             self.emit(f"  #{t['id']} [{t['status']}] {t['title']} — {t['assignee']}")
             if t["branch"]:
-                self.emit(f"       {DIM}{t['branch']}{RESET}")
+                # What the branch holds, next to what the worker said about it.
+                n = commits_on(t)
+                landed = f"  {n} commit(s)" if n is not None else ""
+                self.emit(f"       {DIM}{t['branch']}{landed}{RESET}")
             if t["result"]:
                 self.emit(f"       {t['result'].strip()[:200]}")
 
@@ -557,7 +593,7 @@ class Console:
                 self.emit(f"  proposal #{p['id']} {p['title']}")
                 self.emit(f"    {DIM}/proposals {p['id']} to read it · "
                           f"/approve {p['id']} <why> · /reject {p['id']} <why>{RESET}")
-            self.emit(f"{DIM}rule on it, or /conclude force <closing words> to close "
+            self.emit(f"{DIM}sign off on it, or /conclude force <closing words> to close "
                       f"the meeting with it unresolved{RESET}")
             return
         for m in unanswered:
@@ -665,17 +701,38 @@ class Console:
         self.emit(f"{DIM}replying to #{row['id']} {row['author']}: {preview}…{RESET}")
 
     def _rounds(self, rest: str) -> None:
+        """`/rounds 7` means seven rounds. `/rounds +7` means seven more.
+
+        It used to add in both cases, so asking for 7 on a 3-round topic gave 10
+        rounds and 13 turns -- two numbers nobody asked for and no way to tell
+        where they came from.
+        """
         if not self._require_topic():
             return
-        if not rest.strip().isdigit():
+        arg = rest.strip()
+        add = arg.startswith("+")
+        digits = arg.lstrip("+")
+        if not digits.isdigit():
             t = self.store.topic(self.topic_id)
-            self.emit(f"  round {t['round'] + 1} of {t['max_rounds']}   "
-                      f"{DIM}/rounds <n> to grant more{RESET}")
+            self.emit(f"  round {BOLD}{t['round'] + 1}{RESET} of {BOLD}{t['max_rounds']}{RESET}"
+                      f"   {DIM}/rounds <n> sets the total · /rounds +<n> adds more{RESET}")
             return
-        self.store.grant_rounds(self.topic_id, int(rest))
+
+        n = int(digits)
+        try:
+            if add:
+                self.store.grant_rounds(self.topic_id, n)
+            else:
+                self.store.set_rounds(self.topic_id, n)
+        except StoreError as exc:
+            self.emit(f"{RED}{exc}{RESET}")
+            return
+
         t = self.store.topic(self.topic_id)
-        self.emit(f"{DIM}now round {t['round'] + 1} of {t['max_rounds']}, "
-                  f"and every seat has {rest} more turn(s){RESET}")
+        seats = self.store.seats(self.topic_id)
+        turns = min((s["max_turns"] for s in seats), default=t["max_rounds"])
+        self.emit(f"{DIM}round {t['round'] + 1} of {t['max_rounds']} — "
+                  f"each seat may speak up to {turns} time(s){RESET}")
 
     def _seat_change(self, verb: str, agent: str, kind: str = "") -> None:
         """Add or remove a seat on this topic.
@@ -739,7 +796,7 @@ class Console:
                 return
             if self.store.is_manager(self.topic_id, agent):
                 self.emit(f"{RED}{agent} manages this topic — /mode work <someone "
-                          f"else> first, or /mode discuss{RESET}")
+                          f"else> first, or /topic mode discuss{RESET}")
                 return
             owed = len(self.store.open_mentions(self.topic_id, agent))
             with self.store.tx() as c:
@@ -790,7 +847,7 @@ class Console:
         self.emit(f"{DIM}posted as message #{p['message_id']} — "
                   f"/quote {p['message_id']} to reply to it{RESET}")
         if p["decided_by"]:
-            self.emit(f"{DIM}ruled {p['status']} by {p['decided_by']} "
+            self.emit(f"{DIM}{p['status']} by {p['decided_by']} "
                       f"{p['decided_at'] or ''}{RESET}")
             if p["rationale"]:
                 self.emit(f"{DIM}  “{p['rationale'].strip()}”{RESET}")
@@ -857,7 +914,7 @@ class Console:
                       f"{len(self.store.proposals(tid))} proposal(s)")
             for w in trees:
                 self.emit(f"  {DIM}leaves a worktree on disk: {w}{RESET}")
-            self.emit(f"{DIM}confirm with:  /rm {ref} yes{RESET}")
+            self.emit(f"{DIM}confirm with:  /topic rm {ref} yes{RESET}")
             return True
 
         was_current = tid == self.topic_id
@@ -896,9 +953,49 @@ class Console:
             self._switch(rest[0]["slug"])
             return True
         self.topic, self.topic_id = None, None
-        self.emit(f"{DIM}board is empty — /new <what you want to discuss>{RESET}")
+        self.emit(f"{DIM}board is empty — /topic new <what you want to discuss>{RESET}")
         self.on_topic_change()
         return True
+
+    #: Everything you can do *to* a topic, reachable as `/topic <verb>`. Kept in
+    #: one place so the session has one obvious noun to ask about rather than six
+    #: unrelated verbs at the top level.
+    TOPIC_VERBS = ("new", "switch", "rename", "agenda", "mode", "manager", "rm", "list")
+
+    def _topic(self, rest: str) -> None:
+        """`/topic` is the noun; the verbs live under it.
+
+        `/topic <slug>` still switches, because that is the common case and it
+        predates the grouping. A slug that collides with a verb loses -- name a
+        topic `mode` and you will have to reach it another way, which is a fair
+        trade for `/topic mode work` meaning what it says.
+        """
+        rest = rest.strip()
+        verb, _, tail = rest.partition(" ")
+        if not rest or verb == "list":
+            return self._topic_overview()
+        if verb in self.TOPIC_VERBS:
+            return {"new": self._new, "switch": self._switch, "rename": self._rename,
+                    "agenda": self._agenda, "attach": self._attach, "mode": self._mode,
+                    "manager": self._manager, "rm": self._rm}[verb](tail.strip())
+        # Not guessing that an unknown word is a slug. `/topic mode` would have
+        # been ambiguous forever, and a wrong guess here silently switches you
+        # somewhere instead of saying it did not understand.
+        self.emit(f"{RED}no such topic command: {verb}{RESET}")
+        self.emit(f"  {DIM}/topic switch {verb}   to move to that topic{RESET}")
+        self.emit(f"  {DIM}/topic {' | '.join(self.TOPIC_VERBS)}{RESET}")
+
+    def _topic_overview(self) -> None:
+        """Where you are, what it is to settle, and what else is open."""
+        if self.topic_id is not None:
+            self._show_agenda()
+        rows = [t for t in self.store.topics() if not t["slug"].startswith("doctor-")]
+        if rows:
+            self.emit(f"  {DIM}topics{RESET}")
+            for t in rows:
+                here = f"{BOLD}›{RESET}" if t["id"] == self.topic_id else " "
+                self.emit(f"  {here} {t['slug']:<28} {DIM}{t['mode']}  {t['status']}{RESET}")
+        self.emit(f"  {DIM}/topic {' | '.join(self.TOPIC_VERBS)}{RESET}")
 
     def _switch(self, rest: str) -> None:
         try:
@@ -919,8 +1016,8 @@ class Console:
         """
         title = rest.strip()
         if not title:
-            self.emit(f"{RED}usage: /new <what you want to discuss>{RESET}")
-            self.emit(f"{DIM}e.g.  /new workflow optimization in agentic AI development"
+            self.emit(f"{RED}usage: /topic new <what you want to discuss>{RESET}")
+            self.emit(f"{DIM}e.g.  /topic new workflow optimization in agentic AI development"
                       f"{RESET}")
             return
         # The short handle is derived, not demanded. Asking someone to invent a
@@ -950,8 +1047,178 @@ class Console:
             self.emit(f"{RED}could not open `{slug}`: {exc}{RESET}")
             return
         self._switch(slug)
-        self.emit(f"{DIM}seats: {', '.join(seats)} — type any detail they need, "
-                  f"then /run{RESET}")
+        self.emit(f"{DIM}seats: {', '.join(seats)} — /topic agenda to say what to "
+                  f"settle, then /run{RESET}")
+
+    def _rename(self, rest: str) -> None:
+        """`/topic rename <slug> <new title>` -- any topic, not just this one.
+
+        Naming the target explicitly is the whole point: renaming something you
+        are not looking at is exactly when a silent guess would be costly.
+        """
+        try:
+            parts = shlex.split(rest)
+        except ValueError:                       # an unbalanced quote
+            parts = rest.split()
+        if len(parts) < 2:
+            self.emit(f"{RED}usage: /topic rename <slug> <new title>{RESET}")
+            if self.topic_id is not None:
+                cur = self.store.topic(self.topic_id)
+                self.emit(f'  {DIM}e.g.  /topic rename {cur["slug"]} '
+                          f'"a clearer title"{RESET}')
+            return
+
+        slug, title = parts[0], " ".join(parts[1:])
+        try:
+            target = self.store.topic(slug)
+        except StoreError as exc:
+            self.emit(f"{RED}{exc}{RESET}")
+            return
+        try:
+            now = self.store.rename_topic(int(target["id"]), title, self.me)
+        except StoreError as exc:
+            self.emit(f"{RED}{exc}{RESET}")
+            return
+
+        self.emit(f"{DIM}`{slug}` renamed to {BOLD}{title}{RESET}"
+                  + (f"{DIM} — now `{now}`{RESET}" if now != slug else ""))
+        if self.topic_id == int(target["id"]):
+            self.topic = self.store.topic(self.topic_id)
+            self._show_agenda()
+            self.on_topic_change()
+
+    def _attach(self, rest: str) -> None:
+        """Feed a document to the council.
+
+        Text is copied next to the board and inlined into every seat's prompt,
+        because a deliberating seat cannot open a file -- so a path alone would
+        reach the one execute-capable seat and nobody else.
+        """
+        if not self._require_topic():
+            return
+        rest = rest.strip().strip('"')
+        rows = self.store.attachments(self.topic_id)
+
+        if not rest:
+            if not rows:
+                self.emit(f"  {DIM}nothing attached — /attach <file>{RESET}")
+                return
+            for a in rows:
+                mark = "text" if a["is_text"] else "binary"
+                self.emit(f"  {DIM}#{a['id']}{RESET} {a['name']}  "
+                          f"{DIM}{a['bytes']:,}B, {mark}"
+                          + (f" — {a['note']}" if a["note"] else "") + RESET)
+            self.emit(f"  {DIM}/attach rm <id> removes one{RESET}")
+            return
+
+        verb, _, tail = rest.partition(" ")
+        if verb in {"rm", "remove"} and tail.strip().isdigit():
+            try:
+                name = self.store.detach(int(tail.strip()), self.me)
+            except StoreError as exc:
+                self.emit(f"{RED}{exc}{RESET}")
+                return
+            self.emit(f"{DIM}removed {name}{RESET}")
+            return
+
+        try:
+            aid = self.store.attach(self.topic_id, rest, self.me)
+        except StoreError as exc:
+            self.emit(f"{RED}{exc}{RESET}")
+            return
+        a = self.store.q1("SELECT * FROM attachments WHERE id = ?", (aid,))
+        how = ("inlined into every seat's next prompt" if a["is_text"]
+               else "binary — the seats get its path, not its contents")
+        self.emit(f"{DIM}attached {a['name']} ({a['bytes']:,}B) — {how}{RESET}")
+
+    def _agenda_points(self) -> list[str]:
+        """The agenda as a list. Empty when the brief is only an echo of the
+        title, because `/new` seeds it that way and a bare title is not one."""
+        from .store import agenda_points
+        return agenda_points(self.store.topic(self.topic_id))
+
+    def _show_agenda(self, note: str = "") -> None:
+        """The invitation: what this meeting is called, and what it is to settle.
+
+        Printing "agenda set" and nothing else was how two calls could silently
+        overwrite each other -- the confirmation looked identical whether a point
+        had been added or the previous one thrown away. Showing the whole thing
+        after every change makes that impossible to miss.
+        """
+        topic = self.store.topic(self.topic_id)
+        points = self._agenda_points()
+        self.emit("")
+        self.emit(f"  {BOLD}{topic['title'].strip()}{RESET}  {DIM}({topic['slug']}){RESET}")
+        if points:
+            self.emit(f"  {DIM}agenda{RESET}")
+            for i, pt in enumerate(points, 1):
+                self.emit(f"    {BOLD}{i}.{RESET} {pt}")
+        else:
+            self.emit(f"  {DIM}no agenda yet — the seats get the title alone{RESET}")
+        if note:
+            self.emit(f"  {DIM}{note}{RESET}")
+        self.emit("")
+
+    def _agenda(self, rest: str) -> None:
+        """What the meeting is for, as distinct from what it is called.
+
+        A one-line topic gets a one-line answer from every seat. Given the
+        points to settle, they work through them -- and the agenda ends up in
+        the minutes as the thing the council was actually asked.
+
+        Typing `/topic agenda X` twice adds two points rather than replacing the
+        first, because that is what people do: an agenda is built up a line at a
+        time, the way you would write a meeting invitation. Replacing wholesale
+        is the rarer act, so it is the one that has to be asked for by name.
+        """
+        if not self._require_topic():
+            return
+        title = (self.store.topic(self.topic_id)["title"] or "").strip()
+        points = self._agenda_points()
+        rest = rest.strip()
+
+        if not rest:
+            self._show_agenda("/topic agenda <point> adds one · ; for several · "
+                              "/topic agenda clear starts over")
+            return
+
+        if rest in {"clear", "none"}:
+            self.store.set_brief(self.topic_id, title, self.me)
+            self._show_agenda("cleared")
+            return
+
+        first, _, tail = rest.partition(" ")
+        if first in {"drop", "rm"} and tail.strip().isdigit():
+            n = int(tail.strip())
+            if not 1 <= n <= len(points):
+                self.emit(f"{RED}no point {n} — there are {len(points)}{RESET}")
+                return
+            dropped = points.pop(n - 1)
+            self.store.set_brief(self.topic_id,
+                                 "\n".join("- " + p for p in points) or title, self.me)
+            self._show_agenda(f"dropped: {dropped}")
+            return
+
+        if first == "set":
+            rest = tail.strip()
+            points = []
+            if not rest:
+                self.emit(f"{RED}usage: /topic agenda set <the whole agenda>{RESET}")
+                return
+        elif rest.startswith("+"):
+            rest = rest[1:].strip()      # kept: `+` used to be how you added
+            if not rest:
+                self.emit(f"{RED}usage: /topic agenda +<the point to add>{RESET}")
+                return
+
+        # The session gives you one line to type on, so `;` is how several
+        # points get entered at once.
+        added = [seg.strip() for seg in rest.split(";") if seg.strip()]
+        points.extend(added)
+        self.store.set_brief(self.topic_id, "\n".join("- " + p for p in points), self.me)
+        word = "point" if len(added) == 1 else "points"
+        self._show_agenda(f"added {len(added)} {word} — the seats "
+                          f"see this from their next turn")
 
     def _mode(self, rest: str) -> None:
         if not self._require_topic():
@@ -960,7 +1227,7 @@ class Console:
         mode = words[0] if words else ""
         if mode not in {"debate", "discuss", "work"}:
             self.emit(f"  mode is {BOLD}{self.store.topic(self.topic_id)['mode']}{RESET}   "
-                      f"{DIM}/mode debate | discuss | work <manager>{RESET}")
+                      f"{DIM}/topic mode debate | discuss | work <manager>{RESET}")
             return
 
         if mode == "work":
@@ -970,7 +1237,7 @@ class Console:
             # being work, rather than lingering as a title nobody uses.
             manager = words[1] if len(words) > 1 else None
             if not manager:
-                self.emit(f"{RED}work needs a manager: /mode work <agent>{RESET}")
+                self.emit(f"{RED}work needs a manager: /topic mode work <agent>{RESET}")
                 self.emit(f"{DIM}candidates: {', '.join(self.seat_names())}{RESET}")
                 return
             if not self.store.seat(self.topic_id, manager):
@@ -1053,7 +1320,7 @@ class Console:
             return
         if self.store.topic(self.topic_id)["mode"] != "work":
             self.emit(f"{DIM}no manager in a discussion — roles exist on work topics."
-                      f" /mode work <agent> to switch.{RESET}")
+                      f" /topic mode work <agent> to switch.{RESET}")
             return
         if not self.store.seat(self.topic_id, rest):
             self.emit(f"{RED}{rest!r} holds no seat here{RESET}")
@@ -1069,6 +1336,23 @@ class Console:
     def on_topic_change(self) -> None:
         """Hook for a surface that has to repaint. The REPL has nothing to do."""
 
+    def _seat_named(self, name: str) -> str | None:
+        """A seat on this topic, however the name was typed.
+
+        `@Santa` is what a chat gives you -- Telegram completes a mention with
+        its `@` attached -- while the seat is `Santa`. Everywhere else that takes
+        an agent name already strips it; `/nudge` did not, and the mismatch
+        surfaced as a wake that raised deep inside a worker thread.
+        """
+        want = name.strip().lstrip("@").strip()
+        here = [s["agent"] for s in self.store.seats(self.topic_id)]
+        for seat in here:
+            if seat.lower() == want.lower():
+                return seat
+        self.emit(f"{RED}no seat called `{want}` on this topic — "
+                  f"{', '.join(here)}{RESET}")
+        return None
+
     def _nudge(self, agent: str) -> None:
         if not self._require_topic():
             return
@@ -1077,6 +1361,10 @@ class Console:
         from .drivers.registry import build_drivers
         from .supervisor import Supervisor
 
+        agent = self._seat_named(agent)
+        if agent is None:
+            return
+
         def work() -> None:
             store = connect(self.db)
             try:
@@ -1084,6 +1372,10 @@ class Console:
                                 .wake_seat(self.topic_id, agent))
                 if not r.ok:
                     self.emit(f"\n{RED}{agent}: {r.detail}{RESET}")
+            except Exception as exc:
+                # This thread dying used to take the only notice with it: the
+                # room said "waking Santa..." and then nothing, for ever.
+                self.emit(f"\n{RED}{agent}: {exc}{RESET}")
             finally:
                 store.close()
 

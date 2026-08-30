@@ -283,3 +283,37 @@ def test_a_task_gets_its_own_branch_and_checkout(tmp_path, real_repo):
     _git("commit", "-q", "-m", "backoff", cwd=tree)
     assert sup._commits_on(board.task(tid)) == 1, "work in the worktree was not counted"
     board.close()
+
+
+def test_the_work_log_counts_what_landed_not_what_was_claimed(tmp_path, real_repo):
+    """A worker's report is a claim about its branch. The log shows the commits
+    beside it so the two can disagree in public."""
+    from mooting.minutes import commits_on, worklog
+
+    board = connect(tmp_path / "board.db", init=True)
+    board.add_agent("human", "human")
+    board.add_agent("boss", "claude", driver="spawn", driver_cfg={"cwd": str(real_repo)})
+    board.add_agent("hand", "codex", driver="spawn",
+                    driver_cfg={"cwd": str(real_repo), "capability": "execute"})
+    topic = board.open_topic("ship-it", "T", "B", "human",
+                             seats=("boss", "hand", "human"), mode="work", manager="boss")
+    tid = board.draft_task(topic, "boss", "hand", "Add backoff", acceptance="tests pass")
+    # A draft task cannot be reported on -- the plan has to be approved first,
+    # which is the whole point of the fence. Turn that key before testing the log.
+    board.decide(board.submit_plan(topic, "boss"), "human", approve=True, rationale="go")
+    Supervisor(board, {})._ensure_workspace(topic, board.task(tid))
+
+    task = board.task(tid)
+    assert commits_on(task) == 0
+
+    tree = pathlib.Path(task["worktree"])
+    (tree / "gateway.py").write_text("RETRY_SECONDS = 1\n", encoding="utf-8")
+    _git("add", "-A", cwd=tree)
+    _git("commit", "-q", "-m", "backoff", cwd=tree)
+
+    board.update_task(tid, "hand", "done", "shipped it")
+    log = "\n".join(worklog(board, topic))
+    assert "commits" in log, "the work log does not report commits at all"
+    assert "| 1 |" in log, f"the commit that landed is not in the log:\n{log}"
+    assert "shipped it" in log, "the worker's own report was dropped"
+    board.close()

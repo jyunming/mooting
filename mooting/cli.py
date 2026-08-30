@@ -14,11 +14,12 @@ import os
 import sys
 from pathlib import Path
 
-from .store import Store, StoreError, connect
+from .store import (NotAuthorised, Store, StoreError, agenda_points,
+                    agenda_text, connect, split_points)
 
 DIM_, RESET_ = "\033[2m", "\033[0m"
 
-# Windows consoles default to cp950 here; council traffic is Chinese from day one.
+# A console whose default codepage is not UTF-8 would garble non-ASCII output.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -26,6 +27,62 @@ if hasattr(sys.stdout, "reconfigure"):
 
 def _board(args: argparse.Namespace) -> Store:
     return connect(Path(args.db) if args.db else None, init=getattr(args, "_init", False))
+
+
+#: Teardown noise from CPython's Windows Proactor loop, and nothing else.
+_BENIGN_TEARDOWN = ("I/O operation on closed pipe", "Event loop is closed")
+
+
+def quiet_asyncio_teardown() -> None:
+    """Stop a harmless GC traceback from landing on a full-screen session.
+
+    When the loop closes with a subprocess transport still open -- leaving a
+    session that was mid-turn does exactly that -- the transport's `__del__`
+    runs with no loop, tries to build a ResourceWarning, and asks a closed pipe
+    for its file descriptor. Python prints the traceback as "Exception ignored"
+    and carries on. Nothing is lost: the CLI has already exited and its result
+    is on the board. It just reads like a crash.
+
+    Closing those transports earlier does not help. Measured: draining them at
+    shutdown turned zero warnings into six, because closing a pipe under a
+    pending `communicate()` causes the very thing it was meant to prevent. So
+    this suppresses the *display*, and narrowly -- the raising object must be an
+    asyncio transport and the message one of two known ones. Anything else,
+    including a real error during teardown, still reaches the default hook.
+    """
+    previous = sys.unraisablehook
+
+    def hook(unraisable):
+        # `unraisable.object` is the `__del__` *function*, not the transport --
+        # so the class name has to come from its qualname, e.g.
+        # `_ProactorBasePipeTransport.__del__`.
+        where = getattr(getattr(unraisable, "object", None), "__qualname__", "")
+        if (where.endswith("__del__") and "Transport" in where
+                and isinstance(unraisable.exc_value, (ValueError, RuntimeError))
+                and any(b in str(unraisable.exc_value) for b in _BENIGN_TEARDOWN)):
+            return
+        previous(unraisable)
+
+    sys.unraisablehook = hook
+
+
+def _session_board(args: argparse.Namespace) -> Store:
+    """Open the board for a session, creating it if this is the first time.
+
+    Refusing to start because nobody has run `init` is a fine answer for a typo
+    in `--db`, and a poor one for someone who has just installed this and typed
+    the only command they know. An explicit path that does not exist still
+    fails; the directory's own board is simply made.
+    """
+    explicit = bool(args.db or os.environ.get("MOOTING_DB"))
+    board = connect(Path(args.db) if args.db else None, init=not explicit)
+    if not [a for a in board.agents() if a["kind"] == "human"]:
+        who = (getattr(args, "as_", None) or os.environ.get("MOOTING_HUMAN")
+               or os.environ.get("USERNAME") or os.environ.get("USER") or "me")
+        board.add_agent(who, "human", display=who)
+        print(f"new board at {board.path}")
+        print(f"you are `{who}` — /me <name> changes that")
+    return board
 
 
 def _human(board: Store, name: str | None) -> str:
@@ -117,6 +174,68 @@ def cmd_topic_new(args) -> int:
                            effort=args.effort, manager=args.manager)
     print(f"topic #{tid} `{args.slug}` opened with seats: {', '.join(seats)}")
     print(f"next: mooting run {args.slug}")
+    return 0
+
+
+def cmd_attach(args) -> int:
+    """Feed a file to a council."""
+    board = _board(args)
+    who = _human(board, args.as_)
+    topic = board.topic(int(args.topic) if args.topic.isdigit() else args.topic)
+    tid = int(topic["id"])
+    if args.rm:
+        print(f"removed {board.detach(int(args.rm), who)}")
+    for f in args.files:
+        aid = board.attach(tid, f, who, note=args.note or "")
+        a = board.q1("SELECT * FROM attachments WHERE id = ?", (aid,))
+        kind = "text, inlined into every prompt" if a["is_text"] else "binary, path only"
+        print(f"#{a['id']} {a['name']}  ({a['bytes']:,} bytes — {kind})")
+    rows = board.attachments(tid)
+    if not args.files and not args.rm:
+        if not rows:
+            print(f"nothing attached to `{topic['slug']}`")
+        for a in rows:
+            mark = "text  " if a["is_text"] else "binary"
+            print(f"  #{a['id']} {mark} {a['name']:<24} {a['bytes']:>9,}B"
+                  + (f"  — {a['note']}" if a["note"] else ""))
+    board.close()
+    return 0
+
+
+def cmd_topic_agenda(args) -> int:
+    """Set a topic's agenda from the shell.
+
+    The reason this exists is remote use: over SSH you could already open a
+    topic and start the council, but the agenda -- the middle step, and the one
+    that makes the difference between a question and a meeting -- was reachable
+    only from inside a session.
+    """
+    board = _board(args)
+    topic = board.topic(int(args.slug) if args.slug.isdigit() else args.slug)
+    tid = int(topic["id"])
+    points = agenda_points(topic)
+
+    if args.clear:
+        board.set_brief(tid, topic["title"], _human(board, args.as_))
+        points = []
+    elif args.set is not None or args.points:
+        # `--set` takes its text directly. As a bare flag it was ambiguous with
+        # the trailing points, and argparse resolved that by rejecting the line.
+        replacing = args.set is not None
+        text = args.set if replacing else " ".join(args.points)
+        if text.strip() == "-":
+            text = sys.stdin.read()
+        added = split_points(text)
+        points = added if replacing else [*points, *added]
+        board.set_brief(tid, agenda_text(points), _human(board, args.as_))
+
+    print(f"{topic['title'].strip()}  ({topic['slug']})")
+    if points:
+        for i, pt in enumerate(points, 1):
+            print(f"  {i}. {pt}")
+    else:
+        print("  no agenda — the seats get the title alone")
+    board.close()
     return 0
 
 
@@ -264,7 +383,7 @@ def cmd_conclude(args) -> int:
         print(f"`{t['slug']}` has {len(undecided)} decision(s) still waiting on you:")
         for p in undecided:
             print(f"  proposal #{p['id']} {p['title']}")
-        print("rule on them first, or --force to close with them unresolved")
+        print("sign off on them first, or --force to close with them unresolved")
         return 1
     for m in board.open_mentions(tid):
         print(f"left unanswered: {m['asker']} asked {m['target']} — "
@@ -340,7 +459,7 @@ def cmd_run(args) -> int:
     board = _board(args)
     t = board.topic(int(args.topic) if args.topic.isdigit() else args.topic)
     if t["status"] == "paused" and not args.resume:
-        print(f"topic is paused ({t['slug']}). Re-run with --resume once you have ruled.")
+        print(f"topic is paused ({t['slug']}). Re-run with --resume once you have signed off.")
         return 1
     if args.resume:
         board.set_topic_status(int(t["id"]), "open", _human(board, args.as_), "resumed by human")
@@ -387,10 +506,127 @@ def cmd_prompt(args) -> int:
     return 0
 
 
+def cmd_telegram(args) -> int:
+    """Run a council in a Telegram chat.
+
+    The token is asked for once. After a successful start it lives on the board,
+    so `mooting telegram` on its own works from then on -- a bot you have to
+    re-authorise every time is a bot you stop using.
+    """
+    board = _session_board(args)
+    if args.forget_token:
+        board.set_setting("telegram.token", None)
+        print("forgotten. `mooting telegram --token ...` to set it again.")
+        board.close()
+        return 0
+
+    stored = board.setting("telegram.token")
+    token = (args.token or os.environ.get("MOOTING_TELEGRAM_TOKEN")
+             or os.environ.get("TELEGRAM_BOT_TOKEN") or stored)
+    if not token:
+        board.close()
+        print("mooting: need a bot token, once.\n"
+              "  mooting telegram --token <token from @BotFather>\n"
+              "  Get one in Telegram: message @BotFather and send /newbot.\n"
+              "  It is remembered afterwards, so you only pass it this time.",
+              file=sys.stderr)
+        return 1
+
+    # Remembered only once Telegram has accepted it -- see `run`. Saving here
+    # would remember a token that never worked.
+    remember = token != stored and not args.no_save
+    if stored and not args.token:
+        print("  token   remembered from a previous run")
+
+    who = _human(board, args.as_)
+    chats = args.chat or [c for c in (board.setting("telegram.chats") or "").split(",") if c]
+    if args.chat:
+        board.set_setting("telegram.chats", ",".join(args.chat))
+    board.close()
+
+    try:
+        from .telegram import run as run_bot
+    except ImportError:
+        print("mooting: the Telegram bot needs aiogram — "
+              "pip install 'mooting[telegram]'", file=sys.stderr)
+        return 1
+    return run_bot(args.db, bot_token=token, chats=chats, human=who,
+                   topic=args.topic, remember=remember)
+
+
+def cmd_pair(args) -> int:
+    """Approve, deny or list chat identities from the shell."""
+    board = _board(args)
+    who = _human(board, args.as_)
+    if args.approve:
+        want = board.q1("SELECT * FROM pairings WHERE id = ?", (int(args.approve),))
+        if want is None:
+            print(f"no pairing request {args.approve}", file=sys.stderr)
+            return 1
+        # Same rule as in chat: their own display name is the name they answer
+        # to, so approving them does not also mean inventing one.
+        seat = args.seat or board.seat_name_for(want["display"],
+                                                fallback=f"guest{args.approve}")
+        row = board.pair_approve(int(args.approve), seat, who)
+        print(f"{row['display'] or row['user_id']} speaks as {row['seat']}")
+    elif args.deny:
+        board.pair_deny(int(args.deny), who)
+        print(f"denied {args.deny}")
+    rows = board.pairings()
+    if not rows:
+        print("no pairing requests yet")
+    for r in rows:
+        print(f"  #{r['id']} {r['status']:<9} {r['display'] or r['user_id']:<24}"
+              f" chat={r['chat_id']}" + (f"  -> {r['seat']}" if r["seat"] else ""))
+    board.close()
+    return 0
+
+
+def cmd_serve(args) -> int:
+    """The board over HTTP, for clients that are not a terminal."""
+    try:
+        from .server import serve
+    except ImportError:
+        print("mooting: the server needs aiohttp — pip install 'mooting[serve]'",
+              file=sys.stderr)
+        return 1
+    board = _board(args)
+    who = _human(board, args.as_)
+    if args.grant:
+        # A per-seat token is an identity: it is who the caller *is* over a
+        # socket, which is why only a human seat can hold one.
+        try:
+            token = board.grant_token(args.grant)
+        except (StoreError, NotAuthorised) as exc:
+            print(f"mooting: {exc}", file=sys.stderr)
+            board.close()
+            return 1
+        print(f"token for {args.grant}:\n  {token}")
+        print("  it may speak and sign off as that seat — treat it as a password")
+        board.close()
+        return 0
+    if args.revoke:
+        board.revoke_token(args.revoke)
+        print(f"revoked the token for {args.revoke}")
+        board.close()
+        return 0
+    holders = board.token_holders()
+    board.close()
+    if args.web:
+        from .web import serve_web
+        return serve_web(args.db, host=args.host, port=args.port, human=who,
+                         topic=None, allow_remote=args.allow_remote)
+    if holders:
+        print(f"  seats   with a token: {', '.join(holders)}")
+    return serve(args.db, host=args.host, port=args.port, token=args.token,
+                 human=who, allow_remote=args.allow_remote)
+
+
 def cmd_console(args) -> int:
     """One terminal where every agent's reply lands and you can talk back."""
+    quiet_asyncio_teardown()
     from .console import run_console
-    board = _board(args)
+    board = _session_board(args)
     who = _human(board, args.as_)
     topic = args.topic
     if not topic:
@@ -403,9 +639,10 @@ def cmd_console(args) -> int:
 
 
 def cmd_tui(args) -> int:
-    """One screen: transcript, seats, tasks, and an input that talks and rules."""
+    """One screen: transcript, seats, tasks, and an input that talks and decides."""
+    quiet_asyncio_teardown()
     from .tui import run_tui
-    board = _board(args)
+    board = _session_board(args)
     who = _human(board, args.as_)
     topic = args.topic
     if not topic:
@@ -490,6 +727,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--manager", help="work mode: the seat that plans and reviews")
     p.set_defaults(fn=cmd_topic_new)
 
+    p = tp.add_parser("agenda", help="what this meeting is to settle")
+    p.add_argument("slug")
+    p.add_argument("points", nargs="*",
+                   help="a point, or several separated by ';'. '-' reads stdin. "
+                        "Omit to just show the agenda.")
+    p.add_argument("--set", metavar="TEXT",
+                   help="replace the whole agenda with this")
+    p.add_argument("--clear", action="store_true", help="remove the agenda")
+    p.set_defaults(fn=cmd_topic_agenda)
+
     p = tp.add_parser("rm", help="delete one topic and everything in it")
     p.add_argument("slug")
     p.add_argument("--yes", action="store_true", help="actually do it")
@@ -538,7 +785,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("topic")
     p.add_argument("-o", "--out", help="file to write ('-' for stdout)")
     p.add_argument("--decisions-only", action="store_true",
-                   help="skip the transcript; keep the rulings and the work log")
+                   help="skip the transcript; keep the decisions and the work log")
     p.set_defaults(fn=cmd_minutes)
 
     p = sub.add_parser("tasks", help="the work plan and where each task has got to")
@@ -583,11 +830,52 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("agent")
     p.set_defaults(fn=cmd_prompt)
 
+    p = sub.add_parser("attach", help="feed a file to a council")
+    p.add_argument("topic")
+    p.add_argument("files", nargs="*", help="omit to list what is attached")
+    p.add_argument("--note", help="why it is attached; shown to every seat")
+    p.add_argument("--rm", help="remove attachment by id")
+    p.set_defaults(fn=cmd_attach)
+
+    p = sub.add_parser("telegram", help="run a council in a Telegram chat")
+    p.add_argument("--token", help="bot token from @BotFather; needed "
+                                   "once, then remembered")
+    p.add_argument("--chat", action="append",
+                   help="allowlisted chat id; repeatable. Without one the bot "
+                        "answers anywhere it is added")
+    p.add_argument("--topic", help="topic slug the chat drives")
+    p.add_argument("--no-save", action="store_true",
+                   help="use the token once without remembering it")
+    p.add_argument("--forget-token", action="store_true",
+                   help="remove the saved token and exit")
+    p.set_defaults(fn=cmd_telegram)
+
+    p = sub.add_parser("pair", help="who may act as which seat in a chat")
+    p.add_argument("--approve", help="pairing id to approve")
+    p.add_argument("--seat", help="the human seat they speak as")
+    p.add_argument("--deny", help="pairing id to refuse")
+    p.set_defaults(fn=cmd_pair)
+
+    p = sub.add_parser("serve", help="serve the board over HTTP (read-only, B1)")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=4173)
+    p.add_argument("--token", help="bearer token; generated if omitted")
+    p.add_argument("--allow-remote", action="store_true",
+                   help="bind a non-loopback address; only behind something "
+                        "that authenticates")
+    p.add_argument("--grant", metavar="SEAT",
+                   help="issue a token that may speak and sign off as that seat")
+    p.add_argument("--revoke", metavar="SEAT", help="withdraw that seat's token")
+    p.add_argument("--web", action="store_true",
+                   help="serve the full session in a browser (needs "
+                        "textual-serve)")
+    p.set_defaults(fn=cmd_serve)
+
     p = sub.add_parser("console", help="live council view: watch replies and talk back")
     p.add_argument("topic", nargs="?", help="default: the most recent open topic")
     p.set_defaults(fn=cmd_console)
 
-    p = sub.add_parser("tui", help="full-screen session: talk, watch the work, rule")
+    p = sub.add_parser("tui", help="full-screen session: talk, watch the work, sign off")
     p.add_argument("topic", nargs="?", help="default: the most recent open topic")
     p.set_defaults(fn=cmd_tui)
 

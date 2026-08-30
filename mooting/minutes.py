@@ -19,6 +19,7 @@ so, rather than promoting the last confident-sounding paragraph.
 
 from __future__ import annotations
 
+import subprocess
 from datetime import datetime
 
 from .store import Store
@@ -95,7 +96,7 @@ def render(store: Store, topic_id: int, transcript: bool = True) -> str:
     for p in decided:
         mark = "**Approved**" if p["status"] == "approved" else "**Rejected**"
         out += [f"### {mark} — {p['title']}", ""]
-        out += [f"_Proposed by {p['author']}; ruled by {p['decided_by']}"
+        out += [f"_Proposed by {p['author']}; decided by {p['decided_by']}"
                 f"{' on ' + _fmt_when(p['decided_at']) if p['decided_at'] else ''}._", ""]
         if p["rationale"]:
             out += [f"> {p['rationale'].strip()}", ""]
@@ -145,6 +146,25 @@ def render(store: Store, topic_id: int, transcript: bool = True) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
+def commits_on(task) -> int | None:
+    """Commits on a task's branch that its base did not have.
+
+    The supervisor already trusted this over a worker's own account of itself
+    when the worker said nothing at all. A report is a claim; this is the
+    evidence, so the log shows both and lets them disagree.
+    """
+    tree, base = task["worktree"], task["base_sha"]
+    if not tree or not base:
+        return None
+    try:
+        r = subprocess.run(["git", "-C", tree, "rev-list", "--count", f"{base}..HEAD"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=15)
+        return int(r.stdout.strip()) if r.returncode == 0 else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
 def worklog(store: Store, topic_id: int) -> list[str]:
     """What was actually done, as opposed to what was decided.
 
@@ -155,11 +175,12 @@ def worklog(store: Store, topic_id: int) -> list[str]:
     tasks = store.tasks(topic_id)
     if not tasks:
         return []
-    out = ["## Work log", "", "| # | task | assignee | state | branch |",
-           "|---|---|---|---|---|"]
+    out = ["## Work log", "", "| # | task | assignee | state | commits | branch |",
+           "|---|---|---|---|---|---|"]
     for t in tasks:
+        n = commits_on(t)
         out.append(f"| {t['id']} | {t['title']} | {t['assignee']} | {t['status']} | "
-                   f"{t['branch'] or '—'} |")
+                   f"{'—' if n is None else n} | {t['branch'] or '—'} |")
     out.append("")
     for t in tasks:
         if not (t["result"] or t["acceptance"]):

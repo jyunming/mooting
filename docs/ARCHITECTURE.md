@@ -79,7 +79,10 @@ cursor, so nobody sees a peer's message from their own round. Round wall-clock i
 
 A seat is eligible when its cursor is behind the board — which is what makes the
 loop terminate on its own. An outstanding question narrows the round to whoever
-was asked; a question put to a human stops the room.
+was asked; a question put to a human stops the room. Only an explicit ask counts
+for that last one: `mentions.asking` separates a question somebody is waiting on
+from a bare `@name` in an argument, because a seat addressing part of its turn to
+you used to halt the council exactly as a question would.
 
 ## Cost
 

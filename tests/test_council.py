@@ -186,8 +186,9 @@ def test_successful_wake_advances_the_cursor(board):
 
 # ------------------------------------------------------------------- encoding
 
-def test_chinese_text_survives_the_round_trip(board):
-    """cp950 is this machine's default codepage; the board must not care."""
+def test_non_ascii_text_survives_the_round_trip(board):
+    """Every text boundary is pinned to UTF-8; the platform default must not
+    get a say, or a reply comes back garbled and reads like corruption."""
     topic = open_debate(board)
     body = "重試一定要加抖動（jitter），否則恢復時會同時湧入——見事故報告 §3。"
     mid = board.post(topic, "claude", body)
@@ -487,7 +488,7 @@ def test_a_slug_is_derived_from_the_title(board):
         == "workflow-optimization-in-agentic-ai"
     assert slugify("Should webhook retries use exponential backoff?") \
         == "should-webhook-retries-use-exponential"
-    # Chinese keeps its characters instead of slugifying to nothing.
+    # a non-Latin script keeps its characters instead of slugifying to nothing.
     assert slugify("分家時養贍田該算用益權還是耗用品？") == "分家時養贍田該算用益權還是耗用品"
     # An all-numeric title would produce an unreachable slug, so it is prefixed.
     assert slugify("2026") == "topic-2026"
@@ -689,3 +690,219 @@ def test_a_concurrent_round_says_so_when_a_seat_blows_up(board, monkeypatch, cap
                (r.exc_info and "database is locked" in str(r.exc_info[1]))
                for r in caplog.records), \
         "the round finished without a word about the seat that failed"
+
+
+def test_granting_turns_is_not_undone_by_the_default_cap(board):
+    """`/rounds 10` writes the budget onto the seat row. Caps carried its own
+    default of 6 and the supervisor took the *minimum*, so a seat granted 10
+    stopped at 6 and said it had no turns left -- while the panel still showed
+    7/10, because the number on screen was not the number that bound."""
+    topic = open_debate(board, max_rounds=10)
+    with board.tx() as c:
+        c.execute("UPDATE seats SET max_turns = 10, turns_used = 7 WHERE topic_id = ?",
+                  (topic,))
+
+    starved = Supervisor(board, {}, Caps())                    # the old behaviour
+    assert not starved._has_budget(topic, "claude"), \
+        "this test no longer reproduces the bug it guards"
+
+    budget = max(s["max_turns"] for s in board.seats(topic))
+    honest = Supervisor(board, {}, Caps(max_turns_per_seat=budget))
+    assert honest._has_budget(topic, "claude"), \
+        "a seat granted 10 turns was still capped at the council default"
+
+
+# --------------------------------------------------------------- attachments
+
+def test_text_attachments_are_inlined_because_seats_cannot_open_files(board, tmp_path):
+    """A deliberating seat has no file access -- codex runs in an empty sandbox
+    on purpose. A path alone would be readable by the one execute-capable seat
+    and invisible to the rest, so the council would argue about a document only
+    one member had."""
+    topic = open_debate(board)
+    doc = tmp_path / "policy.md"
+    doc.write_text("# Retry policy\n\nfixed 30s, no cap\n", encoding="utf-8")
+    board.attach(topic, doc, "human", note="what the gateway does today")
+
+    prompt, _ = Supervisor(board, {}).build_prompt(topic, "claude")
+    assert "## Attached" in prompt
+    assert "fixed 30s, no cap" in prompt, "the text was not inlined"
+    assert "what the gateway does today" in prompt, "the note was dropped"
+    assert "policy.md" in prompt
+
+
+def test_a_binary_attachment_is_named_but_not_inlined(board, tmp_path):
+    topic = open_debate(board)
+    png = tmp_path / "plan.png"
+    png.write_bytes(bytes([137, 80, 78, 71]) + bytes(300))
+    board.attach(topic, png, "human")
+
+    prompt, _ = Supervisor(board, {}).build_prompt(topic, "claude")
+    assert "plan.png" in prompt
+    assert "Not text" in prompt, "a binary was inlined as characters"
+
+
+def test_a_large_attachment_is_truncated_rather_than_crowding_out_the_turn(board, tmp_path):
+    """Source material that fills the prompt is worse than a path: the seat has
+    nothing left to think with."""
+    topic = open_debate(board)
+    big = tmp_path / "log.txt"
+    big.write_text("x" * 50_000, encoding="utf-8")
+    board.attach(topic, big, "human")
+
+    sup = Supervisor(board, {}, Caps(max_attachment_chars=2_000))
+    prompt, _ = sup.build_prompt(topic, "claude")
+    assert "Truncated" in prompt
+    assert prompt.count("x") < 5_000, "the budget was not enforced"
+    assert str(big.name) in prompt
+
+
+def test_an_attachment_is_copied_so_the_record_survives_the_original(board, tmp_path):
+    """Minutes citing a document nobody can open later are minutes of nothing."""
+    topic = open_debate(board)
+    doc = tmp_path / "spec.md"
+    doc.write_text("the original", encoding="utf-8")
+    board.attach(topic, doc, "human")
+    doc.unlink()                                   # the source goes away
+
+    prompt, _ = Supervisor(board, {}).build_prompt(topic, "claude")
+    assert "the original" in prompt, "the attachment did not survive its source"
+
+
+def test_attaching_something_that_is_not_there_says_so(board, tmp_path):
+    topic = open_debate(board)
+    with pytest.raises(StoreError):
+        board.attach(topic, tmp_path / "nope.md", "human")
+
+
+def test_a_pause_quotes_the_part_addressed_to_you():
+    """Reported from a phone as "those don't seem to be a question", and they
+    were not -- they were the opening paragraph of a turn aimed at another seat.
+
+    One message naming two seats writes a mention row for each, and both store
+    the whole body, so quoting from the top showed whichever seat was addressed
+    first under a heading saying somebody was waiting on *you*."""
+    from mooting.supervisor import addressed_to
+
+    body = (
+        "@Santa Direct response on both points:\n\n"
+        "1. **On hyperscalers/fabless:** I concede that fabless giants do not "
+        "run production mask calibration.\n\n"
+        "**Final takeaway for @Jeremy:**\n"
+        "- **Rarity:** Very rare (~a few thousand globally)."
+    )
+
+    mine = addressed_to(body, "Jeremy")
+    assert mine.startswith("Final takeaway for @Jeremy"), mine
+    assert "hyperscalers" not in mine, "quoted somebody else's paragraph"
+    assert "**" not in mine, "markup leaked into a quotation that is italicised"
+
+    # The same body, for the other seat, quotes their part instead.
+    theirs = addressed_to(body, "Santa")
+    assert theirs.startswith("@Santa Direct response"), theirs
+
+
+def test_a_pause_falls_back_when_you_were_never_named():
+    """A seat can direct a turn at somebody without writing their name, so the
+    excerpt has to degrade to the opening rather than to nothing."""
+    from mooting.supervisor import addressed_to
+
+    body = "@Kevin - answering directly. I concede point 3 substantially."
+    assert addressed_to(body, "Jeremy").startswith("@Kevin - answering")
+
+
+def _room(tmp_path):
+    """A board with one human and one agent seated on a topic."""
+    from mooting.store import connect
+    st = connect(tmp_path / "asking.db", init=True)
+    st.add_agent("Jeremy", "human")
+    st.add_agent("Kevin", "agy", driver="spawn")
+    tid = st.open_topic("t", "T", "b", "Jeremy", seats=["Jeremy", "Kevin"])
+    return st, tid
+
+
+def _why_stopped(store, tid):
+    from mooting.drivers import FakeDriver
+    from mooting.supervisor import Supervisor
+    return Supervisor(store, {"Kevin": FakeDriver(store)})._blocking_reason(tid)
+
+
+def test_naming_a_human_in_an_argument_does_not_stop_the_room(tmp_path):
+    """The bug this exists for: Kevin ended a turn with "Final takeaway for
+    @Jeremy: ..." -- a summary, not a question -- and the council halted waiting
+    for an answer to a statement. Reported from a phone as "those don't seem to
+    be a question", because they were not."""
+    store, tid = _room(tmp_path)
+    try:
+        store.post(tid, "Kevin", "@Santa most of this is for you.\n\n"
+                                 "Final takeaway for @Jeremy: it is a rare role.")
+        assert store.open_mentions(tid, "Jeremy"), "the mention is still recorded"
+        assert not store.open_mentions(tid, "Jeremy", only_asks=True)
+        assert _why_stopped(store, tid) is None, "a summary stopped the council"
+    finally:
+        store.close()
+
+
+def test_asking_a_human_still_stops_the_room(tmp_path):
+    """The behaviour worth keeping: a real question waits for its answer rather
+    than letting the debate move on without the one fact only you had."""
+    store, tid = _room(tmp_path)
+    try:
+        store.ask(tid, "Kevin", "Jeremy", "which foundry are you targeting?")
+        assert store.open_mentions(tid, "Jeremy", only_asks=True)
+        why = _why_stopped(store, tid)
+        assert why and "waiting on you" in why, why
+        assert "which foundry" in why, why
+    finally:
+        store.close()
+
+
+def test_answering_discharges_it_and_the_room_moves(tmp_path):
+    store, tid = _room(tmp_path)
+    try:
+        store.ask(tid, "Kevin", "Jeremy", "which foundry?")
+        assert _why_stopped(store, tid) is not None
+        store.post(tid, "Jeremy", "TSMC.", count_turn=False)
+        assert _why_stopped(store, tid) is None, "answering left it blocked"
+    finally:
+        store.close()
+
+
+def test_migrating_an_old_board_sorts_asks_from_mentions(tmp_path):
+    """A board written before the column existed still has to end up with the
+    right answer, because taking the safe default left the exact summary that
+    prompted all this still holding the room.
+
+    `ask` posts a body opening with `@target `; a name found in prose does not.
+    That is enough to tell them apart after the fact."""
+    import sqlite3
+
+    from mooting.store import connect
+
+    store, tid = _room(tmp_path)
+    path = store.path
+    store.post(tid, "Kevin", "Final takeaway for @Jeremy: rare role.")   # named
+    store.ask(tid, "Kevin", "Jeremy", "which foundry are you targeting?")  # asked
+    store.close()
+
+    # Rewind the column away, as an older board would have it.
+    raw = sqlite3.connect(path)
+    raw.execute("ALTER TABLE mentions DROP COLUMN asking")
+    raw.commit()
+    raw.close()
+
+    again = connect(path, init=True)
+    try:
+        cols = {r["name"] for r in again.q("PRAGMA table_info(mentions)")}
+        assert "asking" in cols, "migration did not add the column"
+
+        rows = again.q("SELECT question, asking FROM mentions")
+        named = next(r for r in rows if r["question"].startswith("Final takeaway"))
+        asked = next(r for r in rows if r["question"].startswith("@Jeremy which"))
+        assert named["asking"] == 0, "a summary still blocks the room"
+        assert asked["asking"] == 1, "a real question stopped blocking"
+
+        why = _why_stopped(again, tid)
+        assert why and "which foundry" in why, why
+    finally:
+        again.close()
