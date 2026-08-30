@@ -279,17 +279,47 @@ async def test_a_proposal_is_readable_without_being_rulable(driven, board):
 
 
 @pytest.mark.asyncio
-async def test_running_twice_is_refused_so_one_board_has_one_council(driven):
+async def test_running_twice_is_refused_so_one_board_has_one_council(tmp_path, board):
     """Two clients pressing Run must not start two councils on one board --
-    every seat would be woken twice, on one budget."""
-    first = await driven.post("/api/topics/reno/run", headers=auth())
-    assert first.status == 200
+    every seat would be woken twice, on one budget.
 
-    second = await driven.post("/api/topics/reno/run", headers=auth())
-    assert second.status == 409, "a second council was allowed to start"
+    The first council is held open explicitly. With a supervisor that returns
+    immediately, whether the refusal is even reachable depends on how the loop
+    schedules that first task: on 3.11 it was still pending when the second
+    request arrived and on 3.12 it had already finished, so the same code passed
+    on one and failed on the other. The guard is "not two at once", so the test
+    has to hold one open to mean anything.
+    """
+    release = asyncio.Event()
 
-    stopped = await driven.post("/api/topics/reno/stop", headers=auth())
-    assert stopped.status == 200
+    class Held:
+        async def run_topic(self, topic_id):
+            await release.wait()
+            return "released"
+
+    app = build_app(tmp_path / "board.db", TOKEN, human="jeremy",
+                    supervisor=lambda store, tid: Held())
+    try:
+        async with TestClient(TestServer(app)) as c:
+            first = await c.post("/api/topics/reno/run", headers=auth())
+            assert first.status == 200
+
+            second = await c.post("/api/topics/reno/run", headers=auth())
+            assert second.status == 409, "a second council was allowed to start"
+
+            stopped = await c.post("/api/topics/reno/stop", headers=auth())
+            assert stopped.status == 200
+
+            # And once it has actually stopped, running again is allowed: the
+            # rule is one at a time, not once ever.
+            await asyncio.sleep(0)
+            again = await c.post("/api/topics/reno/run", headers=auth())
+            assert again.status == 200, "the topic stayed locked after stopping"
+            assert (await c.post("/api/topics/reno/stop",
+                                 headers=auth())).status == 200
+    finally:
+        release.set()
+        app[STORE].close()
 
 
 @pytest.mark.asyncio
