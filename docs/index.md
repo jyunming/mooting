@@ -21,7 +21,7 @@ call is yours.
 
 ## A real council
 
-From this repository's own board. Quotes are verbatim; `[...]` marks a cut for
+Held while building this. Quotes are verbatim; `[...]` marks a cut for
 length.
 
 ```

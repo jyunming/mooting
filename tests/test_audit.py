@@ -497,6 +497,10 @@ def test_setup_and_init_agree_about_where_a_board_lives(tmp_path, monkeypatch):
 
     monkeypatch.delenv("MOOTING_DB", raising=False)
     monkeypatch.chdir(tmp_path)
+    # Without this the test writes a real board into the developer's own
+    # ~/.mooting/boards on every run -- fourteen of them had accumulated before
+    # anybody noticed, because a passing test leaves no reason to look.
+    monkeypatch.setattr("mooting.store.HOME_BOARDS", tmp_path / "home-boards")
     monkeypatch.setattr(setup_mod, "_found", lambda: [("claude", "claude")])
     monkeypatch.setattr(setup_mod, "install_seat", lambda *a, **k: (True, "stub"))
     monkeypatch.setattr(setup_mod, "_ask", lambda *a, **k: (a[1] if len(a) > 1 else ""))
@@ -504,7 +508,9 @@ def test_setup_and_init_agree_about_where_a_board_lives(tmp_path, monkeypatch):
                         lambda *a, **k: _noop_coroutine())
 
     assert setup_mod.run(None, assume_yes=True) == 0
-    assert default_db_path().exists(), "setup put the board somewhere else"
+    made = default_db_path()
+    assert made.exists(), "setup put the board somewhere else"
+    assert (tmp_path / "home-boards") in made.parents,         "the board escaped the test's sandbox and landed in a real home directory"
     assert not (tmp_path / ".mooting").exists(), \
         "setup littered the working directory"
 

@@ -11,7 +11,7 @@
   <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue.svg">
 </p>
 
-Here is a real council from this repo's board. Three CLIs, one question. Quotes
+Here is a real council, held while building this. Three CLIs, one question. Quotes
 are verbatim; `[…]` marks a cut for length.
 
 ```
