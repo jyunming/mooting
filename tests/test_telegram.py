@@ -457,6 +457,48 @@ def test_nudging_an_unknown_seat_answers_in_the_chat(tmp_path):
         chat.close()
 
 
+def test_a_stop_notice_stays_on_one_line_and_italicises():
+    """Seen on a phone: the pause notice arrived with literal underscores around
+    it and stopped mid-word at `tapeou_`.
+
+    Two causes, one symptom. The reason embedded 200 raw characters of somebody
+    else's turn, newlines and all; and Telegram-HTML is assembled per line, so an
+    italic span opening in one paragraph and closing in another matches nothing
+    and both underscores survive as text."""
+    from mooting.supervisor import snippet
+    from mooting.telegram import blocks
+
+    question = ("@Santa Direct response on both points:\n\n"
+                "1. On hyperscalers/fabless: I concede that fabless giants "
+                "(Apple, Nvidia, Google) do not run production mask "
+                "calibration - the foundry owns the final tapeout and the "
+                "OPC recipes, which is the part that carries the liability.")
+    reason = f"Kevin is waiting on you: {snippet(question)}"
+
+    assert "\n" not in reason, "a multi-line reason breaks the italics"
+
+    out = blocks(f"_council stopped: {reason}_")
+    assert len(out) == 1, out
+    assert out[0].startswith("<i>") and out[0].endswith("</i>"), out[0]
+    assert "_" not in out[0], "an underscore reached the chat as text"
+
+
+def test_a_snippet_is_cut_at_a_word_not_through_one():
+    """`tapeou` is what a blind slice gives you."""
+    from mooting.supervisor import snippet
+
+    assert snippet("short enough already") == "short enough already"
+
+    long = "word " * 100
+    got = snippet(long, limit=40)
+    assert got.endswith("…")
+    assert len(got) <= 41
+    assert not got.rstrip("…").endswith("wor"), got
+
+    # Whitespace of every kind collapses, so the result is one line.
+    assert snippet("a\n\nb   c\td") == "a b c d"
+
+
 def test_asking_for_a_proposal_by_number_gets_the_buttons_back():
     """The pump starts at the board's head and never replays, so a proposal
     opened before the bot started -- or while the council ran at the terminal --

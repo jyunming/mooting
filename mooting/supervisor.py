@@ -159,6 +159,25 @@ class Caps:
     quiet_rounds_to_settle: int = 1
 
 
+def snippet(text: str, limit: int = 200) -> str:
+    """A quotable one-liner from somebody's whole turn.
+
+    `text[:200]` cut mid-word and kept the newlines, which mattered more than it
+    sounds: the chat wraps this reason in italics, and Telegram-HTML is built
+    per line, so a span that opened in one paragraph and closed in another
+    matched nothing and arrived as literal underscores around a message that
+    stopped mid-word.
+    """
+    flat = " ".join(text.split())
+    if len(flat) <= limit:
+        return flat
+    cut = flat[:limit]
+    space = cut.rfind(" ")
+    if space > limit * 0.6:          # only back up to a word break if it is near
+        cut = cut[:space]
+    return cut.rstrip(" ,.;:—-") + "…"
+
+
 class Supervisor:
     def __init__(
         self,
@@ -658,7 +677,7 @@ class Supervisor:
         # on without the fact only they had.
         for m in self.store.open_mentions(topic_id):
             if self.store.is_human(m["target"]):
-                return f"{m['asker']} is waiting on you: {m['question'].strip()[:200]}"
+                return f"{m['asker']} is waiting on you: {snippet(m['question'])}"
         if not self._eligible(topic_id):
             return self._human_ask_reason(topic_id)
         return None
@@ -673,7 +692,7 @@ class Supervisor:
         """
         for m in self.store.open_mentions(topic_id):
             if self.store.is_human(m["target"]):
-                return f"{m['asker']} is waiting on you: {m['question'].strip()[:200]}"
+                return f"{m['asker']} is waiting on you: {snippet(m['question'])}"
         return None
 
     def _eligible(self, topic_id: int) -> list[str]:

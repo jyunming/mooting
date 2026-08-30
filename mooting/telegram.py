@@ -796,7 +796,10 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
                 if t["status"] == "paused":
                     store.set_topic_status(tid, "open", seat, "resumed from chat")
                 reason = await sup.run_topic(tid)
-                await say(msg.chat.id, f"_council stopped: {reason}_")
+                # One line, or the italics straddle two paragraphs and
+                # arrive as literal underscores.
+                flat = " ".join(str(reason).split())
+                await say(msg.chat.id, f"_council stopped: {flat}_")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
