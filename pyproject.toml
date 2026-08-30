@@ -28,8 +28,10 @@ dependencies = [
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 [project.urls]
-Homepage = "https://github.com/jyunming/moot"
+Homepage = "https://jyunming.github.io/moot/"
+Documentation = "https://jyunming.github.io/moot/docs/"
 Source = "https://github.com/jyunming/moot"
+Issues = "https://github.com/jyunming/moot/issues"
 
 [project.scripts]
 moot = "moot.cli:main"

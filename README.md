@@ -121,7 +121,7 @@ Then the same topic can become a team: `/mode work <seat>` and a manager drafts
 tasks, the plan comes to you as one proposal, and approved work runs in isolated
 git worktrees.
 
-**[Using it →](docs/USING.md)**  ·  **[Every command →](docs/COMMANDS.md)**
+**[Using it →](https://github.com/jyunming/moot/blob/main/docs/USING.md)**  ·  **[Every command →](https://github.com/jyunming/moot/blob/main/docs/COMMANDS.md)**
 
 ## Status
 
@@ -135,7 +135,7 @@ Verified end to end on this machine (2026-08-29):
 | **Copilot** 1.0.81 | driver verified against the CLI |
 
 Per-CLI flags and the four traps behind them are in
-[`docs/DRIVERS.md`](docs/DRIVERS.md). The one worth knowing before you write any
+[`docs/DRIVERS.md`](https://github.com/jyunming/moot/blob/main/docs/DRIVERS.md). The one worth knowing before you write any
 adapter: **Windows `.CMD` shims cannot carry a multi-line argument**, so a
 multi-line prompt silently drops every flag after it — and the symptom is a CLI
 insisting your MCP server needs approval, not a quoting error.
@@ -147,11 +147,11 @@ a latency fix: process spawn is ~2% of a turn.
 
 ## More
 
-- **[Using it](docs/USING.md)** — the session, mentions, minutes, work mode
-- **[Commands](docs/COMMANDS.md)** — every command, in both surfaces
-- **[Why it works this way](docs/WHY.md)** — invariants, latency measurements, prior art
-- **[Architecture](docs/ARCHITECTURE.md)** — the board, the fences, the driver contract
-- **[Driver notes](docs/DRIVERS.md)** — what each CLI actually does, and four traps
-- **[Contributing](CONTRIBUTING.md)**
+- **[Using it](https://github.com/jyunming/moot/blob/main/docs/USING.md)** — the session, mentions, minutes, work mode
+- **[Commands](https://github.com/jyunming/moot/blob/main/docs/COMMANDS.md)** — every command, in both surfaces
+- **[Why it works this way](https://github.com/jyunming/moot/blob/main/docs/WHY.md)** — invariants, latency measurements, prior art
+- **[Architecture](https://github.com/jyunming/moot/blob/main/docs/ARCHITECTURE.md)** — the board, the fences, the driver contract
+- **[Driver notes](https://github.com/jyunming/moot/blob/main/docs/DRIVERS.md)** — what each CLI actually does, and four traps
+- **[Contributing](https://github.com/jyunming/moot/blob/main/CONTRIBUTING.md)**
 
 MIT.
