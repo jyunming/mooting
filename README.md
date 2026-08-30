@@ -227,10 +227,6 @@ binaries rather than their documentation.
 | **Antigravity** (`agy`) 1.1.20 | working — `--mode plan` is genuinely read-only |
 | **Copilot** 1.0.81 | driver verified against the CLI |
 
-**The remote extras are not on PyPI yet.** `serve`, `web` and `telegram` ship in
-0.1.1. PyPI has 0.1.0, which declares none of them. Until 0.1.1 is published:
-`pip install 'mooting[telegram] @ git+https://github.com/jyunming/mooting.git'`.
-
 **The tests have run on one platform.** That is what the
 [CI matrix](https://github.com/jyunming/mooting/actions) is for.
 

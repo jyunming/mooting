@@ -180,13 +180,6 @@ mooting tui
     checking the exit code proves nothing. The probe checks what actually reached
     the board. Run it again any time with `mooting doctor`.
 
-!!! warning "The remote extras need 0.1.1"
-
-    `serve`, `web` and `telegram` ship in 0.1.1. PyPI still has 0.1.0, which
-    declares none of them — so `pip install 'mooting[telegram]'` fails until 0.1.1
-    is published. Until then, install from source:
-    `pip install 'mooting[telegram] @ git+https://github.com/jyunming/mooting.git'`.
-
 ## Two minutes in
 
 ```

@@ -67,7 +67,7 @@ bind is refused outright unless you also pass `--allow-remote`.
 ### HTTP + events — `mooting serve`
 
 ```bash
-pip install 'mooting[serve]'   # needs 0.1.1 — PyPI's 0.1.0 declares only the dev extra
+pip install 'mooting[serve]'
 mooting serve
 ```
 
@@ -103,9 +103,7 @@ token like `8123456789:AAF...`. Treat it as a password.
 **2. Install, and seat a council.**
 
 ```bash
-pip install 'mooting[telegram]'      # 0.1.1 or newer — 0.1.0 declares no extras
-# until 0.1.1 is on PyPI:
-#   pip install 'mooting[telegram] @ git+https://github.com/jyunming/mooting.git'
+pip install 'mooting[telegram]'
 cd your-project
 mooting setup
 ```
