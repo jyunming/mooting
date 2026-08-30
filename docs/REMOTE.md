@@ -94,7 +94,7 @@ whose token made it.
 A council in a Telegram chat, with buttons for rulings and the same commands
 as the terminal session.
 
-### Setting it up
+#### Setting it up
 
 **1. Make a bot.** In Telegram, message **@BotFather** and send `/newbot`. It
 asks for a display name, then a username ending in `bot`, and replies with a
@@ -103,7 +103,9 @@ token like `8123456789:AAF...`. Treat it as a password.
 **2. Install, and seat a council.**
 
 ```bash
-pip install 'mooting[telegram]'      # 0.1.1 or newer — 0.1.0 has no extras
+pip install 'mooting[telegram]'      # 0.1.1 or newer — 0.1.0 declares no extras
+# until 0.1.1 is on PyPI:
+#   pip install 'mooting[telegram] @ git+https://github.com/jyunming/mooting.git'
 cd your-project
 mooting setup
 ```
@@ -152,7 +154,7 @@ your subscriptions. The id is remembered too, so from now on it is just
 Plain messages post as you. `@Santa what does the gateway do today?` puts a
 question to one seat and the others wait for the answer.
 
-### Once it is running
+#### Once it is running
 
 - A proposal arrives with **Approve / Reject** buttons. The reason is the reply
   it asks you for, and the button carries the proposal id, so a ruling cannot
@@ -164,7 +166,7 @@ question to one seat and the others wait for the answer.
 - `/topic agenda`, `/rounds`, `/effort`, `/seats` — the same commands as the
   terminal session, because it is the same dispatch behind them.
 
-### Adding other people
+#### Adding other people
 
 Once you are paired, approving happens in the chat — no terminal:
 
@@ -185,8 +187,6 @@ speak as one, and put a non-human name against something only a human may do.
 Approval is **per chat** — being trusted in one council is not being trusted in
 another — and `mooting pair --approve <id> --seat <s>` still works from the
 shell, which is how you recover if you lose access to the chat.
-
----
 
 ---
 
