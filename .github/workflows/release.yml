@@ -127,6 +127,11 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # A re-run of a release must not fail on a version that already
+          # uploaded. PyPI refuses a replacement outright, so without this a
+          # partial release could never be finished by re-running it.
+          skip-existing: true
 
   github_release:
     needs: [check, publish]
