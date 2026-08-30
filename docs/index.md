@@ -74,7 +74,7 @@ written down.
 ## Install
 
 ```bash
-pip install mooting          # once published — for now: pip install -e .
+pip install mooting
 
 mooting setup                # finds your CLIs, seats them, wires them up, proves it works
 mooting tui

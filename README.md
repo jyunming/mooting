@@ -82,9 +82,7 @@ if each runs under its own subscription.
 ## Install
 
 ```bash
-pip install mooting            # once published
-# or, from a clone:
-pip install -e .
+pip install mooting
 
 mooting setup                  # finds your CLIs, seats them, wires them up, proves it works
 mooting tui
