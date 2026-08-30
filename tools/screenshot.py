@@ -13,6 +13,8 @@ import asyncio
 import pathlib
 import sys
 import shutil
+import subprocess
+import re
 import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
@@ -61,6 +63,49 @@ def build_board(path):
     return tid
 
 
+
+#: PyPI will not render an SVG -- it serves as text and shows a broken image --
+#: so the README needs a PNG. Keeping the two in one command is the point: the
+#: PNG went stale once already, still showing the project's old name and the old
+#: default effort long after both had changed, and nothing said so.
+CHROME = [
+    r"C:/Program Files/Google/Chrome/Application/chrome.exe",
+    r"C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+    "/usr/bin/google-chrome",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+]
+
+
+def write_png(svg: str) -> pathlib.Path | None:
+    """Rasterise the same SVG through headless Chrome, at 2x for sharp text."""
+    browser = next((c for c in CHROME if pathlib.Path(c).exists()), None) or shutil.which("chromium")
+    if not browser:
+        return None
+
+    m = re.search(r'viewBox="0 0 ([\d.]+) ([\d.]+)"', svg)
+    if not m:
+        return None
+    w, h = (int(float(g)) + 1 for g in m.groups())
+
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    page = tmp / "shot.html"
+    page.write_text(
+        "<html><head><meta charset='utf-8'><style>"
+        "html,body{margin:0;padding:0;background:transparent}"
+        f"svg{{display:block;width:{w}px;height:{h}px}}"
+        "</style></head><body>" + svg + "</body></html>",
+        encoding="utf-8")
+
+    out = OUT / "session.png"
+    r = subprocess.run(
+        [browser, "--headless", "--disable-gpu", "--hide-scrollbars",
+         "--default-background-color=00000000", "--force-device-scale-factor=2",
+         f"--window-size={w},{h}", f"--screenshot={out}", page.resolve().as_uri()],
+        capture_output=True, text=True, encoding="utf-8", errors="replace")
+    shutil.rmtree(tmp, ignore_errors=True)
+    return out if out.exists() and r.returncode == 0 else None
+
+
 async def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     # mkdtemp rather than the context manager: the app holds the board open, and
@@ -81,6 +126,11 @@ async def main() -> None:
     target = OUT / "session.svg"
     target.write_text(svg, encoding="utf-8")
     print(f"wrote {target}  ({len(svg):,} bytes)")
+    png = write_png(svg)
+    if png:
+        print(f"wrote {png}  ({png.stat().st_size:,} bytes)")
+    else:
+        print("no Chrome found -- session.png not refreshed; it is now stale")
 
 
 if __name__ == "__main__":

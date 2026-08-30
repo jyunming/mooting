@@ -186,8 +186,9 @@ def test_successful_wake_advances_the_cursor(board):
 
 # ------------------------------------------------------------------- encoding
 
-def test_chinese_text_survives_the_round_trip(board):
-    """cp950 is this machine's default codepage; the board must not care."""
+def test_non_ascii_text_survives_the_round_trip(board):
+    """Every text boundary is pinned to UTF-8; the platform default must not
+    get a say, or a reply comes back garbled and reads like corruption."""
     topic = open_debate(board)
     body = "重試一定要加抖動（jitter），否則恢復時會同時湧入——見事故報告 §3。"
     mid = board.post(topic, "claude", body)
@@ -487,7 +488,7 @@ def test_a_slug_is_derived_from_the_title(board):
         == "workflow-optimization-in-agentic-ai"
     assert slugify("Should webhook retries use exponential backoff?") \
         == "should-webhook-retries-use-exponential"
-    # Chinese keeps its characters instead of slugifying to nothing.
+    # a non-Latin script keeps its characters instead of slugifying to nothing.
     assert slugify("分家時養贍田該算用益權還是耗用品？") == "分家時養贍田該算用益權還是耗用品"
     # An all-numeric title would produce an unreachable slug, so it is prefixed.
     assert slugify("2026") == "topic-2026"
@@ -689,3 +690,86 @@ def test_a_concurrent_round_says_so_when_a_seat_blows_up(board, monkeypatch, cap
                (r.exc_info and "database is locked" in str(r.exc_info[1]))
                for r in caplog.records), \
         "the round finished without a word about the seat that failed"
+
+
+def test_granting_turns_is_not_undone_by_the_default_cap(board):
+    """`/rounds 10` writes the budget onto the seat row. Caps carried its own
+    default of 6 and the supervisor took the *minimum*, so a seat granted 10
+    stopped at 6 and said it had no turns left -- while the panel still showed
+    7/10, because the number on screen was not the number that bound."""
+    topic = open_debate(board, max_rounds=10)
+    with board.tx() as c:
+        c.execute("UPDATE seats SET max_turns = 10, turns_used = 7 WHERE topic_id = ?",
+                  (topic,))
+
+    starved = Supervisor(board, {}, Caps())                    # the old behaviour
+    assert not starved._has_budget(topic, "claude"), \
+        "this test no longer reproduces the bug it guards"
+
+    budget = max(s["max_turns"] for s in board.seats(topic))
+    honest = Supervisor(board, {}, Caps(max_turns_per_seat=budget))
+    assert honest._has_budget(topic, "claude"), \
+        "a seat granted 10 turns was still capped at the council default"
+
+
+# --------------------------------------------------------------- attachments
+
+def test_text_attachments_are_inlined_because_seats_cannot_open_files(board, tmp_path):
+    """A deliberating seat has no file access -- codex runs in an empty sandbox
+    on purpose. A path alone would be readable by the one execute-capable seat
+    and invisible to the rest, so the council would argue about a document only
+    one member had."""
+    topic = open_debate(board)
+    doc = tmp_path / "policy.md"
+    doc.write_text("# Retry policy\n\nfixed 30s, no cap\n", encoding="utf-8")
+    board.attach(topic, doc, "human", note="what the gateway does today")
+
+    prompt, _ = Supervisor(board, {}).build_prompt(topic, "claude")
+    assert "## Attached" in prompt
+    assert "fixed 30s, no cap" in prompt, "the text was not inlined"
+    assert "what the gateway does today" in prompt, "the note was dropped"
+    assert "policy.md" in prompt
+
+
+def test_a_binary_attachment_is_named_but_not_inlined(board, tmp_path):
+    topic = open_debate(board)
+    png = tmp_path / "plan.png"
+    png.write_bytes(bytes([137, 80, 78, 71]) + bytes(300))
+    board.attach(topic, png, "human")
+
+    prompt, _ = Supervisor(board, {}).build_prompt(topic, "claude")
+    assert "plan.png" in prompt
+    assert "Not text" in prompt, "a binary was inlined as characters"
+
+
+def test_a_large_attachment_is_truncated_rather_than_crowding_out_the_turn(board, tmp_path):
+    """Source material that fills the prompt is worse than a path: the seat has
+    nothing left to think with."""
+    topic = open_debate(board)
+    big = tmp_path / "log.txt"
+    big.write_text("x" * 50_000, encoding="utf-8")
+    board.attach(topic, big, "human")
+
+    sup = Supervisor(board, {}, Caps(max_attachment_chars=2_000))
+    prompt, _ = sup.build_prompt(topic, "claude")
+    assert "Truncated" in prompt
+    assert prompt.count("x") < 5_000, "the budget was not enforced"
+    assert str(big.name) in prompt
+
+
+def test_an_attachment_is_copied_so_the_record_survives_the_original(board, tmp_path):
+    """Minutes citing a document nobody can open later are minutes of nothing."""
+    topic = open_debate(board)
+    doc = tmp_path / "spec.md"
+    doc.write_text("the original", encoding="utf-8")
+    board.attach(topic, doc, "human")
+    doc.unlink()                                   # the source goes away
+
+    prompt, _ = Supervisor(board, {}).build_prompt(topic, "claude")
+    assert "the original" in prompt, "the attachment did not survive its source"
+
+
+def test_attaching_something_that_is_not_there_says_so(board, tmp_path):
+    topic = open_debate(board)
+    with pytest.raises(StoreError):
+        board.attach(topic, tmp_path / "nope.md", "human")

@@ -1,112 +1,72 @@
 <h1 align="center">Mooting</h1>
 
 <p align="center">
-  <em>Your coding agents, arguing on the record — and you decide.</em>
+  <em>Your coding agents disagree. That's the point.</em>
 </p>
 
 <p align="center">
   <a href="https://github.com/jyunming/mooting/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/jyunming/mooting/actions/workflows/tests.yml/badge.svg"></a>
-  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <a href="https://pypi.org/project/mooting/"><img alt="PyPI" src="https://img.shields.io/pypi/v/mooting.svg"></a>
+  <a href="https://github.com/jyunming/mooting/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
   <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue.svg">
 </p>
 
 <p align="center">
-  <a href="https://jyunming.github.io/mooting/"><strong>mooting &rarr;</strong></a>
+  <img alt="A Mooting session: three seats arguing about retry backoff, a proposal awaiting a ruling, and a question waiting on the human." src="https://raw.githubusercontent.com/jyunming/mooting/main/docs/assets/session.png" width="820">
 </p>
 
 <p align="center">
-  <img alt="A Mooting session" src="docs/assets/session.svg" width="820">
-</p>
-
-<p align="center">
+  <a href="https://jyunming.github.io/mooting/">Website</a> ·
   <a href="#install">Install</a> ·
-  <a href="docs/COMMANDS.md">Commands</a> ·
-  <a href="docs/ARCHITECTURE.md">Architecture</a> ·
-  <a href="docs/DRIVERS.md">Driver notes</a>
+  <a href="https://github.com/jyunming/mooting/blob/main/docs/USING.md">Using it</a> ·
+  <a href="https://github.com/jyunming/mooting/blob/main/docs/COMMANDS.md">Commands</a> ·
+  <a href="https://github.com/jyunming/mooting/blob/main/docs/ARCHITECTURE.md">Architecture</a>
 </p>
 
 ---
 
-Claude Code, Codex, Copilot CLI and Antigravity each keep their own
-subscription, their own context and their own strengths. Mooting gives them one
-shared board and a turn-taking loop, so *"get a second opinion from the model that
-read the sources"* stops being four terminal windows and a lot of copy-paste.
+Ask one model and you get a confident average. Mooting puts **Claude Code, Codex,
+Copilot and Antigravity** in one room, each with its own context and its own
+reading of the sources, and lets them argue about your code. You settle it — and
+the argument is written down.
 
-It never calls a model, holds an API key, or sees a token. It drives the
-first-party CLIs you already pay for.
-
-```bash
-mooting tui
-```
-
-```
-> /new the workflow optimization in agentic AI development
-> we run four CLIs by hand across separate windows and merge by hand
-> /run
-```
-
-Three seats argue. You interject, ask one of them directly with `@codex …`, and
-rule on what they propose. Then:
-
-```
-> /conclude examples before invariants; humans review oracles, not diffs
-wrote what-is-the-best-optimized-workflow-minutes.md — 2 decisions
-```
-
-## What it is for
-
-**A decision you do not want to make alone.** Independent seats, real
-disagreement, and a record of who objected and why — then a ruling that only you
-can give.
-
-**Work that follows from it.** The same topic becomes a team: a manager drafts
-tasks, the plan comes to you as one proposal, and approved work runs in isolated
-git worktrees. Your branch is never touched; merging stays your git action.
-
-**A record that outlives the terminal.** `mooting minutes` writes what was asked,
-what was decided and by whom, who objected, what was left unanswered, and — on a
-work topic — a log of every task and what came of it.
-
-## Why not one model with a long prompt
-
-Because they disagree, and the disagreement is the product. In the session that
-produced this project's own design notes, one seat proposed a criterion for
-agentic workflows and a second seat rejected the premise the first had built on —
-a distinction the first had not considered. That exchange is in the minutes,
-attributable, with the human ruling recorded against it.
-
-And because the seats are the CLIs you already pay for. Routing a cheap question
-to a cheap seat and a hard one to an expensive seat is the point; that only works
-if each runs under its own subscription.
+It never calls a model, holds an API key, or sees a token. Every seat is a CLI
+already on your machine, running on the subscription you already pay for.
 
 ## Install
 
 ```bash
 pip install mooting
 
-mooting setup                  # finds your CLIs, seats them, wires them up, proves it works
+mooting setup      # finds your CLIs, seats them, wires up MCP, proves each one works
 mooting tui
 ```
 
-`mooting doctor` asserts on **what landed on the board**, not on exit codes. A CLI
-can start, load the server, decline to call it and exit 0 — a return-code check
-goes green while the seat is mute.
+Reaching a council from elsewhere — a browser, an HTTP client, a Telegram chat —
+needs an extra and **0.1.1 or newer**: `pip install 'mooting[web]'`,
+`'mooting[serve]'`, `'mooting[telegram]'`. See
+[Remote](https://github.com/jyunming/mooting/blob/main/docs/REMOTE.md).
 
-Windows: use Windows Terminal, PowerShell or cmd for the full-screen session;
-`mooting console` is the line-based fallback for mintty and SSH.
+`mooting setup` spends one real turn per seat, because a CLI can start, load the
+MCP server, decline to call it and still exit 0 — a return-code check goes green
+while the seat is mute.
 
-## A tour
+> **Windows** · use Windows Terminal, PowerShell or cmd for the full-screen
+> session. `mooting console` is the line-based fallback for mintty and SSH.
+
+## Ask. Argue. Rule.
 
 ```
-> /new should webhook retries use exponential backoff?
+> /topic new should webhook retries use exponential backoff?
 > the gateway retries every 30s and stampedes on recovery
 > /run
 ```
 
-Seats argue. Type to interject — it also answers anything asked of you. `@codex
-what does the gateway do today?` puts the question to one of them and the others
-wait for the answer. When a seat proposes something concrete, only you can close
-it:
+Every seat answers at once, so nobody follows the leader. They object, cite, and
+question each other — `@codex what does the gateway do today?` puts it to one of
+them and the others wait for the answer. A question put to *you* stops the room.
+
+When a seat proposes something concrete, only you can close it:
 
 ```
 > /proposals 3          # the whole thing: body, every vote, every objection
@@ -115,33 +75,54 @@ it:
 wrote retries-minutes.md — 1 decision
 ```
 
-Then the same topic can become a team: `/mode work <seat>` and a manager drafts
-tasks, the plan comes to you as one proposal, and approved work runs in isolated
-git worktrees.
+The minutes record what was asked, what was decided and by whom, who objected,
+and what nobody settled.
 
-**[Using it →](https://github.com/jyunming/mooting/blob/main/docs/USING.md)**  ·  **[Every command →](https://github.com/jyunming/mooting/blob/main/docs/COMMANDS.md)**
+## Then put them to work
 
-## Status
+A decision nobody builds is just a nice conversation. `/topic mode work <seat>` makes
+one seat the manager: it breaks the decision into tasks and brings you the plan
+as a **single proposal**. Nothing runs before you approve it — there is no path
+to a running task that does not go through you.
 
-Verified end to end on this machine (2026-08-29):
+Approved work runs in isolated **git worktrees**, one branch per task. Your
+branch is never touched, and merging stays your git action. The work log is
+written the same way the minutes are.
+
+## Conversation, or deliberation
+
+Most of the time you are thinking out loud and want the room to keep up.
+Sometimes it is the decision you will still be living with next year.
+`/effort` switches mid-session.
+
+| Setting | One turn | Reach for it when |
+|---|---|---|
+| **Conversation** `low` — the default | ~30 seconds | Brainstorming, sanity checks, narrowing a shortlist |
+| **Deliberation** `high` | a few minutes | Design reviews, architecture calls, hard trade-offs |
+
+And they think at the same time, so three opinions cost about what one does.
+
+## The seats
+
+Measured against each binary, not read from its documentation.
 
 | Seat | Result |
 |---|---|
 | **Claude Code** 2.1.250 | **working** — posts to the board, resumes by our own UUID |
-| **Codex** 0.149.0 | **working** — needs `--approve-for-me` and its prompt on stdin; stateless |
-| **Antigravity** (`agy`) 1.1.20 | **working** — `--mode plan` is genuinely read-only; stateless |
+| **Codex** 0.149.0 | **working** — needs `--approve-for-me` and its prompt on stdin |
+| **Antigravity** (`agy`) 1.1.20 | **working** — `--mode plan` is genuinely read-only |
 | **Copilot** 1.0.81 | driver verified against the CLI |
 
-Per-CLI flags and the four traps behind them are in
-[`docs/DRIVERS.md`](https://github.com/jyunming/mooting/blob/main/docs/DRIVERS.md). The one worth knowing before you write any
-adapter: **Windows `.CMD` shims cannot carry a multi-line argument**, so a
-multi-line prompt silently drops every flag after it — and the symptom is a CLI
-insisting your MCP server needs approval, not a quoting error.
+The trap worth knowing before you write any adapter: **Windows `.CMD` shims
+cannot carry a multi-line argument**, so a multi-line prompt silently drops every
+flag after it — and the symptom is a CLI insisting your MCP server needs
+approval, not a quoting error. The rest are in
+[the driver notes](https://github.com/jyunming/mooting/blob/main/docs/DRIVERS.md).
 
-**Not built yet:** a web UI. ACP (`--acp` on Copilot and Antigravity) is
-worth adding for **permission routing** — it hands a seat's approval requests back
-to the supervisor, which is the natural home for "the human decides". It is *not*
-a latency fix: process spawn is ~2% of a turn.
+**Not built yet:** a web UI. ACP (`--acp` on Copilot and Antigravity) is worth
+adding for **permission routing** — it hands a seat's approval requests back to
+the supervisor, which is the natural home for "the human decides". It is *not* a
+latency fix: process spawn is ~2% of a turn.
 
 ## More
 
@@ -150,6 +131,7 @@ a latency fix: process spawn is ~2% of a turn.
 - **[Why it works this way](https://github.com/jyunming/mooting/blob/main/docs/WHY.md)** — invariants, latency measurements, prior art
 - **[Architecture](https://github.com/jyunming/mooting/blob/main/docs/ARCHITECTURE.md)** — the board, the fences, the driver contract
 - **[Driver notes](https://github.com/jyunming/mooting/blob/main/docs/DRIVERS.md)** — what each CLI actually does, and four traps
+- **[Remote](https://github.com/jyunming/mooting/blob/main/docs/REMOTE.md)** — over SSH, over HTTP, or from a Telegram chat
 - **[Contributing](https://github.com/jyunming/mooting/blob/main/CONTRIBUTING.md)**
 
 MIT.

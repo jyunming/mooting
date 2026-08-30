@@ -19,7 +19,7 @@ from pathlib import Path
 
 from .drivers.spawn import DRIVER_CLASSES
 from .install import NEEDS_REGISTRATION, install_seat
-from .store import Store, StoreError, connect
+from .store import Store, StoreError, connect, default_db_path
 
 #: Offered in the order most people would want them seated. Gemini's driver
 #: works and `mooting agents add <name> gemini` still seats it -- it is left out
@@ -64,7 +64,10 @@ def run(db: Path | str | None, *, assume_yes: bool = False) -> int:
     print()
 
     # ---------------------------------------------------------------- 1. board
-    target = Path(db) if db else Path.cwd() / ".mooting" / "board.db"
+    # `default_db_path`, not a local path of its own: `mooting init`
+    # centralises boards under the home directory, and setup answering
+    # differently means the two commands disagree about where a board is.
+    target = Path(db) if db else default_db_path()
     fresh = not target.exists()
     store: Store = connect(db, init=True)
     print(f"  board      {target}{'  (new)' if fresh else '  (existing)'}")

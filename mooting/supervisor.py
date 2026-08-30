@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import pathlib
 import subprocess
 from pathlib import Path
 from dataclasses import dataclass
@@ -28,6 +29,64 @@ from .drivers.base import Driver, Seat, WakeResult
 from .store import Store
 
 log = logging.getLogger("mooting.supervisor")
+
+
+def _attachment_section(store, topic_id: int, budget: int) -> list[str]:
+    """Source material, put where every seat can actually reach it.
+
+    Text is inlined rather than merely pointed at, because a deliberating seat
+    cannot open files: codex runs it in an empty sandbox on purpose, and the
+    others have no reason to go looking. A path alone would be readable by the
+    one execute-capable seat and invisible to everyone else, which is the worst
+    of both -- the council would argue about a document only one member had.
+
+    The path is given as well, so a seat that *can* open it may.
+    """
+    rows = store.attachments(topic_id)
+    if not rows:
+        return []
+    lines = ["## Attached", ""]
+    spent = 0
+    for a in rows:
+        head = f"**{a['name']}** ({a['bytes']:,} bytes)"
+        if a["note"]:
+            head += f" — {a['note']}"
+        lines += [head, f"`{a['path']}`", ""]
+        if not a["is_text"]:
+            lines += ["_Not text; open it from that path if you can._", ""]
+            continue
+        try:
+            body = pathlib.Path(a["path"]).read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            lines += [f"_Could not be read back: {exc}_", ""]
+            continue
+        room = budget - spent
+        if room <= 0:
+            lines += ["_Not inlined: the attachment budget for this turn is "
+                      "spent. Open it from the path above._", ""]
+            continue
+        if len(body) > room:
+            body = body[:room]
+            lines += ["```", body, "```",
+                      f"_Truncated at {room:,} characters; the whole file is at "
+                      f"the path above._", ""]
+        else:
+            lines += ["```", body, "```", ""]
+        spent += len(body)
+    return lines
+
+
+def _agenda_of(topic) -> str:
+    """The topic's agenda, or nothing when it is only an echo of the title.
+
+    `/new` seeds the brief with the title so a topic is never empty, which means
+    "has an agenda" is not the same as "brief is set" -- it means somebody wrote
+    something the title does not already say.
+    """
+    brief = (topic["brief"] or "").strip()
+    return "" if brief == (topic["title"] or "").strip() else brief
+
+
 
 #: How the room is framed to a seat. This is the whole difference between the two
 #: topic modes, and it is a real one: told that disagreement is the product, a
@@ -93,6 +152,9 @@ class Caps:
     #: wakes. It is also simply expensive: nobody needs 45k characters of debate
     #: replayed to say one thing.
     max_catchup_chars: int = 12_000
+    #: Ceiling on inlined attachment text per turn. Source material that crowds
+    #: out the argument is worse than a path the seat has to ask about.
+    max_attachment_chars: int = 8_000
     #: Consecutive silent turns across all seats that mean the debate is spent.
     quiet_rounds_to_settle: int = 1
 
@@ -695,12 +757,17 @@ class Supervisor:
         turns_left = min(row["max_turns"], self.caps.max_turns_per_seat) - row["turns_used"]
 
         lines = [
-            f"You are **{agent}**, holding a seat on an Mooting council.",
+            f"You are **{agent}**, holding a seat on a Mooting council.",
             "",
             f"## Topic: {topic['title']}  (`{topic['slug']}`, round {topic['round'] + 1}/{topic['max_rounds']})",
             "",
-            topic["brief"],
-            "",
+            # An agenda is worth naming as one. A seat handed a bare question
+            # answers the question; a seat handed the points to settle works
+            # through them, which is the difference between a chat and a meeting.
+            *(["### Agenda", "", _agenda_of(topic), ""]
+              if _agenda_of(topic) else []),
+            *_attachment_section(self.store, topic_id,
+                                 self.caps.max_attachment_chars),
             f"**Council:** {seats}",
             f"**Your budget:** {turns_left} turn(s) left.",
             "",

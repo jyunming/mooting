@@ -51,8 +51,8 @@ and — prominently — why anything is blocked.
 You never have to leave for the next question:
 
 ```
-> /new the workflow optimization in agentic AI software development
-> /mode work claude     # switch to team mode, claude manages
+> /topic new the workflow optimization in agentic AI software development
+> /topic mode work claude     # switch to team mode, claude manages
 > /mode discuss         # back to a discussion — no roles
 > /seats                # who is here
 > /seats add agy               # seat one already registered
@@ -79,10 +79,10 @@ lingering as a title nobody uses.
 Just type the question. The short handle you see in `mooting ls` and pass to
 `mooting tui` is **derived from it** — that one becomes
 `workflow-optimization-in-agentic-ai` — because asking someone to invent a name for
-their own question before they can ask it is friction for nothing. Chinese titles
+their own question before they can ask it is friction for nothing. Titles
 keep their characters; collisions get a numeric suffix.
 
-`/new` carries the seats, mode and effort over from where you are standing: the
+`/topic new` carries the seats, mode and effort over from where you are standing: the
 common case is "same room, next question", and re-listing the council every time
 is what sends you back to the shell.
 
@@ -166,7 +166,9 @@ mooting minutes ship-it --decisions-only
 
 or `/minutes` from inside the session. It renders what was asked, **what was
 decided and by whom**, who objected and why, what was left unanswered, and — on a
-work topic — a **work log** of every task, its branch and what the worker reported.
+work topic — a **work log** of every task, its branch, what the worker reported,
+and how many commits actually landed on that branch. The report is a claim; the
+commit count is the evidence, and the log shows both so they can disagree.
 
 Two things it deliberately does not do. It does not **summarise**: minutes that
 paraphrase are minutes you have to distrust, and you cannot check them without the
@@ -182,7 +184,7 @@ session:
 
 ```
 > /capability Algae execute D:/proj    # Algae may edit files, in that repo
-> /mode work Santa                     # Santa plans and reviews
+> /topic mode work Santa                     # Santa plans and reviews
 > /run                                 # Santa drafts tasks, then stops
 > /proposals                           # the plan, as one proposal
 > /approve 9 go                        # only this releases any work

@@ -89,7 +89,7 @@ mooting tui
 ## A tour
 
 ```
-> /new should webhook retries use exponential backoff?
+> /topic new should webhook retries use exponential backoff?
 > the gateway retries every 30s and stampedes on recovery
 > /run
 ```
