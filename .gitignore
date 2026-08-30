@@ -17,3 +17,5 @@ site/
 
 # personal marketing drafts, not project documentation
 outputs/linkedin.md
+dist/
+build/
