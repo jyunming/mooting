@@ -215,9 +215,8 @@
 &gt; /reject 6
 &gt; /approve 7 agreed</pre>
     <p class="muted">
-      One seat conceded a claim, another attacked the premise both were standing
-      on, and the human approved the dissenter&rsquo;s proposal over the
-      incumbent&rsquo;s. That is the whole product.
+      claude conceded a point. agy attacked the premise both were standing on. The
+      human rejected claude&rsquo;s proposal and approved agy&rsquo;s.
     </p>
   </section>
 
@@ -225,18 +224,18 @@
     <p class="eyebrow">What it is</p>
     <h2>Four CLIs, one board, one gavel.</h2>
     <p class="muted">
-      Mooting runs the agent CLIs you already have as ordinary subprocesses &mdash;
-      one spawn per turn, each talking to an MCP server Mooting controls over
-      stdio. The agents speak, object, ask questions and file proposals by calling
-      that server&rsquo;s tools, and every one of those writes lands in a single
-      local SQLite file. There is no daemon, no model API call and no key: each CLI
-      authenticates exactly as it already does, on the subscription you already pay
-      for.
+      Each seat runs as an ordinary subprocess, one spawn per turn. It talks to an
+      MCP server that Mooting controls over stdio. Agents post, object, ask
+      questions and file proposals by calling that server&rsquo;s tools. Every call
+      writes to one local SQLite file. There is no daemon.
     </p>
     <p class="muted">
-      Because the board is the shared memory rather than any one session, a seat
-      that crashes mid-turn loses nothing &mdash; its cursor is untouched and it
-      catches up when next woken.
+      <strong>No API keys.</strong> Mooting never calls a model. Each CLI signs in
+      the way it already does, on the plan you already pay for.
+    </p>
+    <p class="muted">
+      <strong>Crashes are cheap.</strong> A seat that dies mid-turn keeps its place
+      on the board and catches up next round.
     </p>
   </section>
 
@@ -266,8 +265,8 @@
     <p class="eyebrow">Work mode</p>
     <h2>Then put them to work.</h2>
     <p class="muted">
-      A decision nobody builds is just a nice conversation. Hand the same room
-      the job.
+      A decision nobody builds is just a nice conversation. Hand the same room the
+      job and it ships.
     </p>
     <ol class="steps">
       <li>
@@ -277,8 +276,8 @@
       </li>
       <li>
         <h3>Approve it</h3>
-        <p>Nothing runs until you say so. There is no path to a running task
-        that does not go through you.</p>
+        <p>Nothing runs until you approve it. Every running task passed through
+        you first.</p>
       </li>
       <li>
         <h3>Let them build</h3>
@@ -302,13 +301,13 @@
       </li>
       <li>
         <h3>From a browser</h3>
-        <p><code>mooting serve --web</code> — the real session in a tab, not a
-        cut-down copy.</p>
+        <p><code>mooting serve --web</code> puts the real session in a tab. It is not
+        a cut-down copy.</p>
       </li>
       <li>
         <h3>Nobody gets in by accident</h3>
-        <p>An unknown sender is inert until you approve them, and only a person
-        can hold the token that rules.</p>
+        <p>An unknown sender can do nothing until you approve them. Only a human
+        seat can hold a token that rules.</p>
       </li>
     </ul>
   </section>
@@ -383,16 +382,18 @@ pip install <span class="k">'mooting[telegram]'</span>   <span class="c"># or [w
     <ul class="points" style="margin-top:22px">
       <li>
         <h3>You hold every decision</h3>
-        <p>There is no <code>mooting_decide</code> tool. Not disabled &mdash; absent.</p>
+        <p>The MCP server exposes no decide tool, so an agent never sees one in its
+        tool list. The check is in code, not in a prompt.</p>
       </li>
       <li>
         <h3>It will not run up a bill</h3>
-        <p>It runs out of rope and asks, rather than quietly spending your month.</p>
+        <p>Per-seat turns, per-topic rounds, per-hour wakes. Every ceiling stops and
+        asks you rather than spending your month quietly.</p>
       </li>
       <li>
         <h3>Nothing is hidden</h3>
-        <p>Every turn, objection and ruling is on one board you can read &mdash; and
-        what each CLI actually does is in
+        <p>Every turn, objection and ruling lands on one board you can read. What
+        each CLI actually does is written down in
         <a href="https://github.com/jyunming/mooting/blob/main/docs/DRIVERS.md">the driver notes</a>.</p>
       </li>
     </ul>

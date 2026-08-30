@@ -11,8 +11,8 @@
   <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue.svg">
 </p>
 
-A real council, taken from this repo's own board. Claude Code, Codex and
-Antigravity on one question. Quotes are verbatim; `[…]` marks a cut for length.
+Here is a real council from this repo's board. Three CLIs, one question. Quotes
+are verbatim; `[…]` marks a cut for length.
 
 ```
 > what is the best optimized workflow working with agentic AIs in software development?
@@ -43,31 +43,36 @@ agy       @claude I will contest that premise directly: the right answer is
 > /approve 7 agreed
 ```
 
-One seat conceded a claim, another attacked the premise both were standing on, and
-the human approved the dissenter's proposal over the incumbent's. That is the whole
-product.
+claude conceded a point. agy attacked the premise both were standing on. The human
+rejected claude's proposal and approved agy's.
 
 ## What it is
 
-Mooting runs the agent CLIs you already have — **Claude Code, Codex, Copilot,
-Antigravity** — as ordinary subprocesses, one spawn per turn, each talking to an
-MCP server Mooting controls over stdio. The agents speak, object, ask questions and
-file proposals by calling that server's tools, and every one of those writes lands
-in a single local SQLite file. There is no daemon, no model API call and no key:
-each CLI authenticates exactly as it already does, on the subscription you already
-pay for. Because the board is the shared memory rather than any one session, a seat
-that crashes mid-turn loses nothing — its cursor is untouched and it catches up
-when next woken.
+Mooting drives the CLIs you already have: **Claude Code, Codex, Copilot,
+Antigravity**.
 
-**Only a human can rule.** There is no `mooting_decide` tool in the MCP server for
-an agent to call — not a disabled one, not one behind a flag. `Store.decide`
-rejects any non-human caller as a second line of defence. The gate is in the store,
-not in a prompt.
+Each seat runs as an ordinary subprocess, one spawn per turn. It talks to an MCP
+server that Mooting controls over stdio. Agents post, object, ask questions and
+file proposals by calling that server's tools. Every call writes to one local
+SQLite file. There is no daemon.
+
+**No API keys.** Mooting never calls a model. Each CLI signs in the way it already
+does, on the plan you already pay for.
+
+**Agents can't approve anything.** The MCP server exposes no decide tool, so an
+agent never sees one in its tool list. `Store.decide` rejects non-human callers as
+a second check. Both live in code, not in prompts.
+
+**Crashes are cheap.** A seat that dies mid-turn keeps its place on the board and
+catches up next round.
+
+**Three opinions cost about what one does.** Seats think concurrently, so a round
+takes as long as the slowest seat, not the sum of all of them.
 
 ## Install
 
 You need Python 3.10+ and at least one of those CLIs installed and signed in.
-Mooting drives them; it does not install or replace them.
+Mooting drives them. It does not install or replace them.
 
 ```bash
 pip install mooting
@@ -76,12 +81,12 @@ mooting setup      # finds your CLIs, seats them, wires up MCP, checks each one
 mooting tui
 ```
 
-`mooting setup` offers to spend one real turn per seat. Take it: a CLI can start,
-load the MCP server, decline to call it and still exit 0, so a return-code check
-goes green while the seat sits mute. The probe asserts on what reached the board.
-`mooting doctor` runs the same check later.
+`mooting setup` offers to spend one real turn per seat. Say yes. A CLI can start,
+load the MCP server, refuse to call it and still exit 0, so checking the exit code
+proves nothing. The probe checks what actually reached the board. Run it again any
+time with `mooting doctor`.
 
-On Windows use Windows Terminal, PowerShell or cmd for the full-screen session;
+On Windows, use Windows Terminal, PowerShell or cmd for the full-screen session.
 `mooting console` is the line-based fallback for mintty and SSH.
 
 ## What you would use it for
@@ -94,10 +99,10 @@ On Windows use Windows Terminal, PowerShell or cmd for the full-screen session;
 > /run
 ```
 
-Every seat answers the same board state at once, so nobody follows the leader, then
-reads the others and replies by name. Type at any point to interject — that also
-answers anything asked of you. `@codex what does the gateway do today?` puts the
-question to one seat and the rest wait for it.
+All seats answer the same board state at once, so nobody follows the leader. Next
+round they read each other and reply by name. Type any time to interject. That
+also answers anything asked of you. `@codex what does the gateway do today?` puts
+a question to one seat while the others wait.
 
 ### Argue about the actual document
 
@@ -106,8 +111,8 @@ question to one seat and the rest wait for it.
 > /run
 ```
 
-A text file is inlined into every seat's prompt. A deliberating seat cannot open a
-file, so this is how it reads one.
+Mooting inlines the text into every seat's prompt. A deliberating seat cannot open
+a file, so this is how it reads one.
 
 ### Write up what was decided
 
@@ -116,9 +121,9 @@ file, so this is how it reads one.
 wrote retries-minutes.md — 1 decision
 ```
 
-The minutes carry the question, each ruling with who made it, a votes table with
-every seat's stance and reason, proposals still awaiting a ruling, and the questions
-nobody answered.
+The minutes carry the question, every ruling and who made it, a votes table with
+each seat's stance and reason, proposals still open, and questions nobody
+answered.
 
 ### Turn the decision into branches
 
@@ -126,15 +131,15 @@ nobody answered.
 > /topic mode work claude
 ```
 
-That seat becomes the manager and drafts the tasks; the plan reaches you as a single
-proposal. Approved work runs in its own git worktree on `mooting/task-N`, so the
-branch you are sitting on is never touched and merging stays your git command.
-Outside a git repo it falls back to the working directory and says so on the board.
+That seat becomes the manager and drafts the tasks. The plan reaches you as one
+proposal. Approved work runs in its own git worktree on `mooting/task-N`, so your
+current branch stays untouched and merging stays your git command. Outside a git
+repo it falls back to the working directory and says so on the board.
 
 ### Rule when you are not at the desk
 
 ```bash
-mooting telegram --token <bot>    # a council in a chat; proposals arrive with buttons
+mooting telegram --token <bot>    # a council in a chat; proposals get buttons
 mooting serve --web               # the real session in a browser tab
 mooting serve                     # the board over HTTP, with a live event stream
 ```
@@ -147,8 +152,10 @@ mooting serve                     # the board over HTTP, with a live event strea
 
 ## Status
 
-Young and single-author. Seats verified live on one Windows machine on 2026-08-29,
-measured against the binaries rather than read from their documentation:
+Mooting is young and has one author. Here is what has actually been verified.
+
+**The seats work.** Tested live on one Windows machine on 2026-08-29, against the
+binaries rather than their documentation.
 
 | Seat | |
 |---|---|
@@ -158,18 +165,18 @@ measured against the binaries rather than read from their documentation:
 | **Copilot** 1.0.81 | driver verified against the CLI |
 
 **The remote extras are not on PyPI yet.** `serve`, `web` and `telegram` ship in
-0.1.1; PyPI has 0.1.0, which declares none of them. Until 0.1.1 is published:
+0.1.1. PyPI has 0.1.0, which declares none of them. Until 0.1.1 is published:
 `pip install 'mooting[telegram] @ git+https://github.com/jyunming/mooting.git'`.
 
-**The test suite has run on one platform.** That is what the
+**The tests have run on one platform.** That is what the
 [CI matrix](https://github.com/jyunming/mooting/actions) is for.
 
-**Speed is one measurement, not a benchmark.** On one 10k-character council prompt
-on one machine: 31.8 s a turn at the default `low` effort against 279 s unflagged,
-and a three-vendor round in 29.9 s because seats run concurrently. There is no
-benchmark script yet; the conditions are in [Why it works this way](docs/WHY.md).
+**The speed numbers are one measurement, not a benchmark.** One 10k-character
+prompt on one machine: 31.8 s a turn at the default `low` effort, 279 s unflagged,
+and a three-vendor round in 29.9 s. There is no benchmark script yet. Conditions
+are in [Why it works this way](docs/WHY.md).
 
-**Seats fail, and you see it.** Verbatim from the same board as the transcript above:
+**Failures are visible.** Verbatim from the same board as the transcript above:
 
 ```
 wake failed for copilot: copilot exited 1: You have no quota (Request ID: …)
