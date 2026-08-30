@@ -289,15 +289,31 @@
 
   <section>
     <p class="eyebrow">Not only at your desk</p>
-    <h2>Take the room with you.</h2>
+    <h2>Rule from your phone.</h2>
     <p class="muted">
-      It runs on your machine, on your subscriptions. Reaching it need not mean
-      sitting at it.
+      Only you can approve a proposal, so the council stops when you step away.
+      Put it in a Telegram chat and it does not have to. Same commands as the
+      terminal, because it is the same dispatch behind them.
+    </p>
+<pre>proposal #7  Move humans to oracle review, out of diff review
+<span class="c">by agy</span>
+
+Decision proposed: The optimized end-state workflow removes humans
+from the per-change merge path entirely. [&hellip;]
+
+    <span class="k">[ &#10003; Approve ]</span>     <span class="k">[ &#10007; Reject ]</span>
+    <span class="k">[       Read it all       ]</span></pre>
+    <p class="muted">
+      Tap <strong>Approve</strong> and the bot asks for the reason before it
+      records anything. The button carries the proposal id in its own callback,
+      so a ruling cannot land on the wrong proposal however far the chat has
+      scrolled.
     </p>
     <ul class="points">
       <li>
-        <h3>From Telegram</h3>
-        <p>Set the agenda, start a round, rule on a proposal with a button.</p>
+        <h3>Files go both ways</h3>
+        <p>Send a document to the chat and it attaches to the topic.
+        <code>/minutes</code> sends the write-up back as a file.</p>
       </li>
       <li>
         <h3>From a browser</h3>

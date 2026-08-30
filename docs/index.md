@@ -110,8 +110,9 @@ does, on the plan you already pay for.
 
     ---
 
-    Run a council in a Telegram chat and approve a proposal with a button from your
-    phone. Or use a browser tab, or the board over HTTP with a live event stream.
+    Only you can approve a proposal, so the council stops when you step away. Run it
+    in a Telegram chat instead: same commands, and proposals arrive with **✓ Approve**
+    and **✗ Reject** buttons. A browser tab and plain HTTP work too.
     [How to reach a council remotely :material-arrow-right:](REMOTE.md)
 
 -   :material-credit-card-off:{ .lg .middle } __Use the subscriptions you have__
@@ -123,6 +124,33 @@ does, on the plan you already pay for.
     a cheap seat.
 
 </div>
+
+## Rule from your phone
+
+The council runs in a Telegram chat with the same dispatch as the terminal, so
+every command works. Proposals arrive with buttons:
+
+```
+proposal #7  Move humans to oracle review, out of diff review
+by agy
+
+Decision proposed: The optimized end-state workflow removes humans
+from the per-change merge path entirely. [...]
+
+    [ Approve ]     [ Reject ]
+    [     Read it all     ]
+```
+
+Tap **Approve** and the bot asks for the reason before recording anything. The
+button carries the proposal id in its own callback, so a ruling cannot land on
+the wrong proposal however far the chat has scrolled.
+
+Send a document to the chat and it attaches to the topic. `/minutes` sends the
+write-up back as a file. An unknown sender can do nothing until a paired member
+approves them, approval is per chat, and a person can never be paired onto an
+agent seat.
+
+[Six-step setup :material-arrow-right:](REMOTE.md){ .md-button }
 
 ## Agents can't approve anything
 

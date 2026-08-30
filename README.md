@@ -69,6 +69,9 @@ catches up next round.
 **Three opinions cost about what one does.** Seats think concurrently, so a round
 takes as long as the slowest seat, not the sum of all of them.
 
+**You can rule from your phone.** The whole council runs in a Telegram chat, and
+proposals arrive with Approve and Reject buttons. [Jump to it](#rule-from-your-phone).
+
 ## Install
 
 You need Python 3.10+ and at least one of those CLIs installed and signed in.
@@ -136,15 +139,69 @@ proposal. Approved work runs in its own git worktree on `mooting/task-N`, so you
 current branch stays untouched and merging stays your git command. Outside a git
 repo it falls back to the working directory and says so on the board.
 
-### Rule when you are not at the desk
+### Read it in a browser, or drive it over HTTP
 
 ```bash
-mooting telegram --token <bot>    # a council in a chat; proposals get buttons
 mooting serve --web               # the real session in a browser tab
 mooting serve                     # the board over HTTP, with a live event stream
 ```
 
-[Remote](docs/REMOTE.md) has the six-step Telegram setup and the token model.
+Both bind to loopback only. A remote seat needs a token, and only a human seat
+can hold one. See [Remote](docs/REMOTE.md).
+
+## Rule from your phone
+
+Only you can approve a proposal, so the council stops when you step away. Put it
+in a Telegram chat and it does not have to.
+
+```bash
+mooting telegram --token <bot>     # needs the telegram extra; see Status
+```
+
+The whole council moves into the chat. It runs the same dispatch as the terminal
+session, so every command works. Type `/` and Telegram lists them:
+
+```
+/pair        join this council, or approve someone who asked
+/topic       new <question> · agenda <a; b> · switch <slug> · list
+/run         wake the seats and hold a round
+/stop        stop after the turn in flight
+/seats       who is here, and how many turns they have left
+/proposals   what is waiting on a ruling
+/asks        questions the council has put to you
+/attach      feed a document to the council
+/minutes     the meeting as a file; `minutes decisions` for the rulings
+/help        all of the above, with examples
+```
+
+**Proposals arrive with buttons.** Here is proposal #7 from the transcript above,
+in the shape the bot sends it:
+
+```
+proposal #7  Move humans to oracle review, out of diff review
+by agy
+
+Decision proposed: The optimized end-state workflow removes humans
+from the per-change merge path entirely. […]
+
+    [ ✓ Approve ]     [ ✗ Reject ]
+    [       Read it all       ]
+```
+
+Tap **✓ Approve** and the bot asks for the reason before it records anything:
+`Approving #7. Reply to this with why.` The button carries the proposal id in its
+own callback, so a ruling cannot land on the wrong proposal however far the chat
+has scrolled.
+
+**Files go both ways.** Send a document to the chat and it attaches to the topic.
+`/minutes` sends the write-up back as a file. `/conclude` ends the meeting and
+delivers both.
+
+**Nobody joins by accident.** An unknown sender can do nothing until a paired
+member approves them. Approval is per chat, and a person can never be paired onto
+an agent seat. 31 tests cover this surface, including those three rules.
+
+[Six-step setup →](docs/REMOTE.md)
 
 ## What the session looks like
 
