@@ -697,7 +697,7 @@ class Supervisor:
         # speaks until they reply -- the alternative is a room that talks over the
         # person it just asked, and by the time they answer the debate has moved
         # on without the fact only they had.
-        for m in self.store.open_mentions(topic_id):
+        for m in self.store.open_mentions(topic_id, only_asks=True):
             if self.store.is_human(m["target"]):
                 return (f"{m['asker']} is waiting on you: "
                         f"{addressed_to(m['question'], m['target'])}")
@@ -713,7 +713,7 @@ class Supervisor:
         would bury the one thing that needs a person, which is the failure this
         whole feature exists to prevent.
         """
-        for m in self.store.open_mentions(topic_id):
+        for m in self.store.open_mentions(topic_id, only_asks=True):
             if self.store.is_human(m["target"]):
                 return (f"{m['asker']} is waiting on you: "
                         f"{addressed_to(m['question'], m['target'])}")

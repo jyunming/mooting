@@ -809,3 +809,89 @@ def test_a_pause_falls_back_when_you_were_never_named():
 
     body = "@Kevin - answering directly. I concede point 3 substantially."
     assert addressed_to(body, "Jeremy").startswith("@Kevin - answering")
+
+
+def _room(tmp_path):
+    """A board with one human and one agent seated on a topic."""
+    from mooting.store import connect
+    st = connect(tmp_path / "asking.db", init=True)
+    st.add_agent("Jeremy", "human")
+    st.add_agent("Kevin", "agy", driver="spawn")
+    tid = st.open_topic("t", "T", "b", "Jeremy", seats=["Jeremy", "Kevin"])
+    return st, tid
+
+
+def _why_stopped(store, tid):
+    from mooting.drivers import FakeDriver
+    from mooting.supervisor import Supervisor
+    return Supervisor(store, {"Kevin": FakeDriver(store)})._blocking_reason(tid)
+
+
+def test_naming_a_human_in_an_argument_does_not_stop_the_room(tmp_path):
+    """The bug this exists for: Kevin ended a turn with "Final takeaway for
+    @Jeremy: ..." -- a summary, not a question -- and the council halted waiting
+    for an answer to a statement. Reported from a phone as "those don't seem to
+    be a question", because they were not."""
+    store, tid = _room(tmp_path)
+    try:
+        store.post(tid, "Kevin", "@Santa most of this is for you.\n\n"
+                                 "Final takeaway for @Jeremy: it is a rare role.")
+        assert store.open_mentions(tid, "Jeremy"), "the mention is still recorded"
+        assert not store.open_mentions(tid, "Jeremy", only_asks=True)
+        assert _why_stopped(store, tid) is None, "a summary stopped the council"
+    finally:
+        store.close()
+
+
+def test_asking_a_human_still_stops_the_room(tmp_path):
+    """The behaviour worth keeping: a real question waits for its answer rather
+    than letting the debate move on without the one fact only you had."""
+    store, tid = _room(tmp_path)
+    try:
+        store.ask(tid, "Kevin", "Jeremy", "which foundry are you targeting?")
+        assert store.open_mentions(tid, "Jeremy", only_asks=True)
+        why = _why_stopped(store, tid)
+        assert why and "waiting on you" in why, why
+        assert "which foundry" in why, why
+    finally:
+        store.close()
+
+
+def test_answering_discharges_it_and_the_room_moves(tmp_path):
+    store, tid = _room(tmp_path)
+    try:
+        store.ask(tid, "Kevin", "Jeremy", "which foundry?")
+        assert _why_stopped(store, tid) is not None
+        store.post(tid, "Jeremy", "TSMC.", count_turn=False)
+        assert _why_stopped(store, tid) is None, "answering left it blocked"
+    finally:
+        store.close()
+
+
+def test_an_old_board_keeps_its_mentions_blocking(tmp_path):
+    """`asking` defaults to 1 on migration: a topic paused before the
+    distinction existed stays paused, rather than silently resuming under new
+    rules its seats never agreed to."""
+    import sqlite3
+
+    from mooting.store import connect
+
+    store, tid = _room(tmp_path)
+    path = store.path
+    store.post(tid, "Kevin", "Final takeaway for @Jeremy: rare role.")
+    store.close()
+
+    # Rewind the column away, as an older board would have it.
+    raw = sqlite3.connect(path)
+    raw.execute("ALTER TABLE mentions DROP COLUMN asking")
+    raw.commit()
+    raw.close()
+
+    again = connect(path, init=True)
+    try:
+        cols = {r["name"] for r in again.q("PRAGMA table_info(mentions)")}
+        assert "asking" in cols, "migration did not add the column"
+        assert again.open_mentions(tid, "Jeremy", only_asks=True), \
+            "a pre-existing mention lost its block"
+    finally:
+        again.close()

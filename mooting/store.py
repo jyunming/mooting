@@ -264,8 +264,11 @@ class Store:
         self._conn.executescript(SCHEMA.read_text(encoding="utf-8"))
         # CREATE TABLE IF NOT EXISTS cannot add a column to a board that already
         # exists, so new columns are migrated explicitly. Cheap and idempotent.
+        # `asking` defaults to 1 so rows written before the distinction existed
+        # keep blocking, which is what the topics holding them expect.
         for table, column, ddl in (("topics", "mode", "TEXT NOT NULL DEFAULT 'debate'"),
                                    ("topics", "effort", "TEXT"),
+                                   ("mentions", "asking", "INTEGER NOT NULL DEFAULT 1"),
                                    ("tasks", "base_sha", "TEXT")):
             cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
@@ -1001,19 +1004,31 @@ class Store:
         """
         seated = {s["agent"] for s in self.q(
             "SELECT agent FROM seats WHERE topic_id = ?", (topic_id,))}
-        targets = {t for t in (explicit or []) if t in seated}
-        targets |= {m for m in MENTION_RE.findall(body) if m in seated}
+        # An explicit target came through `ask`; the rest were found by reading
+        # the prose. Only the first is a question somebody is waiting on -- a
+        # seat writing "final takeaway for @you" is addressing you, not asking,
+        # and used to stop the council all the same.
+        asked = {t for t in (explicit or []) if t in seated}
+        named = {m for m in MENTION_RE.findall(body) if m in seated}
+        targets = asked | named
         targets.discard(asker)                      # @-ing yourself is a no-op
         for target in sorted(targets):
             conn.execute(
-                """INSERT INTO mentions (topic_id, message_id, asker, target, question)
-                   VALUES (?,?,?,?,?)""",
-                (topic_id, message_id, asker, target, question[:2000]),
+                """INSERT INTO mentions
+                       (topic_id, message_id, asker, target, question, asking)
+                   VALUES (?,?,?,?,?,?)""",
+                (topic_id, message_id, asker, target, question[:2000],
+                 1 if target in asked else 0),
             )
         return sorted(targets)
 
-    def open_mentions(self, topic_id: int, target: str | None = None) -> list[sqlite3.Row]:
+    def open_mentions(self, topic_id: int, target: str | None = None, *,
+                      only_asks: bool = False) -> list[sqlite3.Row]:
+        """Outstanding mentions. `only_asks` keeps just the ones somebody is
+        actually waiting on, which is what may stop a council."""
         sql = "SELECT * FROM mentions WHERE topic_id = ? AND answered_by IS NULL"
+        if only_asks:
+            sql += " AND asking = 1"
         args: list[Any] = [topic_id]
         if target:
             sql += " AND target = ?"

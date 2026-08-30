@@ -43,8 +43,10 @@ the reply shows a one-line echo of what it answers.
 
 **When the council needs you, it says so and rings the terminal.** The
 `▶ YOUR TURN` bar (`mooting tui`) or the ring-and-count (`mooting console`)
-means a question is outstanding. An open `@you` question stops the room;
-an open `@codex` question narrows the round to codex. Typing an answer
+means a question is outstanding. An open question *asked* of you stops the
+room; an open `@codex` question narrows the round to codex. Being named is not
+the same as being asked — a seat writing "final takeaway for @you" gives you
+priority without stopping anyone, while `mooting_ask` waits. Typing an answer
 clears every question outstanding against you — that is how an answer is
 recognized, so replying in prose is enough.
 

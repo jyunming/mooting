@@ -145,6 +145,10 @@ CREATE TABLE IF NOT EXISTS mentions (
     asker       TEXT NOT NULL,
     target      TEXT NOT NULL,
     question    TEXT NOT NULL DEFAULT '',
+    -- 1 when somebody explicitly asked (`mooting_ask`), 0 for a bare `@name`
+    -- inside an argument. Only an ask stops the council waiting on a human:
+    -- being named is priority, being asked is a block.
+    asking      INTEGER NOT NULL DEFAULT 1,
     answered_by INTEGER REFERENCES messages(id),   -- the reply that discharged it
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
