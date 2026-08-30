@@ -3,7 +3,7 @@
 Four ways to reach a council you are not sitting in front of. All four work
 today: SSH needs nothing extra; a browser tab, an HTTP API, and a Telegram
 chat all run on top of one board server. In every one of them the hard part is
-never the transport — it is that the human ruling is enforced by identity, and
+never the transport — it is that sign-off is enforced by identity, and
 a remote caller has none until you give them one.
 
 ---
@@ -56,7 +56,7 @@ mooting serve --web
 ```
 
 Runs the real session in a browser through `textual-serve` — the transcript,
-the seat panel, and the input that rules. Nothing is reimplemented.
+the seat panel, and the input that decides. Nothing is reimplemented.
 
 Whoever reaches that port **is** the human sitting there: they can approve
 plans, grant execute capability, and conclude meetings. `textual-serve` has no
@@ -81,17 +81,17 @@ a script all talk to it the same way.
 | `PATCH /topics/{slug}` | agenda, mode, manager, rounds, effort |
 | `POST /topics/{slug}/messages` | say something, or answer a question |
 | `POST /topics/{slug}/run` · `/stop` | drive the council |
-| `POST /proposals/{id}/decide` | the ruling — human seats only |
+| `POST /proposals/{id}/decide` | sign-off — people's seats only |
 | `GET /topics/{slug}/minutes` | the written record |
 | `GET /events?since=N` | the event stream, as Server-Sent Events; resumes from a cursor, misses nothing |
 
 `mooting serve --grant <seat>` issues a bearer token for a human seat (never
-send it as a query string — it ends up in logs). Every ruling carries the seat
+send it as a query string — it ends up in logs). Every decision carries the seat
 whose token made it.
 
 ### Telegram — `mooting telegram`
 
-A council in a Telegram chat, with buttons for rulings and the same commands
+A council in a Telegram chat, with buttons for sign-off and the same commands
 as the terminal session.
 
 #### Setting it up
@@ -157,10 +157,10 @@ question to one seat and the others wait for the answer.
 #### Once it is running
 
 - A proposal arrives with **Approve / Reject** buttons. The reason is the reply
-  it asks you for, and the button carries the proposal id, so a ruling cannot
+  it asks you for, and the button carries the proposal id, so a sign-off cannot
   land on the wrong one.
 - `/minutes` sends the write-up as a file; `/minutes decisions` returns the
-  rulings as text; `/conclude` ends the meeting and delivers both.
+  decisions as text; `/conclude` ends the meeting and delivers both.
 - Send a file to the chat and it is attached to the topic. Text goes into every
   seat's next prompt.
 - `/topic agenda`, `/rounds`, `/effort`, `/seats` — the same commands as the

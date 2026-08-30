@@ -1,7 +1,7 @@
 <h1 align="center">Mooting</h1>
 
 <p align="center">
-  <strong>A council for your coding-agent CLIs. They argue; you rule.</strong>
+  <strong>Your coding agents, working as one team. You host the meeting.</strong>
 </p>
 
 <p align="center">
@@ -43,13 +43,14 @@ agy       @claude I will contest that premise directly: the right answer is
 > /approve 7 agreed
 ```
 
-claude conceded a point. agy attacked the premise both were standing on. The human
-rejected claude's proposal and approved agy's.
+claude conceded a point. agy challenged the premise both were standing on. You took
+agy's proposal over claude's.
 
 ## What it is
 
-Mooting drives the CLIs you already have: **Claude Code, Codex, Copilot,
-Antigravity**.
+You already pay for two or three coding agents. Mooting sits them at one table and
+lets them work as a team: **Claude Code, Codex, Copilot, Antigravity**. You chair
+the meeting.
 
 Each seat runs as an ordinary subprocess, one spawn per turn. It talks to an MCP
 server that Mooting controls over stdio. Agents post, object, ask questions and
@@ -59,9 +60,10 @@ SQLite file. There is no daemon.
 **No API keys.** Mooting never calls a model. Each CLI signs in the way it already
 does, on the plan you already pay for.
 
-**Agents can't approve anything.** The MCP server exposes no decide tool, so an
-agent never sees one in its tool list. `Store.decide` rejects non-human callers as
-a second check. Both live in code, not in prompts.
+**The call is yours.** Nothing is settled until you sign off, and sign-off is
+reserved for a person. The MCP server exposes no decide tool, so it never appears
+in an agent's tool list, and `Store.decide` accepts only a human. Both are in code,
+not in prompts.
 
 **Crashes are cheap.** A seat that dies mid-turn keeps its place on the board and
 catches up next round.
@@ -69,8 +71,9 @@ catches up next round.
 **Three opinions cost about what one does.** Seats think concurrently, so a round
 takes as long as the slowest seat, not the sum of all of them.
 
-**You can rule from your phone.** The whole council runs in a Telegram chat, and
-proposals arrive with Approve and Reject buttons. [Jump to it](#rule-from-your-phone).
+**Run the meeting from your phone.** The whole team moves into a Telegram chat, and
+proposals arrive with Approve and Reject buttons.
+[Jump to it](#run-the-meeting-from-your-phone).
 
 ## Install
 
@@ -124,9 +127,8 @@ a file, so this is how it reads one.
 wrote retries-minutes.md — 1 decision
 ```
 
-The minutes carry the question, every ruling and who made it, a votes table with
-each seat's stance and reason, proposals still open, and questions nobody
-answered.
+The minutes carry the question, every decision and who made it, a table of each
+seat's stance and reason, proposals still open, and questions nobody answered.
 
 ### Turn the decision into branches
 
@@ -146,19 +148,19 @@ mooting serve --web               # the real session in a browser tab
 mooting serve                     # the board over HTTP, with a live event stream
 ```
 
-Both bind to loopback only. A remote seat needs a token, and only a human seat
+Both bind to loopback only. A remote seat needs a token, and only a person's seat
 can hold one. See [Remote](docs/REMOTE.md).
 
-## Rule from your phone
+## Run the meeting from your phone
 
-Only you can approve a proposal, so the council stops when you step away. Put it
-in a Telegram chat and it does not have to.
+You sign off on every proposal, so the team stops when you step away. Put the
+meeting in a Telegram chat and it does not have to.
 
 ```bash
 mooting telegram --token <bot>     # needs the telegram extra; see Status
 ```
 
-The whole council moves into the chat. It runs the same dispatch as the terminal
+The whole team moves into the chat. It runs the same dispatch as the terminal
 session, so every command works. Type `/` and Telegram lists them:
 
 ```
@@ -167,10 +169,10 @@ session, so every command works. Type `/` and Telegram lists them:
 /run         wake the seats and hold a round
 /stop        stop after the turn in flight
 /seats       who is here, and how many turns they have left
-/proposals   what is waiting on a ruling
+/proposals   what is waiting on your sign-off
 /asks        questions the council has put to you
 /attach      feed a document to the council
-/minutes     the meeting as a file; `minutes decisions` for the rulings
+/minutes     the meeting as a file; `minutes decisions` for the decisions
 /help        all of the above, with examples
 ```
 
@@ -190,22 +192,22 @@ from the per-change merge path entirely. […]
 
 Tap **✓ Approve** and the bot asks for the reason before it records anything:
 `Approving #7. Reply to this with why.` The button carries the proposal id in its
-own callback, so a ruling cannot land on the wrong proposal however far the chat
-has scrolled.
+own callback, so your sign-off cannot land on the wrong proposal however far the
+chat has scrolled.
 
 **Files go both ways.** Send a document to the chat and it attaches to the topic.
 `/minutes` sends the write-up back as a file. `/conclude` ends the meeting and
 delivers both.
 
-**Nobody joins by accident.** An unknown sender can do nothing until a paired
-member approves them. Approval is per chat, and a person can never be paired onto
-an agent seat. 31 tests cover this surface, including those three rules.
+**You choose who is in the room.** Someone new can do nothing until a member you
+trust adds them. Membership is per chat, and a person is never seated as one of the
+agents. 31 tests cover this surface, including those three.
 
 [Six-step setup →](docs/REMOTE.md)
 
 ## What the session looks like
 
-<img alt="A Mooting session: seats arguing, a proposal awaiting a ruling, and a question waiting on the human." src="https://raw.githubusercontent.com/jyunming/mooting/main/docs/assets/session.png" width="820">
+<img alt="A Mooting session: seats arguing, a proposal waiting on your sign-off, and a question waiting on you." src="https://raw.githubusercontent.com/jyunming/mooting/main/docs/assets/session.png" width="820">
 
 ## Status
 

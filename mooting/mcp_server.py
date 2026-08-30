@@ -255,7 +255,7 @@ def mooting_tasks(topic: str) -> str:
 
 @mcp.tool()
 def mooting_task_update(task_id: int, status: str, result: str = "") -> str:
-    """Report on your task, or rule on someone else's if you are the manager.
+    """Report on your task, or sign off on someone else's if you are the manager.
 
     As the worker: `in_progress`, `done`, or `blocked`. Say concretely what you
     changed and where, or precisely what stopped you -- your report is all the

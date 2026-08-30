@@ -634,7 +634,7 @@ class MootApp(App):
         if asks:
             bits.append(f"[magenta]{asks} question(s) for you[/magenta]")
         if props:
-            bits.append(f"[yellow]{props} awaiting your ruling[/yellow]")
+            bits.append(f"[yellow]{props} awaiting your sign-off[/yellow]")
         line = "  |  ".join(bits)
         status = self.query_one("#status", Static)
         if self._waiting:

@@ -96,7 +96,7 @@ def render(store: Store, topic_id: int, transcript: bool = True) -> str:
     for p in decided:
         mark = "**Approved**" if p["status"] == "approved" else "**Rejected**"
         out += [f"### {mark} — {p['title']}", ""]
-        out += [f"_Proposed by {p['author']}; ruled by {p['decided_by']}"
+        out += [f"_Proposed by {p['author']}; decided by {p['decided_by']}"
                 f"{' on ' + _fmt_when(p['decided_at']) if p['decided_at'] else ''}._", ""]
         if p["rationale"]:
             out += [f"> {p['rationale'].strip()}", ""]

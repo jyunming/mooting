@@ -68,14 +68,14 @@ COMMANDS = {
     "/asks": "questions waiting on you",
     "/auto": "on | off -- whether posting wakes the council (default on)",
     "/nudge": "wake one seat by hand",
-    "/approve": "<id> <why> -- rule on a proposal (only you can)",
+    "/approve": "<id> <why> -- sign off on a proposal (only you can)",
     "/reject": "<id> <why>",
     "/proposals": "what is waiting on you; /proposals <id> for the whole thing",
     "/show": "<id> -- a message in full, however far back it scrolled",
     "/tasks": "the work plan and where each task has got to",
     "/quote": "reply to the last message; or /quote <seat> | <id>",
     "/me": "<name> -- what the council calls you",
-    "/minutes": "write the meeting out; /minutes decisions for the rulings only",
+    "/minutes": "write the meeting out; /minutes decisions for the decisions only",
     "/conclude": "<your closing words> -- close the meeting and write the minutes",
     "/reopen": "resume a meeting you concluded",
     "/rounds": "<n> -- grant the council more rounds on this topic",
@@ -233,7 +233,7 @@ class Console:
         if asks:
             bits.append(f"{asks} question(s) for you")
         if props:
-            bits.append(f"{props} proposal(s) to rule on")
+            bits.append(f"{props} proposal(s) waiting on you")
         return "  |  ".join(bits)
 
     # ----------------------------------------------------------------- threads
@@ -410,7 +410,7 @@ class Console:
         ("Deciding — only you can", [
             ("/approve <id> <why>", "accept a proposal"),
             ("/reject <id> <why>", "refuse it"),
-            ("/proposals", "what is waiting on your ruling"),
+            ("/proposals", "what is waiting on your sign-off"),
             ("/proposals <id>", "the whole proposal: body, votes, objections"),
             ("/show <id>", "one message in full, however far back it scrolled"),
             ("/asks", "questions waiting on your answer"),
@@ -437,7 +437,7 @@ class Console:
             ("/conclude <closing words>", "close the meeting and write its minutes"),
             ("/reopen", "resume a meeting you concluded"),
             ("/minutes", "write the meeting out as markdown"),
-            ("/minutes decisions", "the rulings and work log, without the transcript"),
+            ("/minutes decisions", "the decisions and work log, without the transcript"),
         ]),
         ("Clearing up", [
             ("/rm [slug] yes", "delete a topic (omit slug for this one)"),
@@ -593,7 +593,7 @@ class Console:
                 self.emit(f"  proposal #{p['id']} {p['title']}")
                 self.emit(f"    {DIM}/proposals {p['id']} to read it · "
                           f"/approve {p['id']} <why> · /reject {p['id']} <why>{RESET}")
-            self.emit(f"{DIM}rule on it, or /conclude force <closing words> to close "
+            self.emit(f"{DIM}sign off on it, or /conclude force <closing words> to close "
                       f"the meeting with it unresolved{RESET}")
             return
         for m in unanswered:
@@ -847,7 +847,7 @@ class Console:
         self.emit(f"{DIM}posted as message #{p['message_id']} — "
                   f"/quote {p['message_id']} to reply to it{RESET}")
         if p["decided_by"]:
-            self.emit(f"{DIM}ruled {p['status']} by {p['decided_by']} "
+            self.emit(f"{DIM}{p['status']} by {p['decided_by']} "
                       f"{p['decided_at'] or ''}{RESET}")
             if p["rationale"]:
                 self.emit(f"{DIM}  “{p['rationale'].strip()}”{RESET}")

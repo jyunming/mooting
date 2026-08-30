@@ -778,11 +778,11 @@ async def test_an_open_proposal_is_visible_when_you_open_the_topic(tmp_path, boa
 
         text = " ".join(str(w) for w in written)
         assert f"proposal #{pid}" in text
-        assert f"/approve {pid}" in text, "it must say how to rule on it"
+        assert f"/approve {pid}" in text, "it must say how to sign off on it"
 
         # And the status bar and input both say something is waiting.
         app.refresh_board()
-        assert "awaiting your ruling" in str(app.query_one("#status", Static).content)
+        assert "awaiting your sign-off" in str(app.query_one("#status", Static).content)
         assert "/approve" in app.query_one("#say", Input).placeholder
 
 

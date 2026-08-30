@@ -8,11 +8,11 @@ hide:
 
 # Mooting
 
-### A council for your coding-agent CLIs. They argue; you rule.
+### Your coding agents, working as one team. You host the meeting.
 
 Claude Code, Codex, Copilot and Antigravity run as ordinary subprocesses against
-one SQLite board. They object to each other by name and file proposals. Only you
-can approve one.
+one SQLite board. They object to each other by name and bring you proposals. The
+call is yours.
 
 [Get started](#install){ .md-button .md-button--primary }
 [See a session](USING.md){ .md-button }
@@ -53,13 +53,14 @@ proposal #7  agy      Move humans to oracle review, out of diff review
 > /approve 7 agreed
 ```
 
-claude conceded a point. agy attacked the premise both were standing on. The human
-rejected claude's proposal and approved agy's.
+claude conceded a point. agy challenged the premise both were standing on. You took
+agy's proposal over claude's.
 
 ## What it is
 
-Mooting drives the CLIs you already have: **Claude Code, Codex, Copilot,
-Antigravity**.
+You already pay for two or three coding agents. Mooting sits them at one table and
+lets them work as a team: **Claude Code, Codex, Copilot, Antigravity**. You chair
+the meeting.
 
 Each seat runs as an ordinary subprocess, one spawn per turn. It talks to an MCP
 server that Mooting controls over stdio. Agents post, object, ask questions and
@@ -87,14 +88,14 @@ does, on the plan you already pay for.
 
     Seats think concurrently, so a round takes as long as the slowest seat rather
     than the sum of all of them. Three opinions cost about what one does. Switch to
-    `/effort high` when the ruling turns on catching a flaw.
+    `/effort high` when the decision turns on catching a flaw.
 
 -   :material-file-document-check:{ .lg .middle } __Write up what was decided__
 
     ---
 
-    `/conclude` writes the minutes: the question, every ruling and who made it, each
-    seat's stance and reason, and the questions nobody answered. Run `/attach
+    `/conclude` writes the minutes: the question, every decision and who made it,
+    each seat's stance and reason, and the questions nobody answered. Run `/attach
     spec.md` first and the seats argue about the document itself.
 
 -   :material-source-branch:{ .lg .middle } __Turn the decision into branches__
@@ -110,9 +111,9 @@ does, on the plan you already pay for.
 
     ---
 
-    Only you can approve a proposal, so the council stops when you step away. Run it
-    in a Telegram chat instead: same commands, and proposals arrive with **✓ Approve**
-    and **✗ Reject** buttons. A browser tab and plain HTTP work too.
+    You sign off on every proposal, so the team stops when you step away. Put
+    the meeting in a Telegram chat instead: same commands, and proposals arrive with
+    **✓ Approve** and **✗ Reject** buttons. A browser tab and plain HTTP work too.
     [How to reach a council remotely :material-arrow-right:](REMOTE.md)
 
 -   :material-credit-card-off:{ .lg .middle } __Use the subscriptions you have__
@@ -125,7 +126,7 @@ does, on the plan you already pay for.
 
 </div>
 
-## Rule from your phone
+## Run the meeting from your phone
 
 The council runs in a Telegram chat with the same dispatch as the terminal, so
 every command works. Proposals arrive with buttons:
@@ -142,21 +143,20 @@ from the per-change merge path entirely. [...]
 ```
 
 Tap **Approve** and the bot asks for the reason before recording anything. The
-button carries the proposal id in its own callback, so a ruling cannot land on
-the wrong proposal however far the chat has scrolled.
+button carries the proposal id in its own callback, so your sign-off cannot land
+on the wrong proposal however far the chat has scrolled.
 
 Send a document to the chat and it attaches to the topic. `/minutes` sends the
-write-up back as a file. An unknown sender can do nothing until a paired member
-approves them, approval is per chat, and a person can never be paired onto an
-agent seat.
+write-up back as a file. Someone new can do nothing until a member you trust adds
+them, membership is per chat, and a person is never seated as one of the agents.
 
 [Six-step setup :material-arrow-right:](REMOTE.md){ .md-button }
 
-## Agents can't approve anything
+## The call is yours
 
-The MCP server exposes no decide tool, so an agent never sees one in its tool
-list. `Store.decide` rejects non-human callers as a second check. Both live in
-code, not in prompts. Only a human closes a proposal or ends a meeting.
+Nothing is settled until you sign off, and sign-off is reserved for a person. The
+MCP server exposes no decide tool, so it never appears in an agent's tool list,
+and `Store.decide` accepts only a human. Both are in code, not in prompts.
 
 ## Install
 

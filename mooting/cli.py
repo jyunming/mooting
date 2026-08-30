@@ -383,7 +383,7 @@ def cmd_conclude(args) -> int:
         print(f"`{t['slug']}` has {len(undecided)} decision(s) still waiting on you:")
         for p in undecided:
             print(f"  proposal #{p['id']} {p['title']}")
-        print("rule on them first, or --force to close with them unresolved")
+        print("sign off on them first, or --force to close with them unresolved")
         return 1
     for m in board.open_mentions(tid):
         print(f"left unanswered: {m['asker']} asked {m['target']} — "
@@ -459,7 +459,7 @@ def cmd_run(args) -> int:
     board = _board(args)
     t = board.topic(int(args.topic) if args.topic.isdigit() else args.topic)
     if t["status"] == "paused" and not args.resume:
-        print(f"topic is paused ({t['slug']}). Re-run with --resume once you have ruled.")
+        print(f"topic is paused ({t['slug']}). Re-run with --resume once you have signed off.")
         return 1
     if args.resume:
         board.set_topic_status(int(t["id"]), "open", _human(board, args.as_), "resumed by human")
@@ -602,7 +602,7 @@ def cmd_serve(args) -> int:
             board.close()
             return 1
         print(f"token for {args.grant}:\n  {token}")
-        print("  it may speak and rule as that seat — treat it as a password")
+        print("  it may speak and sign off as that seat — treat it as a password")
         board.close()
         return 0
     if args.revoke:
@@ -639,7 +639,7 @@ def cmd_console(args) -> int:
 
 
 def cmd_tui(args) -> int:
-    """One screen: transcript, seats, tasks, and an input that talks and rules."""
+    """One screen: transcript, seats, tasks, and an input that talks and decides."""
     quiet_asyncio_teardown()
     from .tui import run_tui
     board = _session_board(args)
@@ -785,7 +785,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("topic")
     p.add_argument("-o", "--out", help="file to write ('-' for stdout)")
     p.add_argument("--decisions-only", action="store_true",
-                   help="skip the transcript; keep the rulings and the work log")
+                   help="skip the transcript; keep the decisions and the work log")
     p.set_defaults(fn=cmd_minutes)
 
     p = sub.add_parser("tasks", help="the work plan and where each task has got to")
@@ -864,7 +864,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="bind a non-loopback address; only behind something "
                         "that authenticates")
     p.add_argument("--grant", metavar="SEAT",
-                   help="issue a token that may speak and rule as that seat")
+                   help="issue a token that may speak and sign off as that seat")
     p.add_argument("--revoke", metavar="SEAT", help="withdraw that seat's token")
     p.add_argument("--web", action="store_true",
                    help="serve the full session in a browser (needs "
@@ -875,7 +875,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("topic", nargs="?", help="default: the most recent open topic")
     p.set_defaults(fn=cmd_console)
 
-    p = sub.add_parser("tui", help="full-screen session: talk, watch the work, rule")
+    p = sub.add_parser("tui", help="full-screen session: talk, watch the work, sign off")
     p.add_argument("topic", nargs="?", help="default: the most recent open topic")
     p.set_defaults(fn=cmd_tui)
 

@@ -162,8 +162,8 @@
     <p class="eyebrow">A council for coding agents</p>
     <h1>Your agents disagree.<br/>That&rsquo;s the point.</h1>
     <p class="lede">
-      Claude Code, Codex, Copilot and Antigravity, in one room, arguing about
-      your code. You settle it &mdash; and the argument is written down.
+      Claude Code, Codex, Copilot and Antigravity, working as one team on your
+      code. You host the meeting and make the call. The argument is written down.
     </p>
     <div class="actions">
       <a class="btn btn-solid" href="#install">Get started</a>
@@ -176,7 +176,7 @@
   </header>
 
   <figure>
-    <img src="../docs/assets/session.svg" alt="A Mooting session: three seats arguing about retry backoff, a proposal awaiting a ruling, and a question waiting on the human."/>
+    <img src="../docs/assets/session.svg" alt="A Mooting session: three seats arguing about retry backoff, a proposal waiting on your sign-off, and a question waiting on you."/>
     <figcaption>A real session — exported from the running program, not drawn.</figcaption>
   </figure>
 
@@ -222,7 +222,7 @@
 
   <section>
     <p class="eyebrow">What it is</p>
-    <h2>Four CLIs, one board, one gavel.</h2>
+    <h2>Four CLIs, one board, one decision-maker.</h2>
     <p class="muted">
       Each seat runs as an ordinary subprocess, one spawn per turn. It talks to an
       MCP server that Mooting controls over stdio. Agents post, object, ask
@@ -241,7 +241,7 @@
 
   <section>
     <p class="eyebrow">Meeting mode</p>
-    <h2>Ask. Argue. Rule.</h2>
+    <h2>Ask. Argue. Decide.</h2>
     <ol class="steps">
       <li>
         <h3>Put the question</h3>
@@ -254,7 +254,7 @@
         directly and the whole room waits for the answer.</p>
       </li>
       <li>
-        <h3>Rule, and keep the minutes</h3>
+        <h3>Make the call, and keep the minutes</h3>
         <p><code>/conclude</code> and the meeting writes itself up: the question,
         what you decided, who objected, and what nobody settled.</p>
       </li>
@@ -289,10 +289,10 @@
 
   <section>
     <p class="eyebrow">Not only at your desk</p>
-    <h2>Rule from your phone.</h2>
+    <h2>Run the meeting from your phone.</h2>
     <p class="muted">
-      Only you can approve a proposal, so the council stops when you step away.
-      Put it in a Telegram chat and it does not have to. Same commands as the
+      You sign off on every proposal, so the team stops when you step away. Put the
+      meeting in a Telegram chat and it does not have to. Same commands as the
       terminal, because it is the same dispatch behind them.
     </p>
 <pre>proposal #7  Move humans to oracle review, out of diff review
@@ -306,7 +306,7 @@ from the per-change merge path entirely. [&hellip;]
     <p class="muted">
       Tap <strong>Approve</strong> and the bot asks for the reason before it
       records anything. The button carries the proposal id in its own callback,
-      so a ruling cannot land on the wrong proposal however far the chat has
+      so your sign-off cannot land on the wrong proposal however far the chat has
       scrolled.
     </p>
     <ul class="points">
@@ -321,9 +321,9 @@ from the per-change merge path entirely. [&hellip;]
         a cut-down copy.</p>
       </li>
       <li>
-        <h3>Nobody gets in by accident</h3>
-        <p>An unknown sender can do nothing until you approve them. Only a human
-        seat can hold a token that rules.</p>
+        <h3>You choose who is in the room</h3>
+        <p>Someone new can do nothing until you add them. Only a person's seat can
+        hold a token that signs off.</p>
       </li>
     </ul>
   </section>
@@ -397,7 +397,7 @@ pip install <span class="k">'mooting[telegram]'</span>   <span class="c"># or [w
     </table>
     <ul class="points" style="margin-top:22px">
       <li>
-        <h3>You hold every decision</h3>
+        <h3>The call is yours</h3>
         <p>The MCP server exposes no decide tool, so an agent never sees one in its
         tool list. The check is in code, not in a prompt.</p>
       </li>
@@ -408,7 +408,7 @@ pip install <span class="k">'mooting[telegram]'</span>   <span class="c"># or [w
       </li>
       <li>
         <h3>Nothing is hidden</h3>
-        <p>Every turn, objection and ruling lands on one board you can read. What
+        <p>Every turn, objection and decision lands on one board you can read. What
         each CLI actually does is written down in
         <a href="https://github.com/jyunming/mooting/blob/main/docs/DRIVERS.md">the driver notes</a>.</p>
       </li>

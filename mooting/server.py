@@ -153,7 +153,7 @@ def build_app(db: Path | str | None, token: str, *, human: str,
         return request.get("seat")
 
     async def decide(request):
-        """Rule on a proposal, over HTTP.
+        """Sign off on a proposal, over HTTP.
 
         The fence is `Store.decide`, which refuses a non-human because locally
         identity comes from the operating system. There is none here, so the
@@ -164,7 +164,7 @@ def build_app(db: Path | str | None, token: str, *, human: str,
         who = acting(request)
         if not who:
             return web.json_response(
-                {"error": "this token may read but not rule; a ruling needs a "
+                {"error": "this token may read but not sign off; that needs a "
                           "token issued to a seat (mooting serve --grant <seat>)"},
                 status=403)
         try:

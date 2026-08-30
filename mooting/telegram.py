@@ -300,10 +300,10 @@ MENU = [
     ("run", "wake the seats and hold a round"),
     ("stop", "stop after the turn in flight"),
     ("seats", "who is here, and how many turns they have left"),
-    ("proposals", "what is waiting on a ruling"),
+    ("proposals", "what is waiting on your sign-off"),
     ("asks", "questions the council has put to you"),
     ("attach", "feed a document to the council"),
-    ("minutes", "the meeting as a file; `minutes decisions` for the rulings"),
+    ("minutes", "the meeting as a file; `minutes decisions` for the decisions"),
     ("help", "all of the above, with examples"),
 ]
 

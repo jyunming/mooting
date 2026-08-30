@@ -4,7 +4,7 @@ Two surfaces, one dispatch. `mooting <command>` runs from the shell; `/command` 
 inside `mooting tui` or `mooting console`.
 
 They are not equivalent. Opening a topic, setting its agenda, running rounds,
-ruling on a proposal and exporting minutes all exist in both — enough to drive a
+signing off on a proposal and exporting minutes all exist in both — enough to drive a
 council over SSH. Retuning a topic once it is open is session-only: `/topic mode`,
 `/topic manager`, `/seats`, `/capability`, `/effort`, `/rounds`, `/stop`,
 `/reopen` and `/me` change the board and have no shell name yet. Scripts that
@@ -56,7 +56,7 @@ terminal — see [Using it](USING.md)), and its input history lasts only that ru
 
 | | |
 |---|---|
-| `/proposals` | what is waiting on your ruling |
+| `/proposals` | what is waiting on your sign-off |
 | `/proposals <id>` | the whole proposal: body, every vote, every objection |
 | `/approve <id> <why>` | accept it |
 | `/reject <id> <why>` | refuse it |
@@ -106,7 +106,7 @@ task row opens it in the transcript.
 |---|---|
 | `/tasks` | the work plan and where each task has got to |
 | `/minutes` | write the meeting out as markdown |
-| `/minutes decisions` | the rulings and work log, without the transcript |
+| `/minutes decisions` | the decisions and work log, without the transcript |
 
 ---
 
@@ -143,7 +143,7 @@ mooting attach <topic> <file> [--note W]    # feed a document to a council
 mooting attach <topic>                     # list them; --rm <id> removes one
 mooting serve [--port 4173] [--token T]    # the board over HTTP; loopback only
 mooting serve --web                        # the whole session, in a browser
-mooting serve --grant <seat>               # a token that may speak and rule as it
+mooting serve --grant <seat>               # a token that may speak and sign off as it
 mooting serve --revoke <seat>              # withdraw it
 mooting telegram --token <bot> --chat <id> # run a council in a Telegram chat
 mooting telegram                           #   the token is remembered after
