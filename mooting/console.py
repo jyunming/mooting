@@ -1336,6 +1336,23 @@ class Console:
     def on_topic_change(self) -> None:
         """Hook for a surface that has to repaint. The REPL has nothing to do."""
 
+    def _seat_named(self, name: str) -> str | None:
+        """A seat on this topic, however the name was typed.
+
+        `@Santa` is what a chat gives you -- Telegram completes a mention with
+        its `@` attached -- while the seat is `Santa`. Everywhere else that takes
+        an agent name already strips it; `/nudge` did not, and the mismatch
+        surfaced as a wake that raised deep inside a worker thread.
+        """
+        want = name.strip().lstrip("@").strip()
+        here = [s["agent"] for s in self.store.seats(self.topic_id)]
+        for seat in here:
+            if seat.lower() == want.lower():
+                return seat
+        self.emit(f"{RED}no seat called `{want}` on this topic — "
+                  f"{', '.join(here)}{RESET}")
+        return None
+
     def _nudge(self, agent: str) -> None:
         if not self._require_topic():
             return
@@ -1344,6 +1361,10 @@ class Console:
         from .drivers.registry import build_drivers
         from .supervisor import Supervisor
 
+        agent = self._seat_named(agent)
+        if agent is None:
+            return
+
         def work() -> None:
             store = connect(self.db)
             try:
@@ -1351,6 +1372,10 @@ class Console:
                                 .wake_seat(self.topic_id, agent))
                 if not r.ok:
                     self.emit(f"\n{RED}{agent}: {r.detail}{RESET}")
+            except Exception as exc:
+                # This thread dying used to take the only notice with it: the
+                # room said "waking Santa..." and then nothing, for ever.
+                self.emit(f"\n{RED}{agent}: {exc}{RESET}")
             finally:
                 store.close()
 

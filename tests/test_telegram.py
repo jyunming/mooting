@@ -408,6 +408,55 @@ def test_a_decision_with_no_reason_still_announces(board):
     assert not line.rstrip().endswith("—"), line
 
 
+def test_nudging_a_mention_does_not_die_in_a_thread(tmp_path):
+    """`/nudge @Santa` is what a phone gives you -- Telegram completes a mention
+    with its `@` attached. The seat is `Santa`, so the wake raised
+    `@Santa holds no seat on topic 5` inside a daemon thread, where nobody was
+    listening: the chat said "waking @Santa..." and then stayed silent for ever.
+    Seen in a live session, not in a test."""
+    from mooting.store import connect
+    from mooting.telegram import ChatBoard
+
+    db = tmp_path / "b.db"
+    st = connect(db, init=True)
+    st.add_agent("Jeremy", "human")
+    st.add_agent("Santa", "claude", driver="spawn")
+    st.open_topic("t", "T", "b", "Jeremy", seats=["Jeremy", "Santa"])
+    st.close()
+
+    chat = ChatBoard(db, "t", "Jeremy")
+    try:
+        # The `@` is tolerated, and the seat resolves whatever the case.
+        assert chat.console._seat_named("@Santa") == "Santa"
+        assert chat.console._seat_named("santa") == "Santa"
+        assert chat.console._seat_named("Santa") == "Santa"
+
+        # A name that is not here says so, rather than raising out of sight.
+        assert chat.console._seat_named("@Nobody") is None
+    finally:
+        chat.close()
+
+
+def test_nudging_an_unknown_seat_answers_in_the_chat(tmp_path):
+    """The failure has to arrive where the person is looking."""
+    from mooting.store import connect
+    from mooting.telegram import ChatBoard
+
+    db = tmp_path / "b2.db"
+    st = connect(db, init=True)
+    st.add_agent("Jeremy", "human")
+    st.add_agent("Santa", "claude", driver="spawn")
+    st.open_topic("t", "T", "b", "Jeremy", seats=["Jeremy", "Santa"])
+    st.close()
+
+    chat = ChatBoard(db, "t", "Jeremy")
+    try:
+        out = chat.handle("/nudge @Nobody")
+        assert "Nobody" in out and "Santa" in out, out
+    finally:
+        chat.close()
+
+
 def test_asking_for_a_proposal_by_number_gets_the_buttons_back():
     """The pump starts at the board's head and never replays, so a proposal
     opened before the bot started -- or while the council ran at the terminal --

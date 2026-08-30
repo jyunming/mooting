@@ -154,6 +154,9 @@ class Board(Console):
         if not agent:
             self.emit("[red]usage: /nudge <agent>[/red]")
             return
+        agent = self._seat_named(agent)
+        if agent is None:
+            return
         self.app_ref.nudge(agent)
         self.emit(f"[dim]waking {agent}…[/dim]")
 
