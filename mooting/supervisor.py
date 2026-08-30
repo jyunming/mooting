@@ -179,7 +179,7 @@ def snippet(text: str, limit: int = 200) -> str:
     return cut.rstrip(" ,.;:—-") + "…"
 
 
-def addressed_to(text: str, target: str, limit: int = 200) -> str:
+def addressed_to(text: str, target: str, limit: int = 400) -> str:
     """The part of a turn that is actually aimed at `target`.
 
     One message naming two seats records a mention for each, and both rows store

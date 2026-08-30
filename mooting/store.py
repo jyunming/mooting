@@ -273,6 +273,22 @@ class Store:
             cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+                if (table, column) == ("mentions", "asking"):
+                    self._backfill_asking()
+
+    def _backfill_asking(self) -> None:
+        """Decide, for mentions written before the column existed, which were asks.
+
+        `ask` posts a body that opens with `@target `, while a name found by
+        reading prose sits anywhere else in the paragraph. Taking the column's
+        default instead would leave every historical topic paused on somebody's
+        summary -- which is the behaviour the column was added to end.
+        """
+        self._conn.execute(
+            "UPDATE mentions SET asking = 0 "
+            "WHERE question NOT LIKE '@' || target || ' %' "
+            "  AND question NOT LIKE '@' || target || ',%'"
+        )
 
     # ------------------------------------------------------------------- events
 

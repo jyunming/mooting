@@ -868,17 +868,21 @@ def test_answering_discharges_it_and_the_room_moves(tmp_path):
         store.close()
 
 
-def test_an_old_board_keeps_its_mentions_blocking(tmp_path):
-    """`asking` defaults to 1 on migration: a topic paused before the
-    distinction existed stays paused, rather than silently resuming under new
-    rules its seats never agreed to."""
+def test_migrating_an_old_board_sorts_asks_from_mentions(tmp_path):
+    """A board written before the column existed still has to end up with the
+    right answer, because taking the safe default left the exact summary that
+    prompted all this still holding the room.
+
+    `ask` posts a body opening with `@target `; a name found in prose does not.
+    That is enough to tell them apart after the fact."""
     import sqlite3
 
     from mooting.store import connect
 
     store, tid = _room(tmp_path)
     path = store.path
-    store.post(tid, "Kevin", "Final takeaway for @Jeremy: rare role.")
+    store.post(tid, "Kevin", "Final takeaway for @Jeremy: rare role.")   # named
+    store.ask(tid, "Kevin", "Jeremy", "which foundry are you targeting?")  # asked
     store.close()
 
     # Rewind the column away, as an older board would have it.
@@ -891,7 +895,14 @@ def test_an_old_board_keeps_its_mentions_blocking(tmp_path):
     try:
         cols = {r["name"] for r in again.q("PRAGMA table_info(mentions)")}
         assert "asking" in cols, "migration did not add the column"
-        assert again.open_mentions(tid, "Jeremy", only_asks=True), \
-            "a pre-existing mention lost its block"
+
+        rows = again.q("SELECT question, asking FROM mentions")
+        named = next(r for r in rows if r["question"].startswith("Final takeaway"))
+        asked = next(r for r in rows if r["question"].startswith("@Jeremy which"))
+        assert named["asking"] == 0, "a summary still blocks the room"
+        assert asked["asking"] == 1, "a real question stopped blocking"
+
+        why = _why_stopped(again, tid)
+        assert why and "which foundry" in why, why
     finally:
         again.close()
