@@ -23,9 +23,12 @@ The input at the bottom is the only one. The first character decides what it doe
 | `@codex what about X?` | asks one seat; the others wait for its answer |
 | `/command` | everything below |
 
-Typing `/` lists the commands; `↑`/`↓` walk them, `Tab` or `Enter` takes one,
-`Esc` dismisses. With no list open, `↑`/`↓` walk what you typed before — kept
-across sessions.
+In `mooting tui`, typing `/` lists the commands as you type; `↑`/`↓` walk the
+list, `Tab` or `Enter` takes one, `Esc` dismisses. With no list open, `↑`/`↓`
+walk what you typed before — kept across sessions on disk.
+
+`mooting console` completes the same commands on `Tab` instead (needs a real
+terminal — see [Using it](USING.md)), and its input history lasts only that run.
 
 ### Talking
 
@@ -73,7 +76,9 @@ across sessions.
 | `/topic agenda clear` | drop it; back to the bare title |
 | `/attach <file>` | feed a document in; text is inlined into every prompt |
 | `/attach` | list them; `/attach rm <id>` removes one |
-| `/topic <slug>` | switch to another |
+| `/topic` | where you are, the agenda, and what else is open |
+| `/topic switch <slug>` | move to another topic |
+| `/topic rename <slug> <title>` | rename any topic, not just this one |
 | `/topic mode debate` | argue to find the flaw (default) |
 | `/topic mode discuss` | build on each other |
 | `/topic mode work <agent>` | team mode; that seat plans and reviews |

@@ -181,6 +181,37 @@
   </figure>
 
   <section>
+    <p class="eyebrow">The problem</p>
+    <h2>One model. One answer. No idea what it missed.</h2>
+    <p class="muted">
+      So you open a second terminal, paste the question into a different CLI and
+      read two answers that never meet. Nobody argues. Nothing is written down.
+      Next quarter you cannot remember why you chose what you chose.
+    </p>
+    <ul class="points">
+      <li>
+        <h3>A decision you will have to live with</h3>
+        <p>Four seats, four contexts, four readings of your code. They answer
+        the same board state at once, so nobody follows the leader &mdash; then
+        read each other and push back by name. What you were missing arrives as
+        somebody&rsquo;s objection.</p>
+      </li>
+      <li>
+        <h3>A second opinion you would otherwise skip</h3>
+        <p>31.8 seconds a turn, measured &mdash; and they think at the same time.
+        Three opinions cost about what one does, and less attention than opening
+        another terminal.</p>
+      </li>
+      <li>
+        <h3>A choice nobody will remember making</h3>
+        <p><code>/conclude</code> writes the minutes: what was asked, what you
+        decided, who objected, what nobody settled. Attach the spec first and
+        they argue about the actual document rather than their memory of it.</p>
+      </li>
+    </ul>
+  </section>
+
+  <section>
     <p class="eyebrow">Meeting mode</p>
     <h2>Ask. Argue. Rule.</h2>
     <ol class="steps">
@@ -229,6 +260,31 @@
   </section>
 
   <section>
+    <p class="eyebrow">Not only at your desk</p>
+    <h2>Take the room with you.</h2>
+    <p class="muted">
+      It runs on your machine, on your subscriptions. Reaching it need not mean
+      sitting at it.
+    </p>
+    <ul class="points">
+      <li>
+        <h3>From Telegram</h3>
+        <p>Set the agenda, start a round, rule on a proposal with a button.</p>
+      </li>
+      <li>
+        <h3>From a browser</h3>
+        <p><code>mooting serve --web</code> — the real session in a tab, not a
+        cut-down copy.</p>
+      </li>
+      <li>
+        <h3>Nobody gets in by accident</h3>
+        <p>An unknown sender is inert until you approve them, and only a person
+        can hold the token that rules.</p>
+      </li>
+    </ul>
+  </section>
+
+  <section>
     <p class="eyebrow">One dial</p>
     <h2>Conversation, or deliberation.</h2>
     <p class="muted">
@@ -240,15 +296,16 @@
       <thead><tr><th>Setting</th><th>One turn</th><th>Reach for it when</th></tr></thead>
       <tbody>
         <tr><td>Conversation <code>low</code> <span class="n">&mdash; the default</span></td>
-            <td class="fig">~30 seconds</td>
+            <td class="fig">31.8 s</td>
             <td class="n">Brainstorming, sanity checks, narrowing a shortlist</td></tr>
-        <tr><td>Deliberation <code>high</code></td><td class="fig">a few minutes</td>
+        <tr><td>Deliberation <code>high</code></td><td class="fig">minutes</td>
             <td class="n">Design reviews, architecture calls, hard trade-offs</td></tr>
       </tbody>
     </table>
     <p class="muted" style="margin-top:14px">
-      And they think at the same time, so three opinions cost you about what one
-      does.
+      Measured, not estimated: 31.8 s a turn at <code>low</code> against 279 s
+      with no effort flag at all &mdash; 8.8x, before the seats run concurrently.
+      Three opinions cost you about what one does.
     </p>
   </section>
 
@@ -258,10 +315,20 @@
 <pre>pip install mooting
 
 <span class="k">mooting</span> setup            <span class="c"># finds your CLIs, seats them, registers, and proves it works</span>
-<span class="k">mooting</span> tui</pre>
+<span class="k">mooting</span> tui
+
+<span class="c"># and, when you want it somewhere else:</span>
+pip install <span class="k">'mooting[telegram]'</span>   <span class="c"># or [web], or [serve]</span></pre>
     <p class="muted">
-      Finds the CLIs you already have, seats them, wires up MCP, and makes each
-      one speak once before it promises you anything.
+      Finds the CLIs you already have, seats them, wires up MCP, and asks each
+      one to speak once before it promises you anything &mdash; because a CLI can
+      start, load the server, decline to call it and still exit 0.
+    </p>
+    <p class="muted">
+      <em>The remote extras ship in 0.1.1.</em> PyPI still has 0.1.0, which
+      declares none of them, so that second command fails until 0.1.1 is
+      published. Until then:
+      <code>pip install 'mooting[telegram] @ git+https://github.com/jyunming/mooting.git'</code>.
     </p>
   </section>
 
