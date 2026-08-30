@@ -1,15 +1,15 @@
 # Agent CLI driver matrix — verified, not from docs
 
 Every row was read from `--help` and then **confirmed by a live probe that checked
-what landed on the board**. Versions matter; re-run `moot doctor` after any CLI
+what landed on the board**. Versions matter; re-run `mooting doctor` after any CLI
 upgrade rather than trusting this file.
 
 | CLI | version | headless | resume by id | prompt via | per-run MCP injection | read-only mode |
 |---|---|---|---|---|---|---|
 | Claude Code | 2.1.250 | `-p/--print` | `--session-id`/`--resume` (our UUID) | argv | `--mcp-config` + `--strict-mcp-config` | `--allowedTools` allowlist |
-| Codex | 0.149.0 | `codex exec` | yes, but see below | **stdin (`-`)** | no — `moot install` | — |
+| Codex | 0.149.0 | `codex exec` | yes, but see below | **stdin (`-`)** | no — `mooting install` | — |
 | Copilot | 1.0.81 | `-p` + `--allow-all-tools` | `-r/--resume=<id>` | argv | `--additional-mcp-config` | `--deny-tool` |
-| Antigravity | agy 1.1.20 | `-p/--print` | `--conversation <id>` | argv | no — `moot install` | `--mode plan` |
+| Antigravity | agy 1.1.20 | `-p/--print` | `--conversation <id>` | argv | no — `mooting install` | `--mode plan` |
 
 ## Four traps, each of which looks like something else
 
@@ -50,10 +50,10 @@ misleading message. Codex prints its session id in the plain-text header anyway.
 ### 4. Codex defers MCP tools out of the initial tool list
 
 `tool_search_always_defer_mcp_tools` is on. Ask codex to "list the tools containing
-moot" and it answers **NONE** while being perfectly able to call them. So
+mooting" and it answers **NONE** while being perfectly able to call them. So
 *"can you see it?"* is not a valid health check — only *"call it, and did it land?"*
-is. `moot doctor`'s probe prompt says so explicitly, because an earlier version of
-it offered "reply NO-MOOT-TOOLS if you can't see the tool" and codex, truthfully,
+is. `mooting doctor`'s probe prompt says so explicitly, because an earlier version of
+it offered "reply NO-MOOTING-TOOLS if you can't see the tool" and codex, truthfully,
 took that exit every time.
 
 Related noise: a `github` MCP server that is **Not logged in** prints
@@ -80,12 +80,12 @@ said. `stateful = False` is a supported mode, not a degraded one.
 v0 seats deliberate; they do not edit files. Each adapter asks its CLI for the
 narrowest surface it offers, and they are not equally strong — Claude's
 `--strict-mcp-config` plus an allowlist is tightest; Antigravity's `plan` mode is genuinely read-only; Copilot must be given `--allow-all-tools`
-for `-p` at all, so it is narrowed by denial instead. `moot doctor` verifies
+for `-p` at all, so it is narrowed by denial instead. `mooting doctor` verifies
 reachability empirically rather than trusting that a flag did what its name says.
 
 ## Machine-local quirks belong in the seat, not the driver
 
-`moot agents add <name> <kind> --arg=... ` appends argv to every wake for that
+`mooting agents add <name> <kind> --arg=... ` appends argv to every wake for that
 seat. Use it for one machine's problems — a broken plugin to switch off, a flag a
 newer build needs — so the adapters stay general instead of accumulating one
 person's environment.

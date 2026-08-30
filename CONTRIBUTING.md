@@ -35,7 +35,7 @@ say which efforts the CLI actually accepts, and narrow the tool surface. It does
 **not** carry the agent's reply back — the agent posts to the board itself, which
 is why five CLIs with five output formats need no output parsers.
 
-Then prove it: `moot doctor --only <seat>` spends one real turn and asserts on
+Then prove it: `mooting doctor --only <seat>` spends one real turn and asserts on
 what landed on the board. A CLI can start, load the MCP server, decline to call
 it and exit 0; a return-code check goes green while the seat is mute.
 
@@ -49,6 +49,6 @@ topic — and `Store.decide` is the only code path that moves a task out of
 
 ## Reporting a bug
 
-The board is a plain SQLite file. `moot show <topic>` and the `wakes` table
+The board is a plain SQLite file. `mooting show <topic>` and the `wakes` table
 usually say what happened, and both are safe to paste with the message bodies
 trimmed.

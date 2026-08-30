@@ -4,7 +4,7 @@ The key simplification, and the reason this interface is small:
 
     A driver does NOT carry the agent's reply back.
 
-The agent posts to the board itself, through the Moot MCP tools it was given.
+The agent posts to the board itself, through the Mooting MCP tools it was given.
 The driver's only jobs are (a) deliver a prompt into the right CLI session,
 (b) know when that turn is over, (c) capture the CLI's session identifier so the
 next wake resumes the same conversation. Content never flows through here.
@@ -17,7 +17,7 @@ they don't.
 
 Consequence worth stating: a wake that fails is not a lost message. The seat's
 `last_seen` cursor is untouched, so the agent catches up on whatever wakes it
-next -- including a human running `moot nudge`. The board is the substrate;
+next -- including a human running `mooting nudge`. The board is the substrate;
 this whole module is an accelerator.
 """
 

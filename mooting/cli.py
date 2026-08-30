@@ -1,7 +1,7 @@
 """The human's surface.
 
-Deliberately a separate surface from the MCP tools. Agents get `moot_say`,
-`moot_propose`, `moot_vote`; the human gets those *plus* `approve`/`reject`,
+Deliberately a separate surface from the MCP tools. Agents get `mooting_say`,
+`mooting_propose`, `mooting_vote`; the human gets those *plus* `approve`/`reject`,
 which exist nowhere in the agent-facing tool list. Same board, different powers,
 and the difference is structural rather than a matter of prompt discipline.
 """
@@ -30,12 +30,12 @@ def _board(args: argparse.Namespace) -> Store:
 
 def _human(board: Store, name: str | None) -> str:
     """Resolve who 'you' are, and refuse to let a human command run as an agent."""
-    who = name or os.environ.get("MOOT_HUMAN")
+    who = name or os.environ.get("MOOTING_HUMAN") or os.environ.get("MOOT_HUMAN")
     if not who:
         humans = [a["name"] for a in board.agents() if a["kind"] == "human"]
         if len(humans) == 1:
             return humans[0]
-        raise SystemExit("who are you? pass --as <name> or set MOOT_HUMAN")
+        raise SystemExit("who are you? pass --as <name> or set MOOTING_HUMAN")
     if not board.is_human(who):
         raise SystemExit(f"{who!r} is not a human seat; agent seats cannot use this command")
     return who
@@ -49,7 +49,7 @@ def cmd_init(args) -> int:
     board.add_agent(args.human, "human", display=args.human)
     print(f"board at {board.path}")
     print(f"human seat: {args.human}")
-    print("next: moot agents add claude claude --cwd .")
+    print("next: mooting agents add claude claude --cwd .")
     return 0
 
 
@@ -116,7 +116,7 @@ def cmd_topic_new(args) -> int:
                            max_rounds=args.rounds, max_turns=args.turns, mode=args.mode,
                            effort=args.effort, manager=args.manager)
     print(f"topic #{tid} `{args.slug}` opened with seats: {', '.join(seats)}")
-    print(f"next: moot run {args.slug}")
+    print(f"next: mooting run {args.slug}")
     return 0
 
 
@@ -215,7 +215,7 @@ def cmd_ask(args) -> int:
     question = sys.stdin.read() if args.question == "-" else args.question
     mid = board.ask(int(t["id"]), who, args.agent, question)
     print(f"asked {args.agent} (#{mid}). They are next in line.")
-    print(f"next: moot nudge {t['slug']} {args.agent}    (or `moot run {t['slug']}`)")
+    print(f"next: mooting nudge {t['slug']} {args.agent}    (or `mooting run {t['slug']}`)")
     return 0
 
 
@@ -318,7 +318,7 @@ def _decide(args, approve: bool) -> int:
     p = board.proposal(args.proposal_id)
     print(f"proposal #{p['id']} {p['status']} by {who}")
     if board.topic(int(p["topic_id"]))["status"] == "paused":
-        print(f"topic is paused — `moot run {board.topic(int(p['topic_id']))['slug']}` to continue")
+        print(f"topic is paused — `mooting run {board.topic(int(p['topic_id']))['slug']}` to continue")
     return 0
 
 
@@ -357,7 +357,7 @@ def cmd_run(args) -> int:
     print(f"\n== stopped: {reason}")
     for p in board.proposals(int(t["id"]), status="open"):
         print(f"   awaiting you: #{p['id']} {p['title']}")
-        print(f"   moot approve {p['id']} -m '...'   |   moot reject {p['id']} -m '...'")
+        print(f"   mooting approve {p['id']} -m '...'   |   mooting reject {p['id']} -m '...'")
     return 0
 
 
@@ -439,9 +439,9 @@ def cmd_doctor(args) -> int:
 # --------------------------------------------------------------------- parser
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="moot", description=__doc__.splitlines()[0])
-    ap.add_argument("--db", help="board path (default ./.moot/board.db, or $MOOT_DB)")
-    ap.add_argument("--as", dest="as_", help="act as this human seat (or $MOOT_HUMAN)")
+    ap = argparse.ArgumentParser(prog="mooting", description=__doc__.splitlines()[0])
+    ap.add_argument("--db", help="board path (default ./.mooting/board.db, or $MOOTING_DB)")
+    ap.add_argument("--as", dest="as_", help="act as this human seat (or $MOOTING_HUMAN)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("setup", help="find your CLIs, seat them, wire them up, prove it works")
@@ -450,7 +450,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_setup)
 
     p = sub.add_parser("init", help="create a board and your human seat")
-    p.add_argument("--human", default=os.environ.get("MOOT_HUMAN", "human"))
+    p.add_argument("--human", default=os.environ.get("MOOTING_HUMAN")
+                   or os.environ.get("MOOT_HUMAN", "human"))
     p.set_defaults(fn=cmd_init)
 
     ag = sub.add_parser("agents", help="manage seats").add_subparsers(dest="sub", required=True)
@@ -608,7 +609,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.fn(args)
     except StoreError as exc:
-        print(f"moot: {exc}", file=sys.stderr)
+        print(f"mooting: {exc}", file=sys.stderr)
         return 1
 
 

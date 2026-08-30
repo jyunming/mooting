@@ -24,7 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "site"
-REPO = "https://github.com/jyunming/moot"
+REPO = "https://github.com/jyunming/mooting"
 
 #: A GitHub blob link to `docs/X.md` becomes the mkdocs page at `docs/X/`.
 BLOB = re.compile(rf"{re.escape(REPO)}/blob/main/docs/([A-Za-z0-9_]+)\.md")

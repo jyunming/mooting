@@ -1,11 +1,11 @@
-"""`moot setup` — one command that gets a council standing.
+"""`mooting setup` — one command that gets a council standing.
 
 Setting this up by hand is six commands, and the order matters in ways nobody
 should have to learn: a seat of certain kinds needs its MCP server registered
 under its own name *before* it is woken, or it posts as somebody else.
 
-Everything here has a plain command behind it (`moot init`, `moot agents add`,
-`moot install`, `moot doctor`). The wizard runs them in the right order and says
+Everything here has a plain command behind it (`mooting init`, `mooting agents add`,
+`mooting install`, `mooting doctor`). The wizard runs them in the right order and says
 what it is doing, so it stays possible to do by hand — and possible to see what
 it did.
 """
@@ -22,7 +22,7 @@ from .install import NEEDS_REGISTRATION, install_seat
 from .store import Store, StoreError, connect
 
 #: Offered in the order most people would want them seated. Gemini's driver
-#: works and `moot agents add <name> gemini` still seats it -- it is left out
+#: works and `mooting agents add <name> gemini` still seats it -- it is left out
 #: here because it is not being recommended yet, not because it is broken.
 CANDIDATES = ("claude", "codex", "copilot", "agy")
 
@@ -57,14 +57,14 @@ def _yes(prompt: str, default: bool = True) -> bool:
 
 def run(db: Path | str | None, *, assume_yes: bool = False) -> int:
     print()
-    print("  moot setup")
+    print("  mooting setup")
     print("  ─────────────────────────────────────────────")
     print("  Everything below has a plain command behind it; this just runs them")
     print("  in an order that works.")
     print()
 
     # ---------------------------------------------------------------- 1. board
-    target = Path(db) if db else Path.cwd() / ".moot" / "board.db"
+    target = Path(db) if db else Path.cwd() / ".mooting" / "board.db"
     fresh = not target.exists()
     store: Store = connect(db, init=True)
     print(f"  board      {target}{'  (new)' if fresh else '  (existing)'}")
@@ -135,7 +135,7 @@ def run(db: Path | str | None, *, assume_yes: bool = False) -> int:
         from .doctor import run_doctor
         asyncio.run(run_doctor(store, only=",".join(seated)))
     else:
-        print("  Skipped. Run `moot doctor` when you want it.")
+        print("  Skipped. Run `mooting doctor` when you want it.")
     print()
 
     # ----------------------------------------------------------- 5. first topic
@@ -147,12 +147,12 @@ def run(db: Path | str | None, *, assume_yes: bool = False) -> int:
             slug = slugify(question, [t["slug"] for t in store.topics()])
             store.open_topic(slug, question, question, me, seats=[*seated, me])
             print(f"\n  Opened `{slug}`.")
-            print(f"  Next:  moot tui {slug}")
+            print(f"  Next:  mooting tui {slug}")
             store.close()
             return 0
 
     print("\n  Ready. Next:")
-    print("     moot tui                 open the session")
+    print("     mooting tui                 open the session")
     print("     /new <your question>     start a topic from inside it")
     print("     /help                    everything else")
     store.close()
@@ -163,5 +163,5 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin wrapp
     try:
         return run(None)
     except StoreError as exc:
-        print(f"moot: {exc}", file=sys.stderr)
+        print(f"mooting: {exc}", file=sys.stderr)
         return 1

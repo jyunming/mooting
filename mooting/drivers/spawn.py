@@ -1,7 +1,7 @@
 """Spawn-per-turn adapters for the four CLIs.
 
 All four are the same shape -- build argv, run to completion, let the agent post
-through its own Moot MCP tools -- and differ only in flags. So they share a base
+through its own Mooting MCP tools -- and differ only in flags. So they share a base
 and contribute an `argv()` each, rather than being four hand-written subprocess
 dances that drift apart.
 
@@ -23,7 +23,7 @@ v0 seats deliberate; they do not edit files. Each adapter therefore asks its CLI
 for the narrowest tool surface it offers, and `--tool-policy` is where that per-CLI
 decision lives so it is reviewable in one place instead of scattered through argv
 builders. The flags differ in strength, and honestly: Claude's `--strict-mcp-config`
-plus an allowlist is the tightest; Copilot's and Gemini's are weaker. `moot doctor`
+plus an allowlist is the tightest; Copilot's and Gemini's are weaker. `mooting doctor`
 verifies the restriction empirically rather than trusting that a flag did what its
 name suggests.
 """
@@ -43,7 +43,7 @@ from .base import Driver, Seat, WakeResult
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 
 
-def moot_mcp_config(agent: str, db: Path | str) -> dict:
+def mooting_mcp_config(agent: str, db: Path | str) -> dict:
     """The MCP server block handed to a CLI so it can reach the board.
 
     Injected per-run where the CLI supports it (Claude, Copilot), so participating
@@ -51,11 +51,11 @@ def moot_mcp_config(agent: str, db: Path | str) -> dict:
     """
     return {
         "mcpServers": {
-            "moot": {
+            "mooting": {
                 "command": sys.executable,
-                "args": ["-X", "utf8", "-m", "moot.mcp_server",
+                "args": ["-X", "utf8", "-m", "mooting.mcp_server",
                          "--agent", agent, "--db", str(db)],
-                "env": {"PYTHONUTF8": "1", "MOOT_AGENT": agent, "MOOT_DB": str(db)},
+                "env": {"PYTHONUTF8": "1", "MOOTING_AGENT": agent, "MOOTING_DB": str(db)},
             }
         }
     }
@@ -169,17 +169,17 @@ class ClaudeDriver(SpawnDriver):
 
     def tool_profile(self, seat: Seat) -> list[str]:
         if seat.executing:
-            # Editing is the job; the moot tools stay available so the worker can
+            # Editing is the job; the mooting tools stay available so the worker can
             # report back. `--strict-mcp-config` still keeps other servers out.
             return ["--permission-mode", "acceptEdits"]
-        return ["--allowedTools", "mcp__moot", "--permission-mode", "manual"]
+        return ["--allowedTools", "mcp__mooting", "--permission-mode", "manual"]
 
     def argv(self, seat: Seat, prompt: str, session: str | None) -> list[str]:
-        cfg = json.dumps(moot_mcp_config(seat.agent, self.db), ensure_ascii=False)
+        cfg = json.dumps(mooting_mcp_config(seat.agent, self.db), ensure_ascii=False)
         argv = [
             self.binary, "-p", prompt,
             "--mcp-config", cfg,
-            "--strict-mcp-config",       # nothing but Moot; no inherited servers
+            "--strict-mcp-config",       # nothing but Mooting; no inherited servers
             *self.tool_profile(seat),
             "--output-format", "json",
             *self.effort_argv(seat),
@@ -238,7 +238,7 @@ class CodexDriver(SpawnDriver):
         #   2. Even with that fixed via forward slashes, a server introduced *only*
         #      by `-c` is not launched. It must exist in the config file.
         # Both failures look identical from outside: a clean exit that posts
-        # nothing. So codex is registered once via `moot install` instead.
+        # nothing. So codex is registered once via `mooting install` instead.
         # --approve-for-me is what makes an MCP tool call actually execute. Without
         # it `codex exec` runs with approval policy "never", which does not mean
         # "auto-approve" -- it means *refuse*: the call is dispatched, the server
@@ -257,8 +257,8 @@ class CodexDriver(SpawnDriver):
         # board (see working_dir), and codex refuses to start outside a git repo:
         # "Not inside a trusted directory and --skip-git-repo-check was not
         # specified." This went unnoticed for a long time because the scratch dir
-        # sits under .moot/, so whenever moot itself was run from inside a repo the
-        # sandbox inherited that repo and codex was satisfied. Run moot from a
+        # sits under .mooting/, so whenever mooting itself was run from inside a repo the
+        # sandbox inherited that repo and codex was satisfied. Run mooting from a
         # folder that is not a repo -- a home directory, say -- and every codex
         # wake dies. The flag is scoped to that case on purpose: for an executing
         # seat the working directory is the user's own tree, and codex declining to
@@ -313,7 +313,7 @@ class CopilotDriver(SpawnDriver):
 
     `--allow-all-tools` is mandatory for `-p`, so the surface is narrowed by
     disabling built-in servers and denying the dangerous tools instead of by an
-    allowlist. That is weaker than Claude's `--strict-mcp-config`; `moot doctor`
+    allowlist. That is weaker than Claude's `--strict-mcp-config`; `mooting doctor`
     is what confirms the seat can only reach the board.
     """
     binary = "copilot"
@@ -337,7 +337,7 @@ class CopilotDriver(SpawnDriver):
         return [] if seat.executing else ["--deny-tool", "shell", "--deny-tool", "write"]
 
     def argv(self, seat: Seat, prompt: str, session: str | None) -> list[str]:
-        cfg = json.dumps(moot_mcp_config(seat.agent, self.db), ensure_ascii=False)
+        cfg = json.dumps(mooting_mcp_config(seat.agent, self.db), ensure_ascii=False)
         argv = [
             self.binary,
             "-p", prompt,
@@ -352,7 +352,7 @@ class CopilotDriver(SpawnDriver):
         if seat.cli_session:
             argv.append(f"--resume={seat.cli_session}")
         else:
-            argv += ["-n", f"moot-{seat.topic_slug}-{seat.agent}"]
+            argv += ["-n", f"mooting-{seat.topic_slug}-{seat.agent}"]
         return argv + self.extra_argv
 
     def extract_session(self, stdout: str, stderr: str, proposed: str | None) -> str | None:
@@ -370,8 +370,8 @@ class GeminiDriver(SpawnDriver):
     `--approval-mode plan` is the read-only mode -- the right posture for a seat
     that deliberates and must not edit files.
 
-    Gemini has no per-run MCP injection, so `moot doctor` checks that the server
-    is registered (`gemini mcp add moot ...`) instead of injecting it here."""
+    Gemini has no per-run MCP injection, so `mooting doctor` checks that the server
+    is registered (`gemini mcp add mooting ...`) instead of injecting it here."""
     binary = "gemini"
     stateful = False
 
@@ -388,7 +388,7 @@ class GeminiDriver(SpawnDriver):
             "-p", prompt,
             "--session-id", str(uuid.uuid4()),
             *self.tool_profile(seat),
-            "--allowed-mcp-server-names", f"moot-{seat.agent}",
+            "--allowed-mcp-server-names", f"mooting-{seat.agent}",
             "-o", "text",
             *self.extra_argv,
         ]
@@ -401,7 +401,7 @@ class AgyDriver(SpawnDriver):
 
     `--mode plan` is a real read-only mode, which makes it one of the two seats
     (with Gemini) that cannot edit files even if it decided to. Like Gemini it has
-    no per-run MCP injection, so it is registered once by `moot install`.
+    no per-run MCP injection, so it is registered once by `mooting install`.
     """
     binary = "agy"
     #: Stateless by measurement, not by limitation. `--conversation <id>` resumes

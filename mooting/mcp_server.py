@@ -1,4 +1,4 @@
-"""The surface an agent CLI sees: `python -m moot.mcp_server --agent <name>`.
+"""The surface an agent CLI sees: `python -m mooting.mcp_server --agent <name>`.
 
 Each CLI spawns its own copy of this over stdio. They all write to one SQLite
 board, which is why no daemon is required and why the council survives any single
@@ -6,10 +6,10 @@ CLI dying mid-turn.
 
 Two deliberate omissions:
 
-**There is no `moot_decide` tool.** Not a disabled one, not one that checks a
+**There is no `mooting_decide` tool.** Not a disabled one, not one that checks a
 flag -- it does not exist. `Store.decide` refuses non-humans as a backstop, but an
 agent should never see an approve button in its tool list to begin with. Humans
-decide through `moot approve` / the web UI, on a different surface entirely.
+decide through `mooting approve` / the web UI, on a different surface entirely.
 
 **Identity comes from argv, never from the model.** The agent name is bound when
 the CLI spawns this process, so a model cannot post as a peer by passing a
@@ -30,10 +30,10 @@ from .store import Store, StoreError, connect
 
 # Bound at startup from argv/env; see the module docstring on why this is not a
 # tool parameter.
-AGENT: str = os.environ.get("MOOT_AGENT", "unknown")
+AGENT: str = os.environ.get("MOOTING_AGENT") or os.environ.get("MOOT_AGENT", "unknown")
 BOARD: Store | None = None
 
-mcp = FastMCP("moot")
+mcp = FastMCP("mooting")
 
 
 def board() -> Store:
@@ -57,7 +57,7 @@ def _fmt_transcript(rows: list[Any], limit: int = 60) -> str:
 # ----------------------------------------------------------------------- read
 
 @mcp.tool()
-def moot_inbox() -> str:
+def mooting_inbox() -> str:
     """What has happened on your councils since you last caught up.
 
     Call this at the start of every turn. It is the poll-on-turn path that keeps
@@ -92,7 +92,7 @@ def moot_inbox() -> str:
 
 
 @mcp.tool()
-def moot_read(topic: str, after: int = 0) -> str:
+def mooting_read(topic: str, after: int = 0) -> str:
     """Full transcript of a topic. `topic` is its slug or id; `after` a message id."""
     tid = _topic_id(topic)
     t = board().topic(tid)
@@ -104,7 +104,7 @@ def moot_read(topic: str, after: int = 0) -> str:
 
 
 @mcp.tool()
-def moot_status() -> str:
+def mooting_status() -> str:
     """Who holds which seat, on what, and how much budget each has left."""
     b = board()
     lines = []
@@ -124,7 +124,7 @@ def moot_status() -> str:
 # ---------------------------------------------------------------------- write
 
 @mcp.tool()
-def moot_say(topic: str, body: str) -> str:
+def mooting_say(topic: str, body: str) -> str:
     """Post an argument to the council.
 
     This is the only way your reasoning reaches anyone -- text you return to your
@@ -142,7 +142,7 @@ def moot_say(topic: str, body: str) -> str:
 
 
 @mcp.tool()
-def moot_propose(topic: str, title: str, body: str) -> str:
+def mooting_propose(topic: str, title: str, body: str) -> str:
     """Put a concrete decision to the council.
 
     A proposal is the only thing that can become action, and only a human closes
@@ -162,7 +162,7 @@ def moot_propose(topic: str, title: str, body: str) -> str:
 
 
 @mcp.tool()
-def moot_vote(proposal_id: int, stance: str, rationale: str = "") -> str:
+def mooting_vote(proposal_id: int, stance: str, rationale: str = "") -> str:
     """Record an advisory stance: `support`, `object`, or `abstain`.
 
     Objecting is worth more than agreeing. If you object, say what specifically
@@ -176,12 +176,12 @@ def moot_vote(proposal_id: int, stance: str, rationale: str = "") -> str:
 
 
 @mcp.tool()
-def moot_ask(topic: str, agent: str, question: str) -> str:
+def mooting_ask(topic: str, agent: str, question: str) -> str:
     """Ask one named councillor directly for their opinion.
 
     This is an @mention with a guaranteed target: it posts your question to the
     board and puts that seat next in line to answer, ahead of the normal rotation.
-    Writing `@name` inside `moot_say` does the same thing.
+    Writing `@name` inside `mooting_say` does the same thing.
 
     Use it when someone else holds the knowledge the argument turns on -- the seat
     that read the sources, or owns the subsystem. It buys them priority, not extra
@@ -196,7 +196,7 @@ def moot_ask(topic: str, agent: str, question: str) -> str:
 
 
 @mcp.tool()
-def moot_pass(topic: str, why: str = "nothing to add") -> str:
+def mooting_pass(topic: str, why: str = "nothing to add") -> str:
     """End your turn without arguing. A real answer, not a failure.
 
     Use it when you agree, when the point is outside what you can judge, or when
@@ -212,7 +212,7 @@ def moot_pass(topic: str, why: str = "nothing to add") -> str:
 # ----------------------------------------------------------------------- work
 
 @mcp.tool()
-def moot_assign(topic: str, agent: str, title: str, body: str = "",
+def mooting_assign(topic: str, agent: str, title: str, body: str = "",
                  acceptance: str = "") -> str:
     """Draft a task for one teammate. Manager only, on a work topic.
 
@@ -234,7 +234,7 @@ def moot_assign(topic: str, agent: str, title: str, body: str = "",
 
 
 @mcp.tool()
-def moot_tasks(topic: str) -> str:
+def mooting_tasks(topic: str) -> str:
     """The plan and where every task has got to."""
     tid = _topic_id(topic)
     rows = board().tasks(tid)
@@ -254,7 +254,7 @@ def moot_tasks(topic: str) -> str:
 
 
 @mcp.tool()
-def moot_task_update(task_id: int, status: str, result: str = "") -> str:
+def mooting_task_update(task_id: int, status: str, result: str = "") -> str:
     """Report on your task, or rule on someone else's if you are the manager.
 
     As the worker: `in_progress`, `done`, or `blocked`. Say concretely what you
@@ -272,21 +272,22 @@ def moot_task_update(task_id: int, status: str, result: str = "") -> str:
 
 def main(argv: list[str] | None = None) -> int:
     global AGENT, BOARD
-    ap = argparse.ArgumentParser(description="Moot MCP server (stdio, one per agent CLI)")
-    ap.add_argument("--agent", default=os.environ.get("MOOT_AGENT"),
+    ap = argparse.ArgumentParser(description="Mooting MCP server (stdio, one per agent CLI)")
+    ap.add_argument("--agent", default=os.environ.get("MOOTING_AGENT")
+                    or os.environ.get("MOOT_AGENT"),
                     help="seat name this CLI posts as; binds identity for the session")
-    ap.add_argument("--db", default=os.environ.get("MOOT_DB"), help="path to board.db")
+    ap.add_argument("--db", default=os.environ.get("MOOTING_DB"), help="path to board.db")
     args = ap.parse_args(argv)
 
     if not args.agent:
-        ap.error("--agent is required (or set MOOT_AGENT)")
+        ap.error("--agent is required (or set MOOTING_AGENT)")
 
     AGENT = args.agent
     BOARD = connect(Path(args.db) if args.db else None)
     try:
         BOARD.agent(AGENT)
     except StoreError:
-        print(f"moot: unknown seat {AGENT!r}; run `moot agents add {AGENT} <kind>` first",
+        print(f"mooting: unknown seat {AGENT!r}; run `mooting agents add {AGENT} <kind>` first",
               file=sys.stderr)
         return 2
 

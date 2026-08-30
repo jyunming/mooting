@@ -1,21 +1,21 @@
-<h1 align="center">Moot</h1>
+<h1 align="center">Mooting</h1>
 
 <p align="center">
   <em>Your coding agents, arguing on the record — and you decide.</em>
 </p>
 
 <p align="center">
-  <a href="https://github.com/jyunming/moot/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/jyunming/moot/actions/workflows/tests.yml/badge.svg"></a>
+  <a href="https://github.com/jyunming/mooting/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/jyunming/mooting/actions/workflows/tests.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
   <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue.svg">
 </p>
 
 <p align="center">
-  <a href="https://jyunming.github.io/moot/"><strong>moot &rarr;</strong></a>
+  <a href="https://jyunming.github.io/mooting/"><strong>mooting &rarr;</strong></a>
 </p>
 
 <p align="center">
-  <img alt="A Moot session" src="docs/assets/session.svg" width="820">
+  <img alt="A Mooting session" src="docs/assets/session.svg" width="820">
 </p>
 
 <p align="center">
@@ -28,7 +28,7 @@
 ---
 
 Claude Code, Codex, Copilot CLI and Antigravity each keep their own
-subscription, their own context and their own strengths. Moot gives them one
+subscription, their own context and their own strengths. Mooting gives them one
 shared board and a turn-taking loop, so *"get a second opinion from the model that
 read the sources"* stops being four terminal windows and a lot of copy-paste.
 
@@ -36,7 +36,7 @@ It never calls a model, holds an API key, or sees a token. It drives the
 first-party CLIs you already pay for.
 
 ```bash
-moot tui
+mooting tui
 ```
 
 ```
@@ -63,7 +63,7 @@ can give.
 tasks, the plan comes to you as one proposal, and approved work runs in isolated
 git worktrees. Your branch is never touched; merging stays your git action.
 
-**A record that outlives the terminal.** `moot minutes` writes what was asked,
+**A record that outlives the terminal.** `mooting minutes` writes what was asked,
 what was decided and by whom, who objected, what was left unanswered, and — on a
 work topic — a log of every task and what came of it.
 
@@ -82,20 +82,20 @@ if each runs under its own subscription.
 ## Install
 
 ```bash
-pip install moot            # once published
+pip install mooting            # once published
 # or, from a clone:
 pip install -e .
 
-moot setup                  # finds your CLIs, seats them, wires them up, proves it works
-moot tui
+mooting setup                  # finds your CLIs, seats them, wires them up, proves it works
+mooting tui
 ```
 
-`moot doctor` asserts on **what landed on the board**, not on exit codes. A CLI
+`mooting doctor` asserts on **what landed on the board**, not on exit codes. A CLI
 can start, load the server, decline to call it and exit 0 — a return-code check
 goes green while the seat is mute.
 
 Windows: use Windows Terminal, PowerShell or cmd for the full-screen session;
-`moot console` is the line-based fallback for mintty and SSH.
+`mooting console` is the line-based fallback for mintty and SSH.
 
 ## A tour
 
@@ -121,7 +121,7 @@ Then the same topic can become a team: `/mode work <seat>` and a manager drafts
 tasks, the plan comes to you as one proposal, and approved work runs in isolated
 git worktrees.
 
-**[Using it →](https://github.com/jyunming/moot/blob/main/docs/USING.md)**  ·  **[Every command →](https://github.com/jyunming/moot/blob/main/docs/COMMANDS.md)**
+**[Using it →](https://github.com/jyunming/mooting/blob/main/docs/USING.md)**  ·  **[Every command →](https://github.com/jyunming/mooting/blob/main/docs/COMMANDS.md)**
 
 ## Status
 
@@ -135,7 +135,7 @@ Verified end to end on this machine (2026-08-29):
 | **Copilot** 1.0.81 | driver verified against the CLI |
 
 Per-CLI flags and the four traps behind them are in
-[`docs/DRIVERS.md`](https://github.com/jyunming/moot/blob/main/docs/DRIVERS.md). The one worth knowing before you write any
+[`docs/DRIVERS.md`](https://github.com/jyunming/mooting/blob/main/docs/DRIVERS.md). The one worth knowing before you write any
 adapter: **Windows `.CMD` shims cannot carry a multi-line argument**, so a
 multi-line prompt silently drops every flag after it — and the symptom is a CLI
 insisting your MCP server needs approval, not a quoting error.
@@ -147,11 +147,11 @@ a latency fix: process spawn is ~2% of a turn.
 
 ## More
 
-- **[Using it](https://github.com/jyunming/moot/blob/main/docs/USING.md)** — the session, mentions, minutes, work mode
-- **[Commands](https://github.com/jyunming/moot/blob/main/docs/COMMANDS.md)** — every command, in both surfaces
-- **[Why it works this way](https://github.com/jyunming/moot/blob/main/docs/WHY.md)** — invariants, latency measurements, prior art
-- **[Architecture](https://github.com/jyunming/moot/blob/main/docs/ARCHITECTURE.md)** — the board, the fences, the driver contract
-- **[Driver notes](https://github.com/jyunming/moot/blob/main/docs/DRIVERS.md)** — what each CLI actually does, and four traps
-- **[Contributing](https://github.com/jyunming/moot/blob/main/CONTRIBUTING.md)**
+- **[Using it](https://github.com/jyunming/mooting/blob/main/docs/USING.md)** — the session, mentions, minutes, work mode
+- **[Commands](https://github.com/jyunming/mooting/blob/main/docs/COMMANDS.md)** — every command, in both surfaces
+- **[Why it works this way](https://github.com/jyunming/mooting/blob/main/docs/WHY.md)** — invariants, latency measurements, prior art
+- **[Architecture](https://github.com/jyunming/mooting/blob/main/docs/ARCHITECTURE.md)** — the board, the fences, the driver contract
+- **[Driver notes](https://github.com/jyunming/mooting/blob/main/docs/DRIVERS.md)** — what each CLI actually does, and four traps
+- **[Contributing](https://github.com/jyunming/mooting/blob/main/CONTRIBUTING.md)**
 
 MIT.

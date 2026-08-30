@@ -1,7 +1,7 @@
 """The debate loop.
 
 Reads the board, decides who speaks next, wakes them, repeats. Everything it
-knows how to do, a human could do by hand with `moot nudge` -- that is
+knows how to do, a human could do by hand with `mooting nudge` -- that is
 deliberate. The supervisor is an accelerator over a board that works without it.
 
 Three rules it will not break:
@@ -27,7 +27,7 @@ from typing import Sequence
 from .drivers.base import Driver, Seat, WakeResult
 from .store import Store
 
-log = logging.getLogger("moot.supervisor")
+log = logging.getLogger("mooting.supervisor")
 
 #: How the room is framed to a seat. This is the whole difference between the two
 #: topic modes, and it is a real one: told that disagreement is the product, a
@@ -44,11 +44,11 @@ FRAMING = {
     "work": (
         "**You are the manager of this team.** Break the goal into tasks small "
         "enough that one agent can finish each in a single sitting, and assign "
-        "each to the seat best suited to it -- use `moot_assign`. Give every task "
+        "each to the seat best suited to it -- use `mooting_assign`. Give every task "
         "an acceptance line, so 'done' is checkable rather than a matter of "
         "opinion. Nothing runs until a human approves your plan, so put the whole "
         "plan up at once. When work comes back, review it and use "
-        "`moot_task_update(id, \"accepted\"|\"rejected\", why)`."
+        "`mooting_task_update(id, \"accepted\"|\"rejected\", why)`."
     ),
     "discuss": (
         "**This is a working discussion, not a debate.** Build on what others have "
@@ -180,7 +180,7 @@ class Supervisor:
         with self.store.tx() as c:
             c.execute("UPDATE topics SET round = round + 1 WHERE id = ?", (topic_id,))
         self.store.post(
-            topic_id, "moot",
+            topic_id, "mooting",
             f"--- round {topic['round'] + 2} of {topic['max_rounds']} ---",
             kind="system", count_turn=False,
         )
@@ -264,7 +264,7 @@ class Supervisor:
                 # left a question apparently ignored with nothing on the board to
                 # explain it. Say so: the turn was spent either way.
                 self.store.post(
-                    topic_id, "moot",
+                    topic_id, "mooting",
                     f"{agent} was woken and said nothing — its turn produced no post. "
                     f"Anything still asked of it stays open; /nudge {agent} to try again.",
                     kind="system", count_turn=False)
@@ -279,7 +279,7 @@ class Supervisor:
             else:
                 self.store.set_seat_state(topic_id, agent, "failed")
                 self.store.post(
-                    topic_id, "moot",
+                    topic_id, "mooting",
                     f"wake failed for {agent}: {result.detail}. "
                     f"Its cursor is unchanged -- it will catch up when next woken.",
                     kind="system", count_turn=False,
@@ -385,7 +385,7 @@ class Supervisor:
             cfg = json.loads(self.store.agent(agent)["driver_cfg"])
             if cfg.get("capability") != "execute":
                 self.store.post(
-                    topic_id, "moot",
+                    topic_id, "mooting",
                     f"task #{t['id']} is assigned to {agent}, which was not registered "
                     f"with --capability execute. Re-register that seat or reassign.",
                     kind="system", count_turn=False)
@@ -401,7 +401,7 @@ class Supervisor:
 
         Workers run concurrently; pointing several of them at one checkout would
         have them overwrite each other's edits. Worktrees are also how the result
-        stays reviewable -- work lands on `moot/task-N`, never on the branch you
+        stays reviewable -- work lands on `mooting/task-N`, never on the branch you
         are sitting on, and merging stays a human git action.
         """
         if task["worktree"]:
@@ -409,7 +409,7 @@ class Supervisor:
         tid = int(task["id"])
         cfg = json.loads(self.store.agent(task["assignee"])["driver_cfg"])
         repo = cfg.get("cwd") or str(Path.cwd())
-        branch = f"moot/task-{tid}"
+        branch = f"mooting/task-{tid}"
         tree = Path(self.store.path).parent / "work" / f"task-{tid}"
         try:
             subprocess.run(["git", "-C", repo, "rev-parse", "--git-dir"],
@@ -429,7 +429,7 @@ class Supervisor:
             # which is the user's choice to make by not using a repo.
             log.warning("no worktree for task %s: %s", tid, exc)
             self.store.set_task_workspace(tid, "", repo)
-            self.store.post(topic_id, "moot",
+            self.store.post(topic_id, "mooting",
                             f"task #{tid} has no isolated worktree ({exc}); "
                             f"it will run directly in {repo}",
                             kind="system", count_turn=False)
@@ -469,7 +469,7 @@ class Supervisor:
 
         tid = int(task["id"])
         if self.store.task(tid)["status"] == "in_progress":
-            # The turn ended without the worker calling moot_task_update. Observed
+            # The turn ended without the worker calling mooting_task_update. Observed
             # live: a seat committed real work to its branch and simply never
             # reported. Leaving the task in_progress strands it -- the manager is
             # never asked to review, and the loop then finds nothing runnable.
@@ -517,7 +517,7 @@ class Supervisor:
         tid = int(task["id"])
         where = task["worktree"] or "your working directory"
         lines = [
-            f"You are **{task['assignee']}**, working on an Moot team topic.",
+            f"You are **{task['assignee']}**, working on an Mooting team topic.",
             "",
             f"## Task #{tid}: {task['title']}",
             "",
@@ -542,11 +542,11 @@ class Supervisor:
             "",
             "## Reporting back",
             "",
-            "Use the `moot` MCP tools; nothing else you write is read by anyone.",
+            "Use the `mooting` MCP tools; nothing else you write is read by anyone.",
             "",
-            f"- `moot_task_update({tid}, \"done\", \"<what you changed and where>\")` when finished.",
-            f"- `moot_task_update({tid}, \"blocked\", \"<what stopped you>\")` if you cannot proceed.",
-            "- `moot_ask(topic, agent, question)` to ask the manager or a human first.",
+            f"- `mooting_task_update({tid}, \"done\", \"<what you changed and where>\")` when finished.",
+            f"- `mooting_task_update({tid}, \"blocked\", \"<what stopped you>\")` if you cannot proceed.",
+            "- `mooting_ask(topic, agent, question)` to ask the manager or a human first.",
             "",
             "Do only this task. If you notice other work that needs doing, say so in "
             "your report rather than doing it.",
@@ -575,7 +575,7 @@ class Supervisor:
         if pending:
             # A proposal blocks once every seat has had its *chance* to respond --
             # not once every seat has cast a formal vote. Waiting for votes lets a
-            # council that argues without calling moot_vote debate forever with a
+            # council that argues without calling mooting_vote debate forever with a
             # decision outstanding, which is exactly the routing-around this rule
             # exists to prevent. Seeing a proposal and saying nothing is abstention.
             cursors = {s["agent"]: s["last_seen"] for s in self.store.seats(topic_id)
@@ -665,8 +665,8 @@ class Supervisor:
     def _park(self, topic_id: int, reason: str) -> None:
         topic = self.store.topic(topic_id)
         if topic["status"] == "open":
-            self.store.set_topic_status(topic_id, "paused", "moot", reason)
-            self.store.post(topic_id, "moot", f"paused: {reason}", kind="system", count_turn=False)
+            self.store.set_topic_status(topic_id, "paused", "mooting", reason)
+            self.store.post(topic_id, "mooting", f"paused: {reason}", kind="system", count_turn=False)
 
     # ----------------------------------------------------------------- prompting
 
@@ -695,7 +695,7 @@ class Supervisor:
         turns_left = min(row["max_turns"], self.caps.max_turns_per_seat) - row["turns_used"]
 
         lines = [
-            f"You are **{agent}**, holding a seat on an Moot council.",
+            f"You are **{agent}**, holding a seat on an Mooting council.",
             "",
             f"## Topic: {topic['title']}  (`{topic['slug']}`, round {topic['round'] + 1}/{topic['max_rounds']})",
             "",
@@ -738,7 +738,7 @@ class Supervisor:
                 spent += len(body)
             if elided:
                 lines.append(f"_({elided} earlier message(s) left out — "
-                             f"`moot_read` for the full transcript.)_")
+                             f"`mooting_read` for the full transcript.)_")
                 lines.append("")
             for m, body in reversed(kept):
                 lines.append(f"**{m['author']}** ({m['kind']}):")
@@ -762,24 +762,24 @@ class Supervisor:
         lines += [
             "## What to do now",
             "",
-            f"Use the **`moot-{agent}`** MCP server — that one, not any other "
-            f"`moot-*` server you can see. It is bound to your seat, and posting "
+            f"Use the **`mooting-{agent}`** MCP server — that one, not any other "
+            f"`mooting-*` server you can see. It is bound to your seat, and posting "
             f"through a different one would attribute your words to another "
             f"councillor (the board will refuse it).",
             "",
             "Your reply text here is not read by anyone —",
             "**only what you post through the tools reaches the council.**",
             "",
-            "- `moot_read(topic)` — full transcript, if the excerpt above is not enough.",
-            "- `moot_say(topic, body)` — argue, add evidence, or disagree. One point, made well.",
-            "- `moot_propose(topic, title, body)` — a concrete decision you want taken.",
-            "- `moot_ask(topic, agent, question)` — put a question to one councillor by name.",
-            *(["- `moot_assign(topic, agent, title, body, acceptance)` — draft a task (manager only).",
-               "- `moot_tasks(topic)` — the current plan and its state.",
-               "- `moot_task_update(task_id, status, result)` — `accepted` / `rejected` on finished work."]
+            "- `mooting_read(topic)` — full transcript, if the excerpt above is not enough.",
+            "- `mooting_say(topic, body)` — argue, add evidence, or disagree. One point, made well.",
+            "- `mooting_propose(topic, title, body)` — a concrete decision you want taken.",
+            "- `mooting_ask(topic, agent, question)` — put a question to one councillor by name.",
+            *(["- `mooting_assign(topic, agent, title, body, acceptance)` — draft a task (manager only).",
+               "- `mooting_tasks(topic)` — the current plan and its state.",
+               "- `mooting_task_update(task_id, status, result)` — `accepted` / `rejected` on finished work."]
               if topic["mode"] == "work" else []),
-            "- `moot_vote(proposal_id, stance, rationale)` — `support` / `object` / `abstain`.",
-            "- `moot_pass(topic, why)` — nothing to add. Passing is a real answer; say so and stop.",
+            "- `mooting_vote(proposal_id, stance, rationale)` — `support` / `object` / `abstain`.",
+            "- `mooting_pass(topic, why)` — nothing to add. Passing is a real answer; say so and stop.",
             "",
             "You cannot approve a proposal, including your own. Votes are advisory;",
             "a human holds every decision. Do not edit files — this council deliberates.",
@@ -792,7 +792,7 @@ async def run(store: Store, drivers: dict[str, Driver], topic_id: int, caps: Cap
 
 
 def next_speaker(store: Store, topic_id: int, caps: Caps | None = None) -> str | None:
-    """Exposed for `moot status` and for tests that assert turn order."""
+    """Exposed for `mooting status` and for tests that assert turn order."""
     return Supervisor(store, {}, caps)._next_speaker(topic_id)
 
 

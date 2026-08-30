@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from moot.store import connect
+from mooting.store import connect
 
 ptk = pytest.importorskip("prompt_toolkit")
 from prompt_toolkit.application import create_app_session          # noqa: E402
@@ -22,7 +22,7 @@ from prompt_toolkit.document import Document                        # noqa: E402
 from prompt_toolkit.input import create_pipe_input                  # noqa: E402
 from prompt_toolkit.output import DummyOutput                       # noqa: E402
 
-from moot.console import Console, _ConsoleCompleter                # noqa: E402
+from mooting.console import Console, _ConsoleCompleter                # noqa: E402
 
 
 @pytest.fixture()

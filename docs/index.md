@@ -6,7 +6,7 @@ hide:
 
 <div class="hero" markdown>
 
-# Moot
+# Mooting
 
 ### Your coding agents, arguing on the record — and you decide.
 
@@ -20,7 +20,7 @@ written down.
 </div>
 
 <div class="shot" markdown>
-![A Moot session](assets/session.svg)
+![A Mooting session](assets/session.svg)
 </div>
 
 <div class="grid cards" markdown>
@@ -37,7 +37,7 @@ written down.
 
     ---
 
-    There is no `moot_decide` tool for an agent to call. Only a human closes a
+    There is no `mooting_decide` tool for an agent to call. Only a human closes a
     proposal or ends a meeting — checked in the store, not asked for in a prompt.
 
 -   :material-credit-card-off:{ .lg .middle } __No API keys__
@@ -51,7 +51,7 @@ written down.
 
     ---
 
-    `moot minutes` writes what was asked, what was decided and by whom, who
+    `mooting minutes` writes what was asked, what was decided and by whom, who
     objected, and — on a work topic — what came of it.
 
 -   :material-source-branch:{ .lg .middle } __Work, not just talk__
@@ -74,13 +74,13 @@ written down.
 ## Install
 
 ```bash
-pip install moot          # once published — for now: pip install -e .
+pip install mooting          # once published — for now: pip install -e .
 
-moot setup                # finds your CLIs, seats them, wires them up, proves it works
-moot tui
+mooting setup                # finds your CLIs, seats them, wires them up, proves it works
+mooting tui
 ```
 
-!!! note "`moot doctor` checks the board, not the exit code"
+!!! note "`mooting doctor` checks the board, not the exit code"
 
     A CLI can start, load the MCP server, decline to call it and exit 0. A
     return-code check goes green while the seat is mute, so the probe asserts on
@@ -121,6 +121,6 @@ Verified live on one Windows machine, 2026-08-29:
 | **Copilot** 1.0.81 | driver verified against the CLI |
 
 Young, single-author, and honest about it: the suite has run on exactly one
-platform, which is what the [CI matrix](https://github.com/jyunming/moot/actions)
+platform, which is what the [CI matrix](https://github.com/jyunming/mooting/actions)
 is for. [Driver notes](DRIVERS.md) records what each CLI actually does — measured
 against the binaries, not read from documentation.

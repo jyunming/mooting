@@ -13,7 +13,7 @@ import pathlib
 
 import pytest
 
-from moot.store import CAPABILITIES, NotAuthorised, StoreError, connect
+from mooting.store import CAPABILITIES, NotAuthorised, StoreError, connect
 
 
 @pytest.fixture()
@@ -104,7 +104,7 @@ def test_a_cancelled_wake_kills_the_child_process():
     as a cancellation, not a TimeoutError. Catching only TimeoutError meant the
     CLI was never killed: the council moved on and left it running, burning quota
     on every timed-out turn. FakeDriver spawns nothing, so no test saw it."""
-    from moot.drivers.base import Driver
+    from mooting.drivers.base import Driver
 
     class Sleeper(Driver):
         binary = "python"
@@ -135,7 +135,7 @@ def test_setup_seats_what_it_finds_and_wires_it_in_order(tmp_path, monkeypatch):
     """The order is the point: a seat of certain kinds posts under the wrong name
     until its own MCP server exists, so registration has to happen before
     anything is woken."""
-    from moot import setup as setup_mod
+    from mooting import setup as setup_mod
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(setup_mod, "_found",
@@ -149,7 +149,7 @@ def test_setup_seats_what_it_finds_and_wires_it_in_order(tmp_path, monkeypatch):
         probed.append(only or "")
         return 0
 
-    monkeypatch.setattr("moot.doctor.run_doctor", fake_doctor)
+    monkeypatch.setattr("mooting.doctor.run_doctor", fake_doctor)
     monkeypatch.setattr(setup_mod, "_ask", lambda *a, **k: (a[1] if len(a) > 1 else ""))
 
     rc = setup_mod.run(tmp_path / "board.db", assume_yes=True)
@@ -168,7 +168,7 @@ def test_setup_seats_what_it_finds_and_wires_it_in_order(tmp_path, monkeypatch):
 def test_setup_stops_when_no_cli_is_installed(tmp_path, monkeypatch):
     """A council with no seats is not a council; say so rather than leaving an
     empty board that looks set up."""
-    from moot import setup as setup_mod
+    from mooting import setup as setup_mod
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(setup_mod, "_found", lambda: [])
@@ -195,7 +195,7 @@ def _repo_root():
 
 
 def test_architecture_states_the_real_mcp_tool_count():
-    server = (_repo_root() / "moot" / "mcp_server.py").read_text(encoding="utf-8")
+    server = (_repo_root() / "mooting" / "mcp_server.py").read_text(encoding="utf-8")
     actual = server.count("@mcp.tool()")
     assert actual, "no MCP tools found -- the counting method broke, not the doc"
 
@@ -210,11 +210,11 @@ def test_architecture_states_the_real_mcp_tool_count():
 def test_no_doc_promises_a_transport_no_driver_implements():
     """`stdio_json` and `acp` are accepted strings with no class behind them.
     Prose may say they are planned; a file map may not say they exist."""
-    from moot.drivers.registry import DRIVER_CLASSES
+    from mooting.drivers.registry import DRIVER_CLASSES
 
     real = {d.kind for d in DRIVER_CLASSES.values()}
     arch = (_repo_root() / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
-    row = [ln for ln in arch.splitlines() if "`moot/drivers/`" in ln]
+    row = [ln for ln in arch.splitlines() if "`mooting/drivers/`" in ln]
     assert row, "the file map no longer has a drivers row"
     assert NUMBER_WORDS[len(real)] in row[0], (
         f"{len(real)} transport(s) implemented ({sorted(real)}), "
@@ -230,8 +230,8 @@ def test_codex_deliberation_never_runs_in_the_real_workspace(tmp_path):
     directory instead of the real cwd -- so an inverted `seat.executing` check
     would silently give a meeting seat write access to the user's tree, and
     nothing else in the system would notice. This test is that check."""
-    from moot.drivers.base import Seat
-    from moot.drivers.spawn import CodexDriver
+    from mooting.drivers.base import Seat
+    from mooting.drivers.spawn import CodexDriver
 
     repo = tmp_path / "the-real-repo"
     repo.mkdir()
@@ -255,8 +255,8 @@ def test_agy_plan_mode_and_codex_approval_flags_survive(tmp_path):
     """Two argv flags carry safety meaning and nothing exercised them: codex
     needs --approve-for-me (without it the run blocks on a prompt nobody can
     answer), and agy's read-only guarantee is `--mode plan`."""
-    from moot.drivers.base import Seat
-    from moot.drivers.spawn import AgyDriver, CodexDriver
+    from mooting.drivers.base import Seat
+    from mooting.drivers.spawn import AgyDriver, CodexDriver
 
     seat = Seat(topic_id=1, topic_slug="t", agent="x", kind="codex",
                 cli_session=None, cfg={"cwd": str(tmp_path)})
@@ -275,7 +275,7 @@ def test_model_list_parsing_survives_real_cli_output():
     """`agy` is the one CLI that enumerates its own models, and `_parse` is what
     reads it -- untested, so a change to the output format would have broken the
     model picker silently for the only CLI it serves."""
-    from moot.models import _parse
+    from mooting.models import _parse
 
     got = _parse(
         "Fetching models...\n"
@@ -296,10 +296,10 @@ def test_model_list_parsing_survives_real_cli_output():
 def test_codex_can_deliberate_outside_a_git_repo(tmp_path):
     """The deliberation sandbox is a bare directory under the board, and codex
     refuses to start outside a git repo. That only ever worked because the
-    sandbox sits under .moot/ and inherited whatever repo moot was run from --
-    so running moot anywhere else killed every codex wake."""
-    from moot.drivers.base import Seat
-    from moot.drivers.spawn import CodexDriver
+    sandbox sits under .mooting/ and inherited whatever repo mooting was run from --
+    so running mooting anywhere else killed every codex wake."""
+    from mooting.drivers.base import Seat
+    from mooting.drivers.spawn import CodexDriver
 
     driver = CodexDriver(tmp_path / "board.db")
 
@@ -311,3 +311,41 @@ def test_codex_can_deliberate_outside_a_git_repo(tmp_path):
     # ...but an executing seat runs in the user's own tree, where codex refusing
     # to touch an unversioned directory is the right answer.
     assert "--skip-git-repo-check" not in driver.argv(seat_for(True), "p", None)
+
+
+# --------------------------------------------------- the rename from `moot`
+
+def test_a_board_made_under_the_old_name_is_still_found(tmp_path, monkeypatch):
+    """Renaming the project must not orphan boards people already have. From
+    the outside an unreachable board is indistinguishable from a lost one."""
+    from mooting.store import default_db_path
+
+    monkeypatch.delenv("MOOTING_DB", raising=False)
+    monkeypatch.delenv("MOOT_DB", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    # nothing anywhere: the new location is what gets created
+    assert default_db_path() == tmp_path / ".mooting" / "board.db"
+
+    # a board from before the rename is found where it actually is
+    legacy = tmp_path / ".moot" / "board.db"
+    legacy.parent.mkdir()
+    legacy.write_bytes(b"")
+    assert default_db_path() == legacy
+
+    # ...but once a current board exists it wins, so this never goes ambiguous
+    current = tmp_path / ".mooting" / "board.db"
+    current.parent.mkdir()
+    current.write_bytes(b"")
+    assert default_db_path() == current
+
+
+def test_the_old_env_vars_still_work(tmp_path, monkeypatch):
+    from mooting.store import default_db_path
+
+    monkeypatch.delenv("MOOTING_DB", raising=False)
+    monkeypatch.setenv("MOOT_DB", str(tmp_path / "old.db"))
+    assert default_db_path() == tmp_path / "old.db"
+
+    monkeypatch.setenv("MOOTING_DB", str(tmp_path / "new.db"))
+    assert default_db_path() == tmp_path / "new.db", "the new name must win"

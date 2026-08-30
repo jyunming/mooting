@@ -6,8 +6,8 @@ A tour of the session. Every command is listed in
 ## One session: talk and work in the same place
 
 ```bash
-moot tui           # full-screen: transcript, seats, tasks, and one input
-moot console       # the line REPL — for mintty, SSH, or piping
+mooting tui           # full-screen: transcript, seats, tasks, and one input
+mooting console       # the line REPL — for mintty, SSH, or piping
 ```
 
 ```
@@ -37,7 +37,7 @@ Agent replies render as **markdown** — headings, lists and code as structure, 
 as source characters.
 
 **When the council needs you it says so and rings the terminal** (the `▶ YOUR TURN`
-bar is `moot tui`; the REPL rings and counts the questions). A question waits
+bar is `mooting tui`; the REPL rings and counts the questions). A question waits
 for its answer: an outstanding `@you` stops the room, and an outstanding `@codex`
 narrows the round to codex. Talking over the person you just asked means their
 answer lands in a conversation that has already moved on. The status bar turns into
@@ -76,8 +76,8 @@ argues on equal footing, so there is no manager to be; the role is granted when 
 topic becomes `work` and taken back when it stops being work, rather than
 lingering as a title nobody uses.
 
-Just type the question. The short handle you see in `moot ls` and pass to
-`moot tui` is **derived from it** — that one becomes
+Just type the question. The short handle you see in `mooting ls` and pass to
+`mooting tui` is **derived from it** — that one becomes
 `workflow-optimization-in-agentic-ai` — because asking someone to invent a name for
 their own question before they can ask it is friction for nothing. Chinese titles
 keep their characters; collisions get a numeric suffix.
@@ -109,7 +109,7 @@ different depending on where you were sitting.
 
 ## Watching it happen
 
-`moot console` is one terminal where every agent's reply lands as it is posted,
+`mooting console` is one terminal where every agent's reply lands as it is posted,
 and the same prompt is how you talk back:
 
 ```
@@ -141,14 +141,14 @@ The prompt survives incoming messages while you type (prompt_toolkit
 console — in Git Bash/mintty it falls back to a plain prompt rather than crashing,
 so use Windows Terminal, PowerShell or cmd for the full thing.
 
-`moot watch <topic>` is the read-only tail, for a second terminal.
+`mooting watch <topic>` is the read-only tail, for a second terminal.
 
 ## @mentions
 
 Anyone — agent or human — can direct a question at one councillor:
 
 ```
-moot ask retry-policy codex "What does the gateway actually do today?"
+mooting ask retry-policy codex "What does the gateway actually do today?"
 ```
 
 or write `@codex` inside any message. A mention is a **directed wake**: it jumps the
@@ -160,8 +160,8 @@ that stays a human's call.
 ## Taking the meeting out
 
 ```bash
-moot minutes ship-it                 # writes ship-it-minutes.md
-moot minutes ship-it --decisions-only
+mooting minutes ship-it                 # writes ship-it-minutes.md
+mooting minutes ship-it --decisions-only
 ```
 
 or `/minutes` from inside the session. It renders what was asked, **what was
@@ -199,22 +199,22 @@ actually argued rather than from a fresh brief.
 `debate` and `discuss` argue about **what to do**. `work` does it:
 
 ```bash
-moot agents add mgr    claude --cwd ~/proj --effort low
-moot agents add worker codex  --cwd ~/proj --capability execute
+mooting agents add mgr    claude --cwd ~/proj --effort low
+mooting agents add worker codex  --cwd ~/proj --capability execute
 
-moot topic new ship-it --mode work --manager mgr --seats mgr,worker   --title "Add farewell() to app.py" --brief "..."
+mooting topic new ship-it --mode work --manager mgr --seats mgr,worker   --title "Add farewell() to app.py" --brief "..."
 
-moot run ship-it        # the manager plans, then stops
-moot approve 2 -m "go"  # only you can release work
-moot run ship-it --resume
-moot tasks ship-it
+mooting run ship-it        # the manager plans, then stops
+mooting approve 2 -m "go"  # only you can release work
+mooting run ship-it --resume
+mooting tasks ship-it
 ```
 
 The manager drafts tasks; the whole plan goes to you as an ordinary proposal; and
 **approval is the only thing that turns a draft into runnable work** — `Store.decide`
 is the single code path out of `draft`, so that is checkable rather than promised.
 
-Work runs in a **git worktree per task**, on `moot/task-N`. Concurrent workers
+Work runs in a **git worktree per task**, on `mooting/task-N`. Concurrent workers
 pointed at one checkout would overwrite each other, and this also keeps the result
 reviewable: your working branch is never touched, and merging stays a human git
 action. Nothing is pushed.

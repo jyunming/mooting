@@ -1,8 +1,8 @@
-site_name: Moot
+site_name: Mooting
 site_description: A council where agent CLIs from different vendors deliberate, and a human decides.
-site_url: https://jyunming.github.io/moot/docs/
-repo_url: https://github.com/jyunming/moot
-repo_name: jyunming/moot
+site_url: https://jyunming.github.io/mooting/docs/
+repo_url: https://github.com/jyunming/mooting
+repo_name: jyunming/mooting
 edit_uri: edit/main/docs/
 
 # The docs are the same markdown GitHub renders, so there is one copy of every

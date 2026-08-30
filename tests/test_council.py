@@ -12,10 +12,10 @@ import asyncio
 
 import pytest
 
-from moot import store as store_mod
-from moot.drivers import FakeDriver
-from moot.store import NotAuthorised, StoreError, connect
-from moot.supervisor import Caps, Supervisor
+from mooting import store as store_mod
+from mooting.drivers import FakeDriver
+from mooting.store import NotAuthorised, StoreError, connect
+from mooting.supervisor import Caps, Supervisor
 
 
 @pytest.fixture()
@@ -278,7 +278,7 @@ def test_debate_and_discuss_frame_the_room_differently(board):
     assert "not manufacture an objection" in discuss_prompt
     # Everything else about the two prompts is the same machinery.
     for p in (debate_prompt, discuss_prompt):
-        assert "moot_propose" in p and "a human holds every decision" in p
+        assert "mooting_propose" in p and "a human holds every decision" in p
 
 
 def test_debate_is_the_default_and_bad_modes_are_refused(board):
@@ -415,7 +415,7 @@ def test_a_system_note_quoting_a_question_does_not_ask_again(board):
     board.ask(topic, "claude", "human", "Where is the engine?")
     assert len(board.open_mentions(topic, "human")) == 1
 
-    board.post(topic, "moot", "paused: claude is waiting on you: @human Where is the engine?",
+    board.post(topic, "mooting", "paused: claude is waiting on you: @human Where is the engine?",
                kind="system", count_turn=False)
 
     assert len(board.open_mentions(topic, "human")) == 1, "system note created a phantom ask"
@@ -481,7 +481,7 @@ def test_reset_clears_topics_but_keeps_the_seats_registry(board):
 
 def test_a_slug_is_derived_from_the_title(board):
     """Nobody should have to invent a short name for their own question."""
-    from moot.store import slugify
+    from mooting.store import slugify
 
     assert slugify("The workflow optimization in agentic AI software development") \
         == "workflow-optimization-in-agentic-ai"
@@ -498,7 +498,7 @@ def test_a_slug_is_derived_from_the_title(board):
 def test_a_derived_slug_is_always_acceptable_to_open_topic(board):
     """slugify and open_topic's validation must not disagree -- otherwise /new
     composes a name the store then refuses."""
-    from moot.store import slugify
+    from mooting.store import slugify
 
     for title in ("2026", "!!!", "   spaces   everywhere   ", "分家", "The the the"):
         slug = slugify(title, [t["slug"] for t in board.topics()])
@@ -540,8 +540,8 @@ def test_an_oversized_argv_prompt_is_reported_as_itself(board):
     """WinError 206 surfaces as FileNotFoundError, so an over-long prompt
     otherwise reports as 'the CLI is not installed'."""
     import asyncio
-    from moot.drivers.base import Seat
-    from moot.drivers.spawn import ClaudeDriver
+    from mooting.drivers.base import Seat
+    from mooting.drivers.spawn import ClaudeDriver
 
     d = ClaudeDriver("db")
     seat = Seat(1, "t", "claude", "claude", None, {})
@@ -557,8 +557,8 @@ def test_effort_is_only_sent_where_the_cli_accepts_it(board):
       agy      invalid model selection: gemini-3.1-pro has no "medium" effort
       copilot  Model "auto" does not support reasoning effort configuration
     """
-    from moot.drivers.base import Seat
-    from moot.drivers.spawn import AgyDriver, ClaudeDriver, CopilotDriver
+    from mooting.drivers.base import Seat
+    from mooting.drivers.spawn import AgyDriver, ClaudeDriver, CopilotDriver
 
     def seat(cfg=None, effort="medium"):
         return Seat(1, "t", "a", "k", None, cfg or {}, effort=effort)
@@ -579,7 +579,7 @@ def test_effort_is_only_sent_where_the_cli_accepts_it(board):
 def test_a_failure_reports_stdout_when_stderr_is_silent(board):
     """agy reports errors as JSON on stdout and exits 1 with stderr empty, which
     surfaced as "agy exited 1: " -- an error message containing no error."""
-    from moot.drivers.spawn import AgyDriver, ClaudeDriver
+    from mooting.drivers.spawn import AgyDriver, ClaudeDriver
 
     agy_json = ('{"conversation_id":"","status":"ERROR","response":"",'
                 '"error":"invalid model selection: no \\"medium\\" effort"}')
@@ -602,7 +602,7 @@ def test_a_seat_that_says_nothing_is_reported_not_counted_as_an_answer(board):
     result = asyncio.run(Supervisor(board, {"codex": silent}).wake_seat(topic, "codex"))
 
     assert result.ok, "the CLI itself did not fail"
-    notes = [m["body"] for m in board.transcript(topic) if m["author"] == "moot"]
+    notes = [m["body"] for m in board.transcript(topic) if m["author"] == "mooting"]
     assert any("said nothing" in n for n in notes), "the silence was not reported"
     # The question is still owed, because nothing answered it.
     assert board.open_mentions(topic, "codex")
@@ -613,7 +613,7 @@ def test_a_seat_that_does_speak_is_not_reported_as_silent(board):
     driver = FakeDriver(board)
     asyncio.run(Supervisor(board, {"codex": driver}).wake_seat(topic, "codex"))
 
-    notes = [m["body"] for m in board.transcript(topic) if m["author"] == "moot"]
+    notes = [m["body"] for m in board.transcript(topic) if m["author"] == "mooting"]
     assert not any("said nothing" in n for n in notes)
 
 
@@ -629,7 +629,7 @@ def test_a_post_from_someone_with_no_seat_is_refused(board):
         board.post(topic, "codex", "this would be attributed to the wrong seat")
 
     # The board itself is not a councillor and may always speak.
-    board.post(topic, "moot", "--- round 2 ---", kind="system", count_turn=False)
+    board.post(topic, "mooting", "--- round 2 ---", kind="system", count_turn=False)
     # And a seated agent is unaffected.
     board.post(topic, "claude", "an argument")
 
@@ -640,7 +640,7 @@ def test_the_refusal_names_the_fix(board):
     try:
         board.post(topic, "Gravity", "posted as the wrong councillor")
     except StoreError as exc:
-        assert "moot install Gravity" in str(exc)
+        assert "mooting install Gravity" in str(exc)
     else:
         raise AssertionError("the post should have been refused")
 

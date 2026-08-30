@@ -1,4 +1,4 @@
--- Moot: cross-vendor agent council.
+-- Mooting: cross-vendor agent council.
 --
 -- Design note: this file IS the protocol. Everything else (MCP server, supervisor,
 -- web UI) is a view onto these tables. If an agent CLI dies, or a driver flakes, or

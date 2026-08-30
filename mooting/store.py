@@ -1,6 +1,6 @@
 """SQLite-backed council board.
 
-Every process in Moot -- the MCP server each agent CLI spawns for itself, the
+Every process in Mooting -- the MCP server each agent CLI spawns for itself, the
 supervisor, the human UI -- talks to one file through this module. There is no
 server-of-record and no daemon requirement: if nothing else is running, the board
 is still readable and writable, which is what lets a failed wake degrade to
@@ -111,12 +111,26 @@ class Event:
     created_at: str
 
 
+#: The project was called `moot` before it was `mooting`, and boards created
+#: under that name are still on people's disks. A rename that silently orphans
+#: an existing board looks exactly like data loss from the outside, so an older
+#: board in the same directory is still found -- but only when there is no new
+#: one, so a fresh board always wins and this never becomes ambiguous.
+LEGACY_DIR = ".moot"
+
+
 def default_db_path() -> Path:
-    """Board location. Env override first, then the repo-local `.moot/` dir."""
-    env = os.environ.get("MOOT_DB")
+    """Board location: env override, then `.mooting/`, then a legacy `.moot/`."""
+    env = os.environ.get("MOOTING_DB") or os.environ.get("MOOT_DB")
     if env:
         return Path(env)
-    return Path.cwd() / ".moot" / "board.db"
+    here = Path.cwd()
+    current = here / ".mooting" / "board.db"
+    if not current.exists():
+        legacy = here / LEGACY_DIR / "board.db"
+        if legacy.exists():
+            return legacy
+    return current
 
 
 class Store:
@@ -526,13 +540,13 @@ class Store:
         # then reported Gravity as having said nothing.
         #
         # Refusing the post turns a silent mis-attribution into an error at the
-        # moment it happens. `moot` is the board itself and holds no seat.
-        if author != "moot" and self.seat(topic_id, author) is None:
+        # moment it happens. `mooting` is the board itself and holds no seat.
+        if author != "mooting" and self.seat(topic_id, author) is None:
             raise StoreError(
                 f"{author!r} holds no seat on `{topic['slug']}`, so this post would "
                 f"be attributed to the wrong councillor. If this seat runs codex, "
                 f"gemini or agy, its MCP server needs registering under its own "
-                f"name: moot install {author}")
+                f"name: mooting install {author}")
         with self.tx() as c:
             cur = c.execute(
                 """INSERT INTO messages (topic_id, author, kind, body, reply_to, proposal_id)
@@ -734,7 +748,7 @@ class Store:
             else:
                 released = 0
         if released:
-            self.post(int(p["topic_id"]), "moot",
+            self.post(int(p["topic_id"]), "mooting",
                       f"plan approved - {released} task(s) assigned",
                       kind="system", count_turn=False)
 
@@ -945,8 +959,8 @@ def connect(path: Path | str | None = None, *, init: bool = False) -> Store:
         # directory into "nothing set up yet", which reads like a fresh install
         # rather than a mistake.
         raise StoreError(
-            f"no board at {target}. Run `moot init` here, or point --db / "
-            f"$MOOT_DB at an existing one.")
+            f"no board at {target}. Run `mooting init` here, or point --db / "
+            f"$MOOTING_DB at an existing one.")
     store = Store(path)
     store.init_schema()
     return store

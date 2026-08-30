@@ -17,9 +17,9 @@ pytest.importorskip("textual")
 
 from textual.widgets import DataTable, Input, RichLog, Static  # noqa: E402
 
-from moot.drivers import FakeDriver
-from moot.store import StoreError, connect                          # noqa: E402
-from moot.tui import MootApp                           # noqa: E402
+from mooting.drivers import FakeDriver
+from mooting.store import StoreError, connect                          # noqa: E402
+from mooting.tui import MootApp                           # noqa: E402
 
 
 @pytest.fixture()
@@ -334,7 +334,7 @@ async def test_the_panes_do_not_fight_for_width(tmp_path, board):
 @pytest.mark.asyncio
 async def test_help_text_is_not_eaten_by_markup(tmp_path, board):
     """`[slug]` is a Rich style tag, so /rm rendered with a blank description."""
-    from moot.console import COMMANDS
+    from mooting.console import COMMANDS
 
     for cmd, why in COMMANDS.items():
         assert "[" not in why, f"{cmd} description would be swallowed as markup: {why}"
@@ -389,7 +389,7 @@ async def test_history_never_hands_richlog_a_list(tmp_path, board):
 async def test_every_seat_gets_a_distinct_colour(tmp_path, board):
     """Hashing names looked fine until codex and agy both landed on cyan.
     Distinctness is the point, so it is allocated, not hoped for."""
-    from moot.tui import seat_colours
+    from mooting.tui import seat_colours
 
     palette = seat_colours(["claude", "codex", "agy", "copilot", "jyunming"])
     assert len(set(palette.values())) == 5, f"colours collided: {palette}"
@@ -454,7 +454,7 @@ async def test_each_seat_gets_a_distinct_tinted_band(tmp_path, board):
     from rich.padding import Padding
     from textual.color import Color
 
-    from moot.tui import seat_colours, tint_for
+    from mooting.tui import seat_colours, tint_for
 
     base = Color(24, 24, 32)
     pal = seat_colours(["claude", "codex", "agy", "copilot"])
@@ -473,7 +473,7 @@ async def test_each_seat_gets_a_distinct_tinted_band(tmp_path, board):
 
         # Board notices are not a seat speaking, so they stay untinted.
         sys_parts = app._render_message(
-            {"author": "moot", "kind": "system", "body": "paused"})
+            {"author": "mooting", "kind": "system", "body": "paused"})
         sys_padded = [p for p in sys_parts if isinstance(p, Padding)]
         assert all(p.style.bgcolor is None for p in sys_padded)
 
@@ -853,7 +853,7 @@ async def test_force_closes_it_as_it_stands(tmp_path, board, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_an_unconcluded_meeting_says_so_in_its_minutes(tmp_path, board):
-    from moot.minutes import render
+    from mooting.minutes import render
     app = app_for(tmp_path, board)
     board.post(app.board.topic_id, "claude", "an argument", count_turn=False)
 
@@ -1027,7 +1027,7 @@ def test_model_lists_fall_back_to_known_names_when_a_cli_cannot_be_asked():
     would be wrong the week a new model shipped, hence the text box."""
     import asyncio as aio
 
-    from moot.models import KNOWN, LISTERS, available
+    from mooting.models import KNOWN, LISTERS, available
 
     assert "agy" in LISTERS and "codex" not in LISTERS
     assert aio.run(available("codex")) == list(KNOWN["codex"])
@@ -1124,7 +1124,7 @@ async def test_execute_can_be_granted_in_session_but_stays_two_keys(tmp_path, bo
 
         # The second key: a meeting topic never wakes a seat to execute, whatever
         # its capability says.
-        from moot.supervisor import Supervisor
+        from mooting.supervisor import Supervisor
         await type_line(pilot, app, f"/capability codex execute {repo}")
         got: list[bool] = []
         driver = FakeDriver(board,

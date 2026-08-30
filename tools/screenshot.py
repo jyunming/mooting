@@ -17,8 +17,8 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from moot.store import connect          # noqa: E402
-from moot.tui import MootApp            # noqa: E402
+from mooting.store import connect          # noqa: E402
+from mooting.tui import MootApp            # noqa: E402
 
 #: One copy, in docs/. The marketing page reaches it with ../docs/assets/ rather
 #: than keeping its own -- two copies of a generated file drift the moment one is
@@ -74,7 +74,7 @@ async def main() -> None:
         await pilot.pause()
         app.query_one("#say").value = "the gateway uses a fixed 30s, no cap"
         await pilot.pause()
-        svg = app.export_screenshot(title="moot")
+        svg = app.export_screenshot(title="mooting")
     app.board.store.close()
     app.drive_store.close()
     shutil.rmtree(tmp, ignore_errors=True)
