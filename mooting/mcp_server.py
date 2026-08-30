@@ -30,7 +30,7 @@ from .store import Store, StoreError, connect
 
 # Bound at startup from argv/env; see the module docstring on why this is not a
 # tool parameter.
-AGENT: str = os.environ.get("MOOTING_AGENT") or os.environ.get("MOOT_AGENT", "unknown")
+AGENT: str = os.environ.get("MOOTING_AGENT", "unknown")
 BOARD: Store | None = None
 
 mcp = FastMCP("mooting")
@@ -273,8 +273,7 @@ def mooting_task_update(task_id: int, status: str, result: str = "") -> str:
 def main(argv: list[str] | None = None) -> int:
     global AGENT, BOARD
     ap = argparse.ArgumentParser(description="Mooting MCP server (stdio, one per agent CLI)")
-    ap.add_argument("--agent", default=os.environ.get("MOOTING_AGENT")
-                    or os.environ.get("MOOT_AGENT"),
+    ap.add_argument("--agent", default=os.environ.get("MOOTING_AGENT"),
                     help="seat name this CLI posts as; binds identity for the session")
     ap.add_argument("--db", default=os.environ.get("MOOTING_DB"), help="path to board.db")
     args = ap.parse_args(argv)

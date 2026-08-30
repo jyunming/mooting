@@ -30,7 +30,7 @@ def _board(args: argparse.Namespace) -> Store:
 
 def _human(board: Store, name: str | None) -> str:
     """Resolve who 'you' are, and refuse to let a human command run as an agent."""
-    who = name or os.environ.get("MOOTING_HUMAN") or os.environ.get("MOOT_HUMAN")
+    who = name or os.environ.get("MOOTING_HUMAN")
     if not who:
         humans = [a["name"] for a in board.agents() if a["kind"] == "human"]
         if len(humans) == 1:
@@ -450,8 +450,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_setup)
 
     p = sub.add_parser("init", help="create a board and your human seat")
-    p.add_argument("--human", default=os.environ.get("MOOTING_HUMAN")
-                   or os.environ.get("MOOT_HUMAN", "human"))
+    p.add_argument("--human", default=os.environ.get("MOOTING_HUMAN", "human"))
     p.set_defaults(fn=cmd_init)
 
     ag = sub.add_parser("agents", help="manage seats").add_subparsers(dest="sub", required=True)

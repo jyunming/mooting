@@ -111,26 +111,12 @@ class Event:
     created_at: str
 
 
-#: The project was called `moot` before it was `mooting`, and boards created
-#: under that name are still on people's disks. A rename that silently orphans
-#: an existing board looks exactly like data loss from the outside, so an older
-#: board in the same directory is still found -- but only when there is no new
-#: one, so a fresh board always wins and this never becomes ambiguous.
-LEGACY_DIR = ".moot"
-
-
 def default_db_path() -> Path:
-    """Board location: env override, then `.mooting/`, then a legacy `.moot/`."""
-    env = os.environ.get("MOOTING_DB") or os.environ.get("MOOT_DB")
+    """Board location. Env override first, then the repo-local `.mooting/` dir."""
+    env = os.environ.get("MOOTING_DB")
     if env:
         return Path(env)
-    here = Path.cwd()
-    current = here / ".mooting" / "board.db"
-    if not current.exists():
-        legacy = here / LEGACY_DIR / "board.db"
-        if legacy.exists():
-            return legacy
-    return current
+    return Path.cwd() / ".mooting" / "board.db"
 
 
 class Store:
