@@ -1,14 +1,21 @@
 name: tests
 
 # Everything here has only ever been run on one Windows machine with one Python.
-# CI is what turns "127 tests pass" from something you have to take on trust into
+# CI is what turns "225 tests pass" from something you have to take on trust into
 # something a reader can check, and it is the only way this project will find out
-# it is accidentally Windows-only.
+# it is accidentally Windows-only. It has already earned that: a server test
+# passed on 3.11 and failed on 3.12 because it raced the event loop.
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+
+# A new push supersedes the run it interrupted. Nothing here deploys, so
+# cancelling is free.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -23,6 +30,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+          cache: pip
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
       # No agent CLI is installed here, and none is needed: the suite drives a
@@ -30,3 +38,56 @@ jobs:
       # turn-taking, the caps and the human gate are all exercised without a
       # single token being spent.
       - run: python -X utf8 -m pytest tests -q
+
+  # The release workflow builds the same way. Doing it here too means a
+  # packaging mistake is a red PR rather than something discovered against PyPI,
+  # where a version cannot be replaced.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip build twine
+      - run: python -m build
+      - run: python -m twine check --strict dist/*
+      - name: the wheel carries what it needs and nothing personal
+        run: |
+          python -c "
+          import glob, sys, tarfile, zipfile
+          names = []
+          for w in glob.glob('dist/*.whl'):
+              names += zipfile.ZipFile(w).namelist()
+          for t in glob.glob('dist/*.tar.gz'):
+              names += tarfile.open(t).getnames()
+          boards = [n for n in names if 'board.db' in n]
+          if boards:
+              sys.exit('a council board was packaged: ' + ', '.join(boards))
+          if not any(n.endswith('schema.sql') for n in names):
+              sys.exit('schema.sql is missing; the wheel installs but cannot open a board')
+          print('wheel contents ok')
+          "
+      # A wheel that imports is not much, but it catches the packaging mistakes
+      # that only appear outside the source tree.
+      - name: it installs and runs from the wheel
+        run: |
+          python -m venv /tmp/fresh
+          /tmp/fresh/bin/pip install --quiet dist/*.whl
+          /tmp/fresh/bin/mooting --help > /dev/null
+          /tmp/fresh/bin/python -c "import mooting, mooting.store, mooting.console"
+          echo "installed clean"
+
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install mkdocs-material
+      # build_site.py fails on a dead link rather than shipping one, so this is
+      # a link check as much as a build.
+      - run: python tools/build_site.py

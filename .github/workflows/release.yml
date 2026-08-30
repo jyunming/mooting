@@ -1,0 +1,154 @@
+name: release
+
+# Cutting 0.1.1 by hand took a local build, a `twine check`, a token whose
+# `pypi-` prefix had been stripped in the environment, and a GitHub release
+# written afterwards. Every one of those is a step that can be skipped or done
+# differently next time, which is how a release stops being reproducible.
+#
+# Pushing a `v*` tag now does the whole thing, and refuses early if the tag and
+# pyproject.toml disagree about what is being released.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and check, but do not publish"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # The tag is the only thing a human types here, so it is the only thing that
+  # can be wrong. Catch it before anything is uploaded: PyPI will not let a
+  # version be replaced, so a mismatched tag is a permanent mistake.
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: v
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import os, pathlib, re, sys
+          text = pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
+          version = re.search(r'^version\s*=\s*"([^"]+)"', text, re.M).group(1)
+          ref = os.environ.get("GITHUB_REF_NAME", "")
+          if ref.startswith("v") and ref[1:] != version:
+              sys.exit(f"tag {ref} does not match pyproject version {version}")
+          print(f"version={version}")
+          PY
+
+  # The same matrix the branch gets. A release that skips it is a release that
+  # finds out on PyPI.
+  test:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        python: ["3.10", "3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - run: python -X utf8 -m pytest tests -q
+
+  build:
+    needs: [check, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip build twine
+      - run: python -m build
+      - run: python -m twine check --strict dist/*
+      # The board is gitignored now, but a wheel that ever carried somebody's
+      # council would carry it to everyone who installed it. Assert rather than
+      # trust the ignore rule, which is what failed the first time.
+      - name: no board in the artifacts
+        run: |
+          if python -c "
+          import glob, sys, tarfile, zipfile
+          bad = []
+          for w in glob.glob('dist/*.whl'):
+              bad += [n for n in zipfile.ZipFile(w).namelist() if 'board.db' in n]
+          for t in glob.glob('dist/*.tar.gz'):
+              bad += [n for n in tarfile.open(t).getnames() if 'board.db' in n]
+          print('\n'.join(bad))
+          sys.exit(1 if bad else 0)
+          "; then echo "clean"; else echo "a board was packaged"; exit 1; fi
+      # schema.sql is read at runtime; a wheel without it installs and then
+      # cannot open a board.
+      - name: schema is packaged
+        run: |
+          python -c "
+          import glob, zipfile, sys
+          w = glob.glob('dist/*.whl')[0]
+          names = zipfile.ZipFile(w).namelist()
+          sys.exit(0 if any(n.endswith('schema.sql') for n in names) else 'schema.sql missing from the wheel')
+          "
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: [check, build]
+    if: github.event_name == 'push' || inputs.dry_run == false
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/mooting/${{ needs.check.outputs.version }}/
+    permissions:
+      id-token: write        # Trusted Publishing: no long-lived token to leak
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github_release:
+    needs: [check, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" dist/* --clobber
+          else
+            gh release create "v$VERSION" dist/* \
+              --title "v$VERSION" --generate-notes
+          fi
