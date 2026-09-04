@@ -156,8 +156,8 @@ def run(db: Path | str | None, *, assume_yes: bool = False) -> int:
 
     print("\n  Ready. Next:")
     print("     mooting tui                 open the session")
-    print("     /new <your question>     start a topic from inside it")
-    print("     /help                    everything else")
+    print("     /topic new <question>       start a topic from inside it")
+    print("     /help                       everything else")
     store.close()
     return 0
 

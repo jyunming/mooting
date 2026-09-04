@@ -130,6 +130,30 @@ Leave it running. It prints a one-time pairing code:
 
 It replies with the seat you speak as and this chat's id.
 
+**Adding the bot to another room later.** The bot answers only in rooms it
+knows: one named with `--chat`, or one where somebody has already been approved.
+An unknown group is ignored, and the terminal says which chat it ignored. To
+open a new room, print a code and send it from the account that should hold the
+seat:
+
+```bash
+mooting claim                 # prints:  /pair a1b2c3
+```
+
+Sending that in the new group binds your chat account to the seat, makes you the
+host of that room, and makes the room known. It is good once, for fifteen
+minutes. Reading it requires the machine the board lives on, which is the point:
+every other way of saying who owns a board -- a name passed to the command, being
+first to pair, creating the group -- is something anybody can produce.
+
+**In a group, turn Group Privacy off first.** Telegram gives a new bot privacy
+mode by default, and a bot in that mode receives only commands and replies to
+its own messages. Every command still works, and plain talk — which is how you
+post to the council — never reaches it, silently. In @BotFather: `/mybots` →
+your bot → *Bot Settings* → *Group Privacy* → *Turn off*, then remove the bot
+from the group and add it again, because the setting is read when it joins. A
+one-to-one chat with the bot is unaffected.
+
 **5. Lock it to that room.** Stop the bot, start it again with the id — no
 token, it is remembered:
 
@@ -154,6 +178,11 @@ question to one seat and the others wait for the answer.
 
 #### Once it is running
 
+- `/topics` lists every council as buttons, one per row, with the one this chat
+  is on marked. Tap another and the room moves to it. The same list appears if
+  you send anything while the chat is not on a topic yet, so a slug never has to
+  be typed from memory on a phone. `/topic new`, `/topic agenda` and the rest
+  still mean what they always did.
 - A proposal arrives with **Approve / Reject** buttons. The reason is the reply
   it asks you for, and the button carries the proposal id, so a sign-off cannot
   land on the wrong one.

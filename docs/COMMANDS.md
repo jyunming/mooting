@@ -79,6 +79,8 @@ terminal — see [Using it](USING.md)), and its input history lasts only that ru
 | `/topic` | where you are, the agenda, and what else is open |
 | `/topic switch <slug>` | move to another topic |
 | `/topic rename <slug> <title>` | rename any topic, not just this one |
+| `/topic chair` | who signs off here — the person who opened it, unless it was handed over |
+| `/topic chair <name>` | hand the chair to another person; only the sitting chair may |
 | `/topic mode debate` | argue to find the flaw (default) |
 | `/topic mode discuss` | build on each other |
 | `/topic mode work <agent>` | team mode; that seat plans and reviews |

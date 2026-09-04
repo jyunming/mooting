@@ -67,7 +67,11 @@ def test_loop_terminates_when_nobody_has_anything_new(board):
     reason = run(sup, topic)
 
     assert board.topic(topic)["status"] == "paused"
-    assert reason == "rounds_exhausted" or "awaits" in reason
+    assert "nothing further to add" in reason or "awaits" in reason
+    # A settled council stops at the silence, not at the ceiling. Burning the
+    # remaining rounds costs one real billed wake per seat per round and ends at
+    # "rounds exhausted", so granting more rounds only bought more of it.
+    assert board.topic(topic)["round"] < 4, "ran the budget out on a settled council"
     # Silence must still be bounded: no seat may be woken past its ceiling.
     for s in board.seats(topic):
         assert s["turns_used"] <= s["max_turns"]
@@ -906,3 +910,1188 @@ def test_migrating_an_old_board_sorts_asks_from_mentions(tmp_path):
         assert why and "which foundry" in why, why
     finally:
         again.close()
+
+
+# --------------------------------------------------------------- catch-up (D)
+#
+# None of the four below failed before the fix they guard. They are here because
+# every one of these faults was silent: the council kept running, the suite kept
+# passing, and what a seat had been shown quietly stopped matching what had been
+# said.
+
+
+def test_a_seat_far_behind_is_caught_up_over_several_turns_rather_than_skipped(board):
+    """The cursor may only move as far as the seat was actually shown.
+
+    Returning the board head after a truncated fetch advanced a seat past events
+    it never saw, and nothing replayed them on any later turn.
+    """
+    from mooting.supervisor import CATCHUP_EVENTS
+
+    topic = open_debate(board)
+    for i in range(CATCHUP_EVENTS + 60):
+        board.post(topic, "human", f"point {i}", count_turn=False)
+
+    sup = Supervisor(board, {"claude": FakeDriver(board)})
+    prompt, reached = sup.build_prompt(topic, "claude")
+
+    assert reached < board.head(), "cursor jumped past events the seat was not shown"
+    assert "events behind" in prompt, "a seat carrying a backlog is not told so"
+
+    # And the remainder is still reachable: the next turn starts where this stopped.
+    board.advance_cursor(topic, "claude", reached)
+    _, further = sup.build_prompt(topic, "claude")
+    assert further > reached
+
+
+def test_a_message_past_the_first_five_hundred_still_reaches_the_prompt(board):
+    """Bodies came from `transcript`'s default window, the oldest 500 of a topic.
+
+    Past that the events still arrived and the text did not, so a seat was handed
+    a turn it could not read.
+    """
+    topic = open_debate(board)
+    for i in range(520):
+        board.post(topic, "human", f"filler {i}", count_turn=False)
+    board.advance_cursor(topic, "claude", board.head())
+    board.post(topic, "human", "the point that matters", count_turn=False)
+
+    sup = Supervisor(board, {"claude": FakeDriver(board)})
+    prompt, _ = sup.build_prompt(topic, "claude")
+    assert "the point that matters" in prompt
+
+
+def test_the_newest_window_is_the_tail_of_the_topic(board):
+    """`transcript(...)[-n:]` was the tail of the oldest 500, not of the topic."""
+    topic = open_debate(board)
+    for i in range(600):
+        board.post(topic, "human", f"m{i}", count_turn=False)
+
+    assert board.message_count(topic) > 500
+    tail = board.transcript(topic, limit=3, newest=True)
+    assert tail[-1]["body"] == "m599"
+    assert len(board.transcript(topic, limit=None)) == board.message_count(topic)
+
+
+def test_a_council_with_every_seat_capped_stops_instead_of_running_out_the_rounds(board):
+    """No seat can speak, so another round changes nothing.
+
+    Advancing anyway woke nobody and posted "round N of M" up to the ceiling,
+    which from outside reads like a council still thinking.
+    """
+    topic = open_debate(board, max_rounds=8)
+    driver = FakeDriver(board)
+    sup = Supervisor(board, {"claude": driver, "codex": driver, "gemini": driver},
+                     Caps(max_turns_per_seat=1))
+
+    reason = run(sup, topic)
+
+    assert "capped" in reason
+    assert board.topic(topic)["round"] < 7, "ran the round counter out with nobody to speak"
+    assert board.topic(topic)["status"] == "paused"
+
+
+def test_only_a_person_closes_a_topic_or_changes_the_budget(board):
+    """The caps exist to stop a council spending on its own say-so."""
+    topic = open_debate(board)
+
+    with pytest.raises(NotAuthorised):
+        board.set_topic_status(topic, "resolved", "claude")
+    with pytest.raises(NotAuthorised):
+        board.grant_rounds(topic, 1, "claude")
+    with pytest.raises(NotAuthorised):
+        board.set_rounds(topic, 5, "claude")
+
+    # Parking is not a decision: the supervisor does it when a cap is reached.
+    board.set_topic_status(topic, "paused", "mooting", "cap reached")
+    assert board.topic(topic)["status"] == "paused"
+
+    board.grant_rounds(topic, 1, "human")
+    board.set_topic_status(topic, "resolved", "human")
+    assert board.topic(topic)["status"] == "resolved"
+
+
+def test_promoting_a_plan_has_no_path_around_the_human(board):
+    """`release_plan` did that with no identity check and was reached from nowhere.
+
+    Its docstring claimed `decide` routed through it. `decide` does the same
+    update inline and in one transaction, so that a crash cannot leave a plan
+    approved with its work still drafted.
+    """
+    assert not hasattr(board, "release_plan")
+
+
+def test_a_settled_council_stops_instead_of_spending_the_rest_of_the_budget(board):
+    """Seats that have said their piece are woken again every round otherwise.
+
+    Found on a live board: rounds 5, 6 and 7 were consumed in the same second,
+    the chair granted more, and the same thing happened again. `Caps` carried a
+    `quiet_rounds_to_settle` setting that nothing ever read.
+    """
+    topic = open_debate(board, max_rounds=10)
+    spoken = set()
+
+    def once(store, seat, prompt):
+        if seat.agent in spoken:
+            return None
+        spoken.add(seat.agent)
+        return f"[{seat.agent}] my one point"
+
+    driver = FakeDriver(board, script=once)
+    sup = Supervisor(board, {"claude": driver, "codex": driver, "gemini": driver},
+                     Caps(max_turns_per_seat=10))
+
+    reason = run(sup, topic)
+    wakes = board.q("SELECT COUNT(*) c FROM wakes WHERE topic_id = ?", (topic,))[0]["c"]
+
+    assert "nothing further to add" in reason
+    assert board.topic(topic)["round"] <= 2, "kept advancing with nobody speaking"
+    # Three seats, one round of answers and one of silence. Ten rounds of this
+    # would be thirty billed wakes for three sentences.
+    assert wakes <= 8, f"{wakes} wakes to establish the council had finished"
+
+
+def test_naming_a_person_mid_argument_does_not_freeze_every_agent_seat(board):
+    """Found on a live board, reported as "rounds exhausted".
+
+    Santa ended a turn with "Short version, @Jeremy: yes -- ...". That is a
+    mention, not an ask. `_eligible` narrowed every later round to the human it
+    named, a human seat is never woken, so the eligible list came back empty for
+    ever. A named mention is not a reason to stop either, so nothing parked: the
+    loop spent the whole round budget in one second and said the rounds had run
+    out. Granting more rounds bought another second of the same.
+    """
+    topic = open_debate(board)
+    board.post(topic, "claude", "Short version, @human: yes, with shutters.")
+
+    # Named, and not asked.
+    assert board.open_mentions(topic)
+    assert not board.open_mentions(topic, only_asks=True)
+
+    sup = Supervisor(board, {"claude": FakeDriver(board)})
+    assert set(sup._eligible(topic)) >= {"codex", "gemini"}
+    assert sup._human_ask_reason(topic) is None
+
+
+def test_actually_asking_a_person_still_stops_the_council_for_them(board):
+    """The other half: an ask narrows the round and is reported as the reason."""
+    topic = open_debate(board)
+    board.ask(topic, "claude", "human", "which of the two do you want?")
+
+    assert board.open_mentions(topic, only_asks=True)
+    # Nobody else carries on -- the answer would arrive into a moved-on room.
+    sup = Supervisor(board, {"claude": FakeDriver(board)})
+    assert sup._eligible(topic) == []
+    reason = sup._human_ask_reason(topic)
+    assert reason and "waiting on you" in reason
+
+
+def test_a_named_human_does_not_cost_the_council_its_round_budget(board):
+    """The symptom the chair actually saw: rounds vanishing with nobody speaking."""
+    topic = open_debate(board, max_rounds=15)
+    driver = FakeDriver(board, script=lambda st, seat, p: f"[{seat.agent}] @human noted")
+
+    run(Supervisor(board, {"claude": driver, "codex": driver, "gemini": driver},
+                   Caps(max_turns_per_seat=15)), topic)
+
+    said = [m for m in board.transcript(topic, limit=None) if m["kind"] != "system"]
+    markers = [m for m in board.transcript(topic, limit=None)
+               if m["body"].startswith("--- round")]
+    # Every round that was spent has seats speaking in it, rather than a run of
+    # markers posted in the same second with nothing between them.
+    assert len(said) > len(markers), "rounds went by with nobody speaking"
+
+
+def test_asking_who_you_are_says_where_the_flag_goes(tmp_path, monkeypatch):
+    """`--as` is a global option, so it belongs before the command.
+
+    The old message said to pass it and not where, and argparse answers
+    `mooting telegram --as Jeremy` with "unrecognized arguments", which reads
+    like the flag does not exist. Pairing a second person is what gets somebody
+    here: a board with one person answers this on its own, so the command that
+    worked yesterday stops the day a colleague joins.
+    """
+    from mooting.cli import _human
+
+    monkeypatch.delenv("MOOTING_HUMAN", raising=False)
+    s = connect(tmp_path / "board.db", init=True)
+    s.add_agent("Jeremy", "human")
+    s.add_agent("Santa", "claude", driver="spawn")
+    try:
+        # One person, so it needs no answer.
+        assert _human(s, None) == "Jeremy"
+
+        s.add_agent("ege", "human")
+        with pytest.raises(SystemExit) as caught:
+            _human(s, None)
+        said = str(caught.value)
+        assert "Jeremy" in said and "ege" in said
+        assert "mooting --as" in said, "does not show where the flag goes"
+
+        # Naming one still works, and an agent seat still cannot.
+        assert _human(s, "ege") == "ege"
+        with pytest.raises(SystemExit):
+            _human(s, "Santa")
+    finally:
+        s.close()
+
+
+# ------------------------------------------------------------------- the chair
+#
+# Anybody may call a meeting and argue in it. One person closes it. Before this,
+# approving somebody into a room handed them exactly the authority of the person
+# who opened it, and "a human decided" stopped identifying which human.
+
+
+def test_anybody_may_argue_and_only_the_chair_closes_it(board):
+    board.add_agent("ege", "human")
+    topic = open_debate(board)
+    board.seat_human(topic, "ege")
+    pid = board.propose(topic, "claude", "Cap at 6", "body")
+
+    # A second person speaks under their own name, as before.
+    board.post(topic, "ege", "I think six is too many", count_turn=False)
+    assert any(m["author"] == "ege" for m in board.transcript(topic, limit=None))
+
+    with pytest.raises(NotAuthorised) as caught:
+        board.decide(pid, "ege", approve=True, rationale="fine by me")
+    assert "not the chair" in str(caught.value)
+    assert "human" in str(caught.value).lower() or "argue" in str(caught.value)
+
+    board.decide(pid, "human", approve=True, rationale="agreed")
+    assert board.proposal(pid)["status"] == "approved"
+
+
+def test_the_chair_defaults_to_whoever_opened_the_meeting(board):
+    """No backfill, and no board where nobody signs off: NULL means the opener."""
+    topic = open_debate(board)
+    assert board.chair(topic) == "human"
+    assert board.topic(topic)["chair"] is None
+
+
+def test_the_chair_can_be_handed_over_but_not_taken(board):
+    board.add_agent("ege", "human")
+    topic = open_debate(board)
+    board.seat_human(topic, "ege")
+
+    with pytest.raises(NotAuthorised):
+        board.set_chair(topic, "ege", "ege")          # not theirs to take
+    with pytest.raises(NotAuthorised):
+        board.set_chair(topic, "claude", "human")     # an agent cannot chair
+
+    board.set_chair(topic, "ege", "human")
+    assert board.chair(topic) == "ege"
+
+    pid = board.propose(topic, "claude", "Cap at 6", "body")
+    with pytest.raises(NotAuthorised):
+        board.decide(pid, "human", approve=True)      # handed over means handed over
+    board.decide(pid, "ege", approve=True, rationale="mine now")
+    assert board.proposal(pid)["status"] == "approved"
+
+
+def test_only_the_chair_concludes_the_meeting(board):
+    board.add_agent("ege", "human")
+    topic = open_debate(board)
+    board.seat_human(topic, "ege")
+
+    with pytest.raises(NotAuthorised):
+        board.conclude(topic, "ege", "calling it")
+    board.conclude(topic, "human", "calling it")
+    assert board.topic(topic)["status"] == "resolved"
+
+
+def test_renaming_a_person_carries_the_chair_with_them(board):
+    """`/me` rewrites a name everywhere. A chair left behind would strand a topic."""
+    topic = open_debate(board)
+    board.rename_agent("human", "Jeremy")
+
+    assert board.chair(topic) == "Jeremy"
+    pid = board.propose(topic, "claude", "Cap at 6", "body")
+    board.decide(pid, "Jeremy", approve=True, rationale="still mine")
+    assert board.proposal(pid)["status"] == "approved"
+
+
+def test_the_word_budget_moves_with_effort(board):
+    """More thinking time is a reason to say something denser, not longer."""
+    from mooting.supervisor import WORDS_BY_EFFORT
+
+    topic = open_debate(board)
+    sup = Supervisor(board, {"claude": FakeDriver(board)})
+
+    seen = {}
+    for effort in ("low", "high"):
+        board.set_effort(topic, effort) if hasattr(board, "set_effort") else None
+        with board.tx() as c:
+            c.execute("UPDATE topics SET effort = ? WHERE id = ?", (effort, topic))
+        prompt, _ = sup.build_prompt(topic, "claude")
+        seen[effort] = f"under {WORDS_BY_EFFORT[effort]} words" in prompt
+
+    assert seen["low"] and seen["high"]
+    assert WORDS_BY_EFFORT["low"] < WORDS_BY_EFFORT["high"]
+
+
+def test_a_paired_person_can_rename_themselves(board):
+    """`/me` worked in a terminal and failed in a chat.
+
+    `pairings.seat` carries a real foreign key and was missing from the list of
+    places a name is written, so the rename moved everything else and then the
+    whole transaction failed at COMMIT. Only a paired person has a row there,
+    which is why it looked like Telegram was refusing the command.
+    """
+    board.add_agent("ege", "human")
+    topic = open_debate(board)
+    board.seat_human(topic, "ege")
+    board.pair_approve(board.pair_request("-100", "77", "ege"), "ege", "human")
+    board.post(topic, "ege", "six is too many", count_turn=False)
+
+    board.rename_agent("ege", "Ege")
+
+    assert board.seat_for_chat("-100", "77") == "Ege", "the pairing was left behind"
+    assert [a["name"] for a in board.agents() if a["kind"] == "human"] == ["Ege", "human"]
+    said = [m["author"] for m in board.transcript(topic, limit=None)
+            if m["body"] == "six is too many"]
+    assert said == ["Ege"], "their words were orphaned"
+
+
+def test_removing_a_seat_takes_its_pairing_with_it(board):
+    """The same foreign key, reached the other way.
+
+    `/seats rm` on somebody paired raised a raw IntegrityError, which is the
+    failure the task guard above it exists to prevent. A pairing onto a seat that
+    is gone grants nothing and cannot be repaired from a chat.
+    """
+    board.add_agent("ege", "human")
+    board.pair_approve(board.pair_request("-100", "77", "ege"), "ege", "human")
+
+    counts = board.delete_agent("ege")
+
+    assert counts["pairings"] == 1, "the pairing went quietly"
+    assert board.seat_for_chat("-100", "77") is None
+    assert "ege" not in [a["name"] for a in board.agents()]
+
+
+def test_removing_the_chair_does_not_strand_the_meeting(board):
+    """A meeting must not become undecidable because somebody left.
+
+    The chair was stored by name with no foreign key, so deleting that person
+    left the topic pointing at them: everybody else was refused as "not the
+    chair", and the name itself was refused as "not a human seat". Nobody could
+    sign off, ever.
+    """
+    board.add_agent("ege", "human")
+    topic = open_debate(board)
+    board.seat_human(topic, "ege")
+    board.set_chair(topic, "ege", "human")
+    assert board.chair(topic) == "ege"
+
+    board.delete_agent("ege")
+
+    # Falls back to whoever opened it, and the stored name is cleared rather
+    # than left dangling.
+    assert board.topic(topic)["chair"] is None
+    assert board.chair(topic) == "human"
+
+    pid = board.propose(topic, "claude", "Cap at 6", "body")
+    board.decide(pid, "human", approve=True, rationale="mine again")
+    assert board.proposal(pid)["status"] == "approved"
+
+
+def test_a_meeting_whose_opener_is_also_gone_is_still_decidable(board):
+    """Second line, for a board where `opened_by` names somebody long gone."""
+    board.add_agent("ege", "human")
+    topic = open_debate(board)
+    board.seat_human(topic, "ege")
+    with board.tx() as c:                       # opener no longer on the board
+        c.execute("UPDATE topics SET opened_by = 'someone-who-left' WHERE id = ?",
+                  (topic,))
+
+    assert board.chair(topic) is None, "named a chair who is not there"
+
+    # Undecidable is the one outcome that is not allowed, so it reverts to the
+    # rule that applied before chairs existed: any person may close it.
+    pid = board.propose(topic, "claude", "Cap at 6", "body")
+    board.decide(pid, "ege", approve=True, rationale="somebody has to")
+    assert board.proposal(pid)["status"] == "approved"
+
+
+# --------------------------------------------------------------------- rooms
+#
+# A room owns a roster, so a meeting opened there starts with the right seats
+# instead of being seated by hand every time — and two groups on one board stop
+# sharing a team by accident.
+
+
+def test_a_room_is_created_the_first_time_it_is_used(board):
+    first = board.ensure_room("telegram", "-100123", "engine team")
+    again = board.ensure_room("telegram", "-100123")
+
+    assert first == again, "made a second room for the same chat"
+    assert board.room("telegram", "-100123")["label"] == "engine team"
+    assert board.room("telegram", "nobody-here") is None
+
+
+def test_work_with_no_chat_behind_it_still_has_a_room(board):
+    """A terminal session is not a special case that half the code remembers."""
+    channel, chat = board.LOCAL_ROOM
+    rid = board.ensure_room(channel, chat)
+    assert board.room(*board.LOCAL_ROOM)["id"] == rid
+
+
+def test_a_room_holds_a_team_in_the_order_it_was_set(board):
+    rid = board.ensure_room("telegram", "-100123")
+    assert board.room_team(rid) == []
+
+    board.set_room_team(rid, ["claude", "codex"], "human")
+    assert board.room_team(rid) == ["claude", "codex"]
+
+    # Replacement, not merge: one command that sticks, one that does not.
+    board.set_room_team(rid, ["gemini", "claude"], "human")
+    assert board.room_team(rid) == ["gemini", "claude"]
+
+
+def test_setting_a_team_needs_a_person_and_real_seats(board):
+    rid = board.ensure_room("telegram", "-100123")
+
+    with pytest.raises(NotAuthorised):
+        board.set_room_team(rid, ["claude"], "claude")
+    with pytest.raises(StoreError):
+        board.set_room_team(rid, ["nobody-registered"], "human")
+    assert board.room_team(rid) == [], "a refused change left something behind"
+
+
+def test_two_rooms_hold_different_teams(board):
+    """The whole point: one board, two groups, no shared seats by accident."""
+    abc = board.ensure_room("telegram", "-100111", "team abc")
+    dfg = board.ensure_room("telegram", "-100222", "team def")
+
+    board.set_room_team(abc, ["claude", "codex"], "human")
+    board.set_room_team(dfg, ["gemini"], "human")
+
+    assert board.room_team(abc) == ["claude", "codex"]
+    assert board.room_team(dfg) == ["gemini"]
+
+
+def test_a_team_follows_a_rename_and_forgets_a_deleted_seat(board):
+    """Both foreign keys onto `agents(name)`, and both have bitten before."""
+    rid = board.ensure_room("telegram", "-100123")
+    board.set_room_team(rid, ["claude", "codex"], "human")
+
+    board.rename_agent("claude", "Santa")
+    assert board.room_team(rid) == ["Santa", "codex"], "the team was left behind"
+
+    counts = board.delete_agent("codex")
+    assert counts["teams"] == 1, "the seat left the team quietly"
+    assert board.room_team(rid) == ["Santa"]
+
+
+# ------------------------------------------------- the window execution opens
+#
+# The two-key rule says a seat edits files only when a person approved the task
+# and it was woken for one. It says nothing about the shell that comes with the
+# editing, and `mooting approve 3` is one command away from there: identity is a
+# name, and a seat running as the same user can pass any name.
+
+
+def _mid_task(board):
+    """A board with a seat executing an approved task.
+
+    Written straight into the table rather than through `draft_task`: what is
+    under test is what `executing_now` sees, not how a task got there.
+    """
+    topic = board.open_topic("work", "Work", "b", "human", seats=("human", "claude"))
+    with board.tx() as c:
+        c.execute("UPDATE topics SET mode = 'work' WHERE id = ?", (topic,))
+        c.execute("INSERT INTO tasks (topic_id, title, assignee, created_by, status) "
+                  "VALUES (?,?,?,?,'in_progress')",
+                  (topic, "Do the thing", "claude", "human"))
+    return topic
+
+
+def test_a_signoff_typed_beside_a_running_seat_is_refused(board):
+    topic = open_debate(board)
+    pid = board.propose(topic, "claude", "Cap at 6", "body")
+    _mid_task(board)
+
+    assert board.executing_now(), "no seat is holding a shell"
+    with pytest.raises(NotAuthorised) as caught:
+        board.decide(pid, "human", approve=True, rationale="looks right")
+    said = str(caught.value)
+    assert "holds a shell" in said
+    assert "from a chat" in said, "refused without saying the way out"
+    assert board.proposal(pid)["status"] == "open"
+
+
+def test_the_same_signoff_from_a_chat_is_fine(board):
+    """A chat account is something the seat does not hold."""
+    topic = open_debate(board)
+    pid = board.propose(topic, "claude", "Cap at 6", "body")
+    _mid_task(board)
+
+    board.decide(pid, "human", approve=True, rationale="from my phone", via="telegram")
+    assert board.proposal(pid)["status"] == "approved"
+
+
+def test_the_window_closes_when_the_task_does(board):
+    topic = open_debate(board)
+    pid = board.propose(topic, "claude", "Cap at 6", "body")
+    _mid_task(board)
+
+    with pytest.raises(NotAuthorised):
+        board.decide(pid, "human", approve=True)
+
+    with board.tx() as c:
+        c.execute("UPDATE tasks SET status = 'done'")
+    assert board.executing_now() == []
+    board.decide(pid, "human", approve=True, rationale="now it is quiet")
+    assert board.proposal(pid)["status"] == "approved"
+
+
+def test_concluding_is_held_to_the_same_rule(board):
+    """Closing a meeting is a decision too, and reachable the same way."""
+    topic = open_debate(board)
+    _mid_task(board)
+
+    with pytest.raises(NotAuthorised):
+        board.conclude(topic, "human", "calling it")
+    board.conclude(topic, "human", "calling it", via="telegram")
+    assert board.topic(topic)["status"] == "resolved"
+
+
+def test_nothing_changes_when_no_seat_is_executing(board):
+    """The rule is about an open window, not a permanent tax on the terminal."""
+    topic = open_debate(board)
+    pid = board.propose(topic, "claude", "Cap at 6", "body")
+
+    assert board.executing_now() == []
+    board.decide(pid, "human", approve=True, rationale="ordinary day")
+    assert board.proposal(pid)["status"] == "approved"
+
+
+# --------------------------------------------------------- what a seat reads
+#
+# Found live: a council asked "how can I make money" answered with the chair's
+# age, city and profession. None of it was on the board. The seat was pointed at
+# a working directory, and its CLI had four memory files there.
+
+
+def test_a_directory_with_agent_notes_is_reported(tmp_path):
+    from mooting.doctor import context_leaks
+
+    clean = tmp_path / "empty"
+    clean.mkdir()
+    assert context_leaks(str(clean)) == []
+
+    (tmp_path / "CLAUDE.md").write_text("notes about me", encoding="utf-8")
+    found = context_leaks(str(clean))
+    assert len(found) == 1, found
+    assert found[0].endswith("CLAUDE.md"), "a parent directory's notes are read too"
+
+
+def test_every_kind_of_notes_counts(tmp_path):
+    """Each CLI reads its own file, and a council does not care which."""
+    from mooting.doctor import context_leaks
+
+    for name in ("CLAUDE.md", "AGENTS.md", "GEMINI.md", ".cursorrules"):
+        room = tmp_path / name.replace(".", "_")
+        room.mkdir()
+        (room / name).write_text("x", encoding="utf-8")
+        assert context_leaks(str(room)), f"{name} went unnoticed"
+
+
+def test_a_seats_own_context_is_not_its_repository(board):
+    """The two settings want opposite things, and one setting chose leaking."""
+    from mooting.drivers.base import Seat
+
+    seat = Seat(topic_id=1, topic_slug="t", agent="santa", kind="claude",
+                cli_session=None,
+                cfg={"cwd": r"C:\empty", "repo": r"C:\dev\project"})
+    assert seat.cwd == r"C:\empty"
+    assert seat.repo == r"C:\dev\project"
+
+    # A seat with no repository named has none, rather than quietly using the
+    # directory it was given to keep a council clean.
+    plain = Seat(topic_id=1, topic_slug="t", agent="sam", kind="codex",
+                 cli_session=None, cfg={"cwd": r"C:\empty"})
+    assert plain.repo is None
+
+
+def test_usage_counts_what_a_metered_cli_charges_for(board):
+    """Wakes, not turns. A wake that fails or produces nothing still cost a
+    request, and `turns_used` counts neither."""
+    topic = open_debate(board)
+
+    for agent, outcome, secs in (("claude", "ok", 40), ("claude", "error", 5),
+                                 ("codex", "ok", 12)):
+        wid = board.record_wake(topic, agent)
+        with board.tx() as c:
+            c.execute("UPDATE wakes SET outcome = ?, "
+                      "ended_at = datetime(started_at, ?) WHERE id = ?",
+                      (outcome, f"+{secs} seconds", wid))
+
+    by = {r["agent"]: r for r in board.usage()}
+    assert by["claude"]["wakes"] == 2
+    assert by["claude"]["ok"] == 1
+    assert by["claude"]["failed"] == 1, "a failed wake was not counted as spend"
+    assert by["claude"]["seconds"] == 45
+    assert by["codex"]["failed"] == 0
+    assert "gemini" not in by, "a seat that never ran should not appear"
+
+
+def test_a_window_narrows_it(board):
+    topic = open_debate(board)
+    old = board.record_wake(topic, "claude")
+    with board.tx() as c:
+        c.execute("UPDATE wakes SET outcome='ok', "
+                  "started_at = datetime('now','-3 hours'), "
+                  "ended_at = datetime('now','-3 hours') WHERE id = ?", (old,))
+    fresh = board.record_wake(topic, "codex")
+    with board.tx() as c:
+        c.execute("UPDATE wakes SET outcome='ok', ended_at=started_at WHERE id = ?",
+                  (fresh,))
+
+    assert {r["agent"] for r in board.usage()} == {"claude", "codex"}
+    assert {r["agent"] for r in board.usage(hours=1)} == {"codex"}
+
+
+def test_a_wake_still_running_is_not_counted_as_failed(board):
+    """`pending` is in flight, not spent badly."""
+    topic = open_debate(board)
+    board.record_wake(topic, "claude")
+
+    row = board.usage()[0]
+    assert row["wakes"] == 1 and row["failed"] == 0 and row["ok"] == 0
+
+
+# ------------------------------------------------ what the CLI says it spent
+#
+# Counted by the vendor, not by us: what matters is what came off the
+# subscription, and only the CLI knows that. Read defensively, because none of
+# them promise to keep the shape.
+
+
+def test_a_claude_result_envelope_is_read():
+    from mooting.drivers.base import usage_in
+
+    got = usage_in('{"type":"result","subtype":"success","total_cost_usd":0.0412,'
+                   '"duration_ms":31800,"usage":{"input_tokens":10432,'
+                   '"output_tokens":518},"session_id":"abc"}')
+    assert got == {"cost_usd": 0.0412, "tokens_in": 10432, "tokens_out": 518}
+
+
+def test_a_stream_of_objects_is_read_too():
+    from mooting.drivers.base import usage_in
+
+    got = usage_in('{"type":"start"}\n'
+                   '{"usage":{"prompt_tokens":9,"completion_tokens":3}}')
+    assert got == {"tokens_in": 9, "tokens_out": 3}
+
+
+def test_a_cli_that_says_nothing_is_not_recorded_as_free():
+    """Missing is missing. A turn nobody costed stays unpriced."""
+    from mooting.drivers.base import usage_in
+
+    assert usage_in("codex says nothing about cost") == {}
+    assert usage_in('{"total_cost_usd": ') == {}, "half a line must not be a number"
+    assert usage_in("") == {}
+    assert usage_in('{"usage": "not a dict"}') == {}
+
+
+def test_the_ledger_keeps_what_it_was_told_and_nothing_else(board):
+    topic = open_debate(board)
+
+    priced = board.record_wake(topic, "claude")
+    board.finish_wake(priced, "ok", "", {"tokens_in": 10432, "tokens_out": 518,
+                                         "cost_usd": 0.0412})
+    silent = board.record_wake(topic, "codex")
+    board.finish_wake(silent, "ok", "")
+
+    by = {r["agent"]: r for r in board.usage()}
+    assert by["claude"]["tokens_in"] == 10432
+    assert by["claude"]["cost_usd"] == 0.0412
+    assert by["codex"]["tokens_in"] is None, "a silent CLI was recorded as zero"
+    assert by["codex"]["cost_usd"] is None
+
+
+# ------------------------------------------------------- effort is the dial
+#
+# One setting for "how much is this question worth": how long a seat thinks,
+# how much it may say, and how big the meeting is. Three numbers nobody tunes
+# become one somebody already understands.
+
+
+def test_the_dial_moves_the_budget_with_it(board):
+    from mooting.supervisor import BUDGET_BY_EFFORT
+
+    topic = open_debate(board, max_rounds=1)
+    high = BUDGET_BY_EFFORT["high"]
+
+    rounds, turns = board.raise_budget(topic, high["rounds"], high["turns"], "human")
+    assert rounds == high["rounds"]
+    assert turns == high["turns"]
+    assert board.topic(topic)["max_rounds"] == high["rounds"]
+
+
+def test_a_budget_granted_on_purpose_survives_a_lower_setting(board):
+    """`set_rounds` has always refused to reduce, and the dial follows it."""
+    from mooting.supervisor import BUDGET_BY_EFFORT
+
+    topic = open_debate(board)
+    board.set_rounds(topic, 12, "human")
+
+    low = BUDGET_BY_EFFORT["low"]
+    rounds, turns = board.raise_budget(topic, low["rounds"], low["turns"], "human")
+
+    assert rounds == 12, "a lower setting took back what was granted"
+    assert turns == 12
+    assert all(r["max_turns"] >= 12 for r in board.seats(topic))
+
+
+def test_only_a_person_turns_the_dial(board):
+    from mooting.supervisor import BUDGET_BY_EFFORT
+
+    topic = open_debate(board)
+    high = BUDGET_BY_EFFORT["high"]
+    with pytest.raises(NotAuthorised):
+        board.raise_budget(topic, high["rounds"], high["turns"], "claude")
+
+
+def test_more_effort_is_never_a_smaller_meeting():
+    """The dial has to be monotonic or it is not one dial."""
+    from mooting.supervisor import BUDGET_BY_EFFORT, WORDS_BY_EFFORT
+
+    order = ("low", "medium", "high")
+    for name in ("rounds", "turns"):
+        got = [BUDGET_BY_EFFORT[e][name] for e in order]
+        assert got == sorted(got), f"{name} is not monotonic: {got}"
+    words = [WORDS_BY_EFFORT[e] for e in order]
+    assert words == sorted(words), words
+
+
+# ------------------------------------------------------------- the record
+#
+# The board says who signed off. Until now nothing made that record answer back
+# when somebody edited it, so "you can prove it" was a claim about the design
+# rather than about the file.
+
+
+def _tamper(board, sql, args=()):
+    """Edit the board the way somebody with the file would: behind its back."""
+    import sqlite3
+
+    path = board.path
+    raw = sqlite3.connect(path)
+    raw.execute(sql, args)
+    raw.commit()
+    raw.close()
+
+
+def test_a_clean_board_verifies(board):
+    topic = open_debate(board)
+    board.post(topic, "claude", "split units win", count_turn=False)
+    pid = board.propose(topic, "claude", "Adopt them", "body")
+    board.decide(pid, "human", approve=True, rationale="agreed")
+
+    chain = board.verify_chain()
+    assert chain["ok"] and chain["unchained"] == 0
+    assert chain["checked"] > 0
+    assert board.verify_bodies() == []
+    assert board.verify_decisions() == []
+
+
+def test_rewriting_a_message_stops_matching(board):
+    """The body lives in another table, so the chain alone would not notice."""
+    topic = open_debate(board)
+    board.post(topic, "claude", "split units win", count_turn=False)
+
+    _tamper(board, "UPDATE messages SET body = 'split units are a scam' "
+                   "WHERE body = 'split units win'")
+
+    assert board.verify_chain()["ok"], "the chain covers events, not bodies"
+    assert board.verify_bodies(), "a rewritten body went unnoticed"
+
+
+def test_rewriting_who_signed_off_stops_matching(board):
+    """The one act this project exists to attribute, in a column beside the chain."""
+    topic = open_debate(board)
+    pid = board.propose(topic, "claude", "Adopt them", "body")
+    board.decide(pid, "human", approve=True, rationale="agreed")
+
+    _tamper(board, "UPDATE proposals SET decided_by = 'claude' WHERE id = ?", (pid,))
+
+    assert board.verify_chain()["ok"], "an intact chain is not a verified record"
+    wrong = board.verify_decisions()
+    assert wrong and wrong[0]["expected"] == "human" and wrong[0]["found"] == "claude"
+
+
+def test_removing_an_event_breaks_the_chain(board):
+    topic = open_debate(board)
+    for i in range(4):
+        board.post(topic, "claude", f"point {i}", count_turn=False)
+    victim = [e.id for e in board.events_since(0, topic)][2]
+
+    _tamper(board, "DELETE FROM events WHERE id = ?", (victim,))
+
+    chain = board.verify_chain()
+    assert not chain["ok"], "a deleted event left the chain adding up"
+    assert chain["broken_at"] > victim
+
+
+def test_editing_an_event_breaks_the_chain_from_there(board):
+    topic = open_debate(board)
+    for i in range(3):
+        board.post(topic, "claude", f"point {i}", count_turn=False)
+    target = [e.id for e in board.events_since(0, topic)][1]
+
+    _tamper(board, "UPDATE events SET actor = 'somebody else' WHERE id = ?", (target,))
+
+    chain = board.verify_chain()
+    assert not chain["ok"]
+    assert chain["broken_at"] == target
+
+
+def test_events_written_before_the_chain_are_reported_not_hidden(board):
+    """History cannot be made tamper-evident afterwards, and saying so is the
+    difference between a check and a decoration."""
+    topic = open_debate(board)
+    board.post(topic, "claude", "written before the column existed",
+               count_turn=False)
+
+    # What an existing board looks like the moment the column is added: nothing
+    # written so far carries a link, and everything after it does.
+    _tamper(board, "UPDATE events SET hash = NULL")
+    board.post(topic, "claude", "written after", count_turn=False)
+
+    chain = board.verify_chain()
+    assert chain["unchained"] >= 2, "the old rows were not reported as unchecked"
+    assert chain["checked"] >= 1
+    assert chain["ok"], "an unchained prefix is not a broken chain"
+
+
+# ------------------------------------------------------------- issue #2
+#
+# `cli.py` reconfigured stdout and stderr to UTF-8 and left stdin on the locale
+# codec. Piped UTF-8 was decoded as cp1252: bytes with a mapping became mojibake
+# stored without complaint, and bytes without one became lone surrogates that
+# failed at the SQLite write, three layers below the mistake.
+
+
+def test_piped_utf8_survives_the_read(tmp_path, monkeypatch):
+    """The read side is reconfigured, so `-` input arrives as it was written."""
+    import io
+    import sys
+
+    from mooting.cli import read_stdin
+
+    # `丁` is U+4E01: its UTF-8 is E4 B8 81, and 0x81 is one of the five bytes
+    # cp1252 leaves undefined, which is what produced the surrogate.
+    raw = io.TextIOWrapper(io.BytesIO("丁 split units".encode("utf-8")),
+                           encoding="utf-8")
+    monkeypatch.setattr(sys, "stdin", raw)
+    got = read_stdin("--brief")
+
+    assert got == "丁 split units"
+    got.encode("utf-8")           # would raise if a surrogate had come through
+
+
+def test_a_bad_read_names_the_argument(tmp_path, monkeypatch):
+    """The traceback used to point at `open_topic`, three layers from the cause."""
+    import io
+    import sys
+
+    from mooting.cli import read_stdin
+
+    raw = io.TextIOWrapper(io.BytesIO(b"\xff\xfe not utf-8"), encoding="utf-8")
+    monkeypatch.setattr(sys, "stdin", raw)
+
+    with pytest.raises(SystemExit) as caught:
+        read_stdin("--brief")
+    assert "--brief" in str(caught.value), "the failure did not say what it was reading"
+
+
+def test_surrogates_are_refused_where_they_enter_the_board(board):
+    """They arrive from anywhere text is decoded with `surrogateescape`, not only
+    from stdin, and they survived every layer until SQLite refused them."""
+    from mooting.store import clean_text
+
+    bad = "split units \udc81 win"
+    with pytest.raises(StoreError) as caught:
+        clean_text(bad, "the brief")
+    assert "the brief" in str(caught.value)
+
+    topic = open_debate(board)
+    with pytest.raises(StoreError):
+        board.post(topic, "claude", bad, count_turn=False)
+    with pytest.raises(StoreError):
+        board.propose(topic, "claude", "fine", bad)
+    with pytest.raises(StoreError):
+        board.open_topic("bad", bad, "b", "human", seats=("claude",))
+
+
+def test_ordinary_text_passes_through_untouched(board):
+    from mooting.store import clean_text
+
+    for text in ("丁 split units", "", "plain ascii", "emoji 🙂 and ünïcode"):
+        assert clean_text(text, "the message") == text
+
+
+def test_the_version_has_one_answer():
+    """Three disagreed -- 0.0.1 in the package, 0.1.1 in pyproject, 0.1.0
+    installed -- so a report could not say which version it was against."""
+    import importlib.metadata
+
+    import mooting
+
+    assert mooting.__version__ == importlib.metadata.version("mooting")
+    assert mooting.__version__ != "0.0.1", "the hand-maintained literal is back"
+
+
+# ------------------------------------------------------------- issues #4, #5
+
+
+def _work_board(board):
+    topic = open_debate(board)
+    with board.tx() as c:
+        c.execute("UPDATE topics SET mode = 'work' WHERE id = ?", (topic,))
+        c.execute("UPDATE seats SET role = 'manager' WHERE topic_id = ? AND agent = 'claude'",
+                  (topic,))
+    return topic
+
+
+def _task(board, topic, status="assigned", title="Do the thing"):
+    with board.tx() as c:
+        cur = c.execute("INSERT INTO tasks (topic_id, title, assignee, created_by, status) "
+                        "VALUES (?,?,?,?,?)", (topic, title, "codex", "claude", status))
+        return int(cur.lastrowid)
+
+
+def test_granting_rounds_raises_the_turns_to_use_them(board):
+    """#4. The resume path raised one of the two with a raw UPDATE, so a council
+    with spent seats looked alive and said nothing."""
+    topic = open_debate(board)
+    with board.tx() as c:
+        c.execute("UPDATE seats SET turns_used = max_turns WHERE topic_id = ?", (topic,))
+
+    before = {r["agent"]: r["max_turns"] for r in board.seats(topic)}
+    board.grant_rounds(topic, 4, "human")
+    after = {r["agent"]: r["max_turns"] for r in board.seats(topic)}
+
+    assert board.topic(topic)["max_rounds"] > 3
+    assert all(after[a] == before[a] + 4 for a in before), "turns did not follow rounds"
+
+
+def test_a_seat_cannot_grant_the_council_more_rounds(board):
+    """The raw UPDATE had no identity check, so `--as <agent> --resume --rounds`
+    let a seat top up its own budget."""
+    topic = open_debate(board)
+    with pytest.raises(NotAuthorised):
+        board.grant_rounds(topic, 4, "claude")
+
+
+def test_a_manager_can_send_work_back_to_the_queue(board):
+    """#5. `rejected` was the only way to say "do it again", and it dropped the
+    task out of every code path that reads one."""
+    topic = _work_board(board)
+    tid = _task(board, topic, status="blocked")
+
+    board.update_task(tid, "claude", "assigned", "the cause is fixed, please rerun")
+
+    assert board.task(tid)["status"] == "assigned"
+    queued = [t["id"] for t in board.tasks(topic, status="assigned")]
+    assert tid in queued, "the task did not come back to the queue"
+
+
+def test_rejecting_is_still_terminal(board):
+    """It should mean abandoned, which is why it needed a sibling."""
+    topic = _work_board(board)
+    tid = _task(board, topic, status="done")
+
+    board.update_task(tid, "claude", "rejected", "not worth doing after all")
+    assert board.tasks(topic, status="assigned") == []
+
+
+def test_a_decided_task_is_not_reported_as_work_left_over(board):
+    """`work paused: 6 rejected` read like six failures rather than six calls."""
+    from mooting.supervisor import Caps, Supervisor
+
+    topic = _work_board(board)
+    for _ in range(3):
+        board.update_task(_task(board, topic, status="done"), "claude", "rejected", "no")
+    sup = Supervisor(board, {}, Caps())
+
+    summary = sup._work_summary(topic)
+    assert "paused" not in summary, summary
+    assert "3 rejected" in summary
+
+    _task(board, topic, status="assigned")
+    summary = sup._work_summary(topic)
+    assert "1 assigned" in summary
+    assert "abandoned earlier" in summary, "the abandoned ones were counted as pending"
+
+
+def test_copilot_never_sends_effort_with_the_auto_model(board):
+    """#4, separately. `auto` rejects the flag and fails every wake, and it is
+    the cheap default a person would reasonably name."""
+    from mooting.drivers.base import Seat
+    from mooting.drivers.spawn import CopilotDriver
+
+    driver = CopilotDriver(board.path)
+    for model, expect in ((None, []), ("", []), ("auto", []),
+                          ("claude-opus-4.8", ["--effort", "low"])):
+        seat = Seat(topic_id=1, topic_slug="t", agent="copilot", kind="copilot",
+                    cli_session=None, cfg={"model": model} if model is not None else {},
+                    effort="low")
+        assert driver.effort_argv(seat) == expect, model
+
+
+# ------------------------------------------------- what the review found (#3)
+
+
+def test_http_is_on_this_machine_too(board):
+    """The executing-seat guard ran only for the terminal, so the same window
+    reopened through the server: a seat with a shell can read a token off the
+    board and make the request itself."""
+    topic = open_debate(board)
+    pid = board.propose(topic, "claude", "Cap at 6", "body")
+    work = board.open_topic("w", "W", "b", "human", seats=("human", "claude"))
+    with board.tx() as c:
+        c.execute("UPDATE topics SET mode = 'work' WHERE id = ?", (work,))
+        c.execute("INSERT INTO tasks (topic_id, title, assignee, created_by, status) "
+                  "VALUES (?,?,?,?,'in_progress')", (work, "t", "claude", "human"))
+
+    for route in ("local", "http"):
+        with pytest.raises(NotAuthorised):
+            board.decide(pid, "human", approve=True, via=route)
+    # A chat is genuinely elsewhere: the bot token lets a seat speak as the bot,
+    # not as a paired person, and the sender is what the decide path checks.
+    board.decide(pid, "human", approve=True, rationale="from my phone", via="telegram")
+    assert board.proposal(pid)["status"] == "approved"
+
+
+def test_a_handle_is_worth_guessing_at(board):
+    """24 bits is cheap online and collides on a board that lives a while."""
+    from mooting.store import HANDLE_BYTES, new_handle
+
+    assert HANDLE_BYTES >= 4
+    handles = {new_handle() for _ in range(500)}
+    assert len(handles) == 500, "handles collided in five hundred draws"
+    assert all(len(h) == HANDLE_BYTES * 2 for h in handles)
+
+
+def test_a_terminal_sees_the_whole_board(board):
+    """`None` asks as the terminal, and it administers the rooms."""
+    room = board.ensure_room("telegram", "-100111")
+    mine = board.open_topic("in-a-chat", "In a chat", "b", "human",
+                            seats=("claude",), room_id=room)
+    board.open_topic("at-the-desk", "At the desk", "b", "human", seats=("claude",))
+
+    seen = {t["slug"] for t in board.topics_for_room(None)}
+    assert seen == {"in-a-chat", "at-the-desk"}, seen
+    assert board.topic_visible_in(mine, None), "the terminal could not see a chat's topic"
+
+
+def test_a_room_still_sees_only_its_own(board):
+    room = board.ensure_room("telegram", "-100111")
+    other = board.ensure_room("telegram", "-100222")
+    board.open_topic("theirs", "Theirs", "b", "human", seats=("claude",), room_id=other)
+
+    seen = {t["slug"] for t in board.topics_for_room(room)}
+    assert "theirs" not in seen
+
+
+def test_a_room_cannot_answer_a_request_by_its_number(board):
+    """Accepting the id inside a room left the sequence guessable, which is what
+    the handle was added to stop."""
+    pid = board.pair_request("-100111", "42", "Someone")
+    row = board.pairing("-100111", "42")
+
+    assert board.pairing_by_ref(row["ref"], chat_id="-100111") is not None
+    assert board.pairing_by_ref(str(pid), chat_id="-100111") is None
+    # A terminal may still use the number: it sees the whole board regardless.
+    assert board.pairing_by_ref(str(pid)) is not None
+
+
+# --------------------------------------------------------------- issue #6
+
+
+def _work(board):
+    topic = open_debate(board)
+    with board.tx() as c:
+        c.execute("UPDATE topics SET mode = 'work' WHERE id = ?", (topic,))
+        c.execute("UPDATE seats SET role = 'manager' WHERE topic_id = ? AND agent = 'claude'",
+                  (topic,))
+    # Written the way `agents add --capability execute` writes it.
+    with board.tx() as c:
+        for name in ("claude", "codex", "gemini"):
+            c.execute("UPDATE agents SET driver_cfg = ? WHERE name = ?",
+                      ('{"capability": "execute"}', name))
+    return topic
+
+
+def _queue(board, topic, assignee, depends_on=None):
+    with board.tx() as c:
+        cur = c.execute("INSERT INTO tasks (topic_id, title, assignee, created_by, "
+                        "status, depends_on) VALUES (?,?,?,?,'assigned',?)",
+                        (topic, f"work for {assignee}", assignee, "claude", depends_on))
+        return int(cur.lastrowid)
+
+
+def test_one_seat_is_never_woken_twice_at_once(board):
+    """agy woken for two of its own tasks timed out on both, while the same
+    invocation by hand succeeded in 43 seconds. A seat is one CLI holding one
+    conversation."""
+    from mooting.supervisor import Caps, Supervisor
+
+    topic = _work(board)
+    _queue(board, topic, "gemini")
+    _queue(board, topic, "gemini")
+    _queue(board, topic, "codex")
+
+    runnable = Supervisor(board, {}, Caps())._runnable_tasks(topic)
+    assignees = [t["assignee"] for t in runnable]
+
+    assert sorted(assignees) == ["codex", "gemini"], assignees
+    assert len(assignees) == len(set(assignees)), "a seat was dispatched twice"
+
+
+def test_a_task_waits_for_the_one_it_follows(board):
+    """The manager could work out that two tasks touch the same files and could
+    only write it where nothing read it."""
+    from mooting.supervisor import Caps, Supervisor
+
+    topic = _work(board)
+    first = _queue(board, topic, "codex")
+    second = _queue(board, topic, "gemini", depends_on=first)
+    sup = Supervisor(board, {}, Caps())
+
+    assert [t["id"] for t in sup._runnable_tasks(topic)] == [first]
+
+    board.update_task(first, "codex", "done")
+    board.update_task(first, "claude", "accepted", "good")
+    assert [t["id"] for t in sup._runnable_tasks(topic)] == [second]
+
+
+def test_a_dependency_has_to_name_a_real_task(board):
+    """The column carries a foreign key, so "after #9999" cannot be written at
+    all -- better than depending on the loop to cope with it later."""
+    import sqlite3
+
+    topic = _work(board)
+    with pytest.raises(sqlite3.IntegrityError):
+        _queue(board, topic, "codex", depends_on=9999)
+
+
+def test_sequential_covers_work_too(board):
+    """The flag read as though it would help and was consulted only on the
+    speaking path, so work ran in parallel anyway."""
+    from mooting.supervisor import Caps, Supervisor
+
+    topic = _work(board)
+    _queue(board, topic, "codex")
+    _queue(board, topic, "gemini")
+
+    parallel = Supervisor(board, {}, Caps())._runnable_tasks(topic)
+    one_at_a_time = Supervisor(board, {}, Caps(),
+                               turn_taking="sequential")._runnable_tasks(topic)
+
+    assert len(parallel) == 2
+    assert len(one_at_a_time) == 1

@@ -18,6 +18,7 @@ import json
 import hashlib
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import uuid
@@ -148,6 +149,52 @@ class StoreError(RuntimeError):
     pass
 
 
+def clean_text(value: str, what: str) -> str:
+    """User text on its way onto the board, or a message naming what was wrong.
+
+    Surrogates arrive from anywhere text is decoded with `surrogateescape` -- a
+    mis-set locale, argv on some shells, a file read loosely. They survive every
+    layer until SQLite refuses them, and the traceback then points at the write
+    rather than at the read. Refused here, where the offending input still has a
+    name.
+    """
+    if not isinstance(value, str):
+        return value
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise StoreError(
+            f"{what} is not valid text: it carries bytes that were decoded with "
+            f"the wrong encoding (position {exc.start}). If it was piped in, the "
+            f"source is not UTF-8.") from exc
+    return value
+
+
+#: Routes that cannot be reached from the machine the board lives on. A seat
+#: holding a shell can type in a terminal and can call an HTTP port; it cannot
+#: be a paired person in a chat.
+ON_ANOTHER_MACHINE = frozenset({"telegram"})
+
+#: Bytes behind a handle somebody types. Four rather than three: a pairing
+#: handle is the thing that stands between a stranger and a seat, and 24 bits is
+#: cheap to guess at online and starts colliding on a board that lives a while.
+HANDLE_BYTES = 4
+
+
+def new_handle() -> str:
+    """A handle short enough to retype and long enough to be worth nothing."""
+    return secrets.token_hex(HANDLE_BYTES)
+
+
+def chain_hash(prev: str | None, eid: int, topic_id, kind: str, actor: str,
+               payload: str, created_at: str) -> str:
+    """One link. Covers the row and the link before it, so an edit anywhere
+    downstream stops matching from that point on."""
+    material = "\x1f".join([prev or "", str(eid), str(topic_id), kind, actor,
+                            payload, created_at or ""])
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
 class NotAuthorised(StoreError):
     """Raised when a seat tries to exercise a power it does not hold."""
 
@@ -266,15 +313,37 @@ class Store:
         # exists, so new columns are migrated explicitly. Cheap and idempotent.
         # `asking` defaults to 1 so rows written before the distinction existed
         # keep blocking, which is what the topics holding them expect.
+        # `chair` needs no backfill: NULL falls back to `opened_by`, so every
+        # topic on an existing board keeps a chair without one being invented.
         for table, column, ddl in (("topics", "mode", "TEXT NOT NULL DEFAULT 'debate'"),
                                    ("topics", "effort", "TEXT"),
+                                   ("topics", "chair", "TEXT"),
+                                   ("rooms", "topic", "TEXT"),
+                                   ("rooms", "host", "TEXT"),
+                                   ("topics", "room_id", "INTEGER"),
+                                   ("pairings", "ref", "TEXT"),
+                                   ("agents", "tg_user_id", "TEXT"),
                                    ("mentions", "asking", "INTEGER NOT NULL DEFAULT 1"),
-                                   ("tasks", "base_sha", "TEXT")):
+                                   ("events", "hash", "TEXT"),
+                                   ("wakes", "tokens_in", "INTEGER"),
+                                   ("wakes", "tokens_out", "INTEGER"),
+                                   ("wakes", "cost_usd", "REAL"),
+                                   ("tasks", "base_sha", "TEXT"),
+                                   ("tasks", "depends_on", "INTEGER")):
             cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
                 if (table, column) == ("mentions", "asking"):
                     self._backfill_asking()
+
+
+        # Every open, not only when the column is added: a request with no handle
+        # cannot be answered, and one can arrive that way from an older board or
+        # a path that forgot to set it. The table is small and this is idempotent.
+        for row in self._conn.execute(
+                "SELECT id FROM pairings WHERE ref IS NULL OR ref = ''").fetchall():
+            self._conn.execute("UPDATE pairings SET ref = ? WHERE id = ?",
+                               (new_handle(), row["id"]))
 
     def _backfill_asking(self) -> None:
         """Decide, for mentions written before the column existed, which were asks.
@@ -300,11 +369,24 @@ class Store:
         actor: str,
         payload: dict[str, Any] | None = None,
     ) -> int:
+        body = json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)
         cur = conn.execute(
             "INSERT INTO events (topic_id, kind, actor, payload) VALUES (?,?,?,?)",
-            (topic_id, kind, actor, json.dumps(payload or {}, ensure_ascii=False)),
+            (topic_id, kind, actor, body),
         )
-        return int(cur.lastrowid)
+        eid = int(cur.lastrowid)
+        # Chained in the same transaction as the row it covers, so an event and
+        # its link are never separately true. The previous link comes from the
+        # board rather than from memory: two processes write here.
+        row = conn.execute(
+            "SELECT created_at FROM events WHERE id = ?", (eid,)).fetchone()
+        prev = conn.execute(
+            "SELECT hash FROM events WHERE id < ? ORDER BY id DESC LIMIT 1",
+            (eid,)).fetchone()
+        link = chain_hash(prev["hash"] if prev else None, eid, topic_id, kind,
+                          actor, body, row["created_at"])
+        conn.execute("UPDATE events SET hash = ? WHERE id = ?", (link, eid))
+        return eid
 
     def events_since(self, cursor: int, topic_id: int | None = None, limit: int = 200,
                      until: int | None = None) -> list[Event]:
@@ -325,6 +407,72 @@ class Store:
             Event(r["id"], r["topic_id"], r["kind"], r["actor"], json.loads(r["payload"]), r["created_at"])
             for r in rows
         ]
+
+    def verify_chain(self) -> dict:
+        """Walk the chain and say where, if anywhere, it stops adding up.
+
+        Reports the unchained prefix rather than hiding it: a board that existed
+        before this was written cannot be made tamper-evident retroactively, and
+        saying so is the difference between a check and a decoration.
+        """
+        rows = self.q("SELECT * FROM events ORDER BY id")
+        unchained = 0
+        prev = None
+        for row in rows:
+            if row["hash"] is None:
+                unchained += 1
+                continue
+            want = chain_hash(prev, int(row["id"]), row["topic_id"], row["kind"],
+                              row["actor"], row["payload"], row["created_at"])
+            if want != row["hash"]:
+                return {"ok": False, "broken_at": int(row["id"]),
+                        "checked": len(rows) - unchained, "unchained": unchained}
+            prev = row["hash"]
+        return {"ok": True, "broken_at": None,
+                "checked": len(rows) - unchained, "unchained": unchained}
+
+    def verify_bodies(self) -> list[int]:
+        """Message ids whose text no longer matches what was announced."""
+        bad = []
+        for ev in self.q("SELECT * FROM events WHERE kind = 'message'"):
+            payload = json.loads(ev["payload"])
+            want, mid = payload.get("digest"), payload.get("message_id")
+            if not want or not mid:
+                continue
+            row = self.q1("SELECT body FROM messages WHERE id = ?", (mid,))
+            if row is None:
+                bad.append(int(mid))
+                continue
+            if hashlib.sha256(row["body"].encode("utf-8")).hexdigest() != want:
+                bad.append(int(mid))
+        return bad
+
+    def verify_decisions(self) -> list[dict]:
+        """Sign-offs whose row no longer matches the event that recorded them.
+
+        The chain covers events, and a proposal's verdict lives in a column
+        beside them: `UPDATE proposals SET decided_by = ...` left an intact chain
+        and a different name against the one act this project exists to
+        attribute. Checked against the event's own actor, which is the record.
+        """
+        wrong = []
+        for ev in self.q("SELECT * FROM events WHERE kind = 'decision' ORDER BY id"):
+            payload = json.loads(ev["payload"])
+            pid = payload.get("proposal_id")
+            if pid is None:
+                continue
+            row = self.q1("SELECT decided_by, status FROM proposals WHERE id = ?", (pid,))
+            if row is None:
+                wrong.append({"proposal_id": pid, "expected": ev["actor"],
+                              "found": "the proposal is gone"})
+                continue
+            if row["decided_by"] != ev["actor"]:
+                wrong.append({"proposal_id": pid, "expected": ev["actor"],
+                              "found": row["decided_by"]})
+            elif payload.get("status") and row["status"] != payload["status"]:
+                wrong.append({"proposal_id": pid, "expected": payload["status"],
+                              "found": row["status"]})
+        return wrong
 
     def head(self) -> int:
         row = self.q1("SELECT COALESCE(MAX(id), 0) AS h FROM events")
@@ -379,7 +527,14 @@ class Store:
         ("proposals", "author"), ("proposals", "decided_by"),
         ("votes", "agent"), ("wakes", "agent"),
         ("tasks", "assignee"), ("tasks", "created_by"),
-        ("topics", "opened_by"),
+        ("topics", "opened_by"), ("topics", "chair"),
+        # `pairings.seat` carries a real foreign key, so leaving it behind did not
+        # orphan a row quietly -- it failed the whole rename at COMMIT. `/me` in a
+        # terminal worked and `/me` in a chat answered "FOREIGN KEY constraint
+        # failed", because only a paired person has a row here.
+        ("pairings", "seat"),
+        # `room_seats.agent` is another real foreign key, for the same reason.
+        ("room_seats", "agent"),
     )
 
     def rename_agent(self, old: str, new: str) -> None:
@@ -429,7 +584,22 @@ class Store:
                 f"{name!r} is on {len(owns)} task(s) (#{owns[0]['id']} "
                 f"{owns[0]['title']!r}...). Delete those topics first, or leave the "
                 f"seat registered -- its work log refers to it.")
+        # `pairings.seat` is a foreign key too, and removing a seat that somebody
+        # is paired to raised the same raw IntegrityError. Their access goes with
+        # the seat -- a pairing onto a seat that no longer exists grants nothing
+        # and cannot be repaired from a chat -- and the count says so rather than
+        # letting it happen quietly.
+        counts["pairings"] = self.q1(
+            "SELECT COUNT(*) c FROM pairings WHERE seat = ?", (name,))["c"]
+        counts["teams"] = self.q1(
+            "SELECT COUNT(*) c FROM room_seats WHERE agent = ?", (name,))["c"]
         with self.tx() as c:
+            c.execute("DELETE FROM room_seats WHERE agent = ?", (name,))
+            # Leaving the chair pointing at somebody who is gone made the topic
+            # undecidable: not the chair for everyone else, not a human seat for
+            # the name itself. Clearing it falls back to whoever opened it.
+            c.execute("UPDATE topics SET chair = NULL WHERE chair = ?", (name,))
+            c.execute("DELETE FROM pairings WHERE seat = ?", (name,))
             c.execute("DELETE FROM seats WHERE agent = ?", (name,))
             c.execute("DELETE FROM agents WHERE name = ?", (name,))
         return counts
@@ -456,6 +626,7 @@ class Store:
         mode: str = "debate",
         effort: str | None = None,
         manager: str | None = None,
+        room_id: int | None = None,
     ) -> int:
         # A slug is looked up by name, but every reference site accepts an id too
         # and decides which by `isdigit()`. So an all-numeric slug creates a topic
@@ -468,13 +639,16 @@ class Store:
             raise StoreError(
                 f"slug {slug!r} is all digits, which would be read as a topic id. "
                 "Give it a word -- e.g. `plans-2026`.")
+        title = clean_text(title, "the title")
+        brief = clean_text(brief, "the brief")
         if mode not in TOPIC_MODES:
             raise StoreError(f"unknown mode {mode!r}; expected one of {sorted(TOPIC_MODES)}")
         with self.tx() as c:
             cur = c.execute(
-                """INSERT INTO topics (slug, title, brief, opened_by, max_rounds, mode, effort)
-                   VALUES (?,?,?,?,?,?,?)""",
-                (slug, title, brief, opened_by, max_rounds, mode, effort),
+                """INSERT INTO topics (slug, title, brief, opened_by, max_rounds,
+                                         mode, effort, room_id)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (slug, title, brief, opened_by, max_rounds, mode, effort, room_id),
             )
             topic_id = int(cur.lastrowid)
             turns = max_rounds if max_turns is None else max_turns
@@ -504,7 +678,7 @@ class Store:
             return self.q("SELECT * FROM topics WHERE status = ? ORDER BY id DESC", (status,))
         return self.q("SELECT * FROM topics ORDER BY id DESC")
 
-    def set_rounds(self, topic_id: int, n: int) -> None:
+    def set_rounds(self, topic_id: int, n: int, actor: str) -> None:
         """Make this topic run to `n` rounds.
 
         Turns move with it. A seat speaks at most once a round, so a seat capped
@@ -512,7 +686,12 @@ class Store:
         meeting that is still running -- and from the outside that looks like the
         agent failing, not like a budget. Never reduces a budget somebody raised
         on purpose: rounds are the binding cap anyway.
+
+        A person only. A cap that an agent could raise is not a cap, and this one
+        exists to stop a council spending a subscription with nobody watching.
         """
+        if not self.is_human(actor):
+            raise NotAuthorised(f"{actor!r} may not change the round budget")
         if n < 1:
             raise StoreError("a topic runs for at least one round")
         with self.tx() as c:
@@ -520,20 +699,44 @@ class Store:
             c.execute("UPDATE seats SET max_turns = MAX(max_turns, ?) WHERE topic_id = ?",
                       (n, topic_id))
 
-    def grant_rounds(self, topic_id: int, n: int) -> None:
-        """More rounds, and the per-seat turns to use them.
+    def raise_budget(self, topic_id: int, rounds: int, turns: int,
+                     actor: str) -> tuple[int, int]:
+        """Bring a topic up to a budget, never down. Returns what it now holds.
+
+        Used when the chair turns the effort dial: a question worth deep thinking
+        is usually worth more rounds, and one worth a quick answer is not worth
+        five. Raising only, for the reason `set_rounds` has always given -- a
+        budget somebody granted on purpose is not something a later setting
+        should quietly take back.
+        """
+        if not self.is_human(actor):
+            raise NotAuthorised(f"{actor!r} may not change the budget")
+        with self.tx() as c:
+            c.execute("UPDATE topics SET max_rounds = MAX(max_rounds, ?) WHERE id = ?",
+                      (rounds, topic_id))
+            c.execute("UPDATE seats SET max_turns = MAX(max_turns, ?) WHERE topic_id = ?",
+                      (turns, topic_id))
+        t = self.topic(topic_id)
+        held = [r["max_turns"] for r in self.seats(topic_id)]
+        return int(t["max_rounds"]), max(held) if held else turns
+
+    def grant_rounds(self, topic_id: int, n: int, actor: str) -> None:
+        """More rounds, and the per-seat turns to use them. A person only.
 
         Raising one without the other is the trap: a seat that has spent its turns
         stays capped however many rounds you add, so the council looks alive and
         says nothing.
         """
+        if not self.is_human(actor):
+            raise NotAuthorised(f"{actor!r} may not grant more rounds")
         with self.tx() as c:
             c.execute("UPDATE topics SET max_rounds = max_rounds + ? WHERE id = ?",
                       (n, topic_id))
             c.execute("UPDATE seats SET max_turns = max_turns + ? WHERE topic_id = ?",
                       (n, topic_id))
 
-    def conclude(self, topic_id: int, by: str, note: str = "") -> int:
+    def conclude(self, topic_id: int, by: str, note: str = "",
+                 via: str = "local") -> int:
         """Close the meeting, on the record.
 
         A meeting that just stops is not the same as one that concluded, and the
@@ -545,6 +748,14 @@ class Store:
         """
         if not self.is_human(by):
             raise NotAuthorised(f"{by!r} is not a human seat; only a human closes a meeting")
+        if via not in ON_ANOTHER_MACHINE and self.executing_now():
+            raise NotAuthorised(
+                "a seat is executing and holds a shell on this machine; conclude "
+                "from a chat, or wait for it to finish")
+        seated = self.chair(topic_id)
+        if seated and by != seated:
+            raise NotAuthorised(
+                f"{by!r} is not the chair of this meeting — {seated} concludes it")
         topic = self.topic(topic_id)
         if topic["status"] in {"resolved", "aborted"}:
             raise StoreError(f"`{topic['slug']}` is already {topic['status']}")
@@ -573,10 +784,53 @@ class Store:
             "AND proposal_id IS NULL ORDER BY id DESC LIMIT 1", (topic_id,))
 
     def set_topic_status(self, topic_id: int, status: str, actor: str, note: str = "") -> None:
+        """Open, pause or close a topic.
+
+        Closing is a decision, so `resolved` and `aborted` need a person, the same
+        as `conclude` and `decide`. Opening and pausing are not: the supervisor
+        parks a topic itself when a cap is reached, which is the whole point of a
+        cap.
+        """
+        if status in {"resolved", "aborted"} and not self.is_human(actor):
+            raise NotAuthorised(f"{actor!r} may not close a topic")
         with self.tx() as c:
             closed = "datetime('now')" if status in {"resolved", "aborted"} else "NULL"
             c.execute(f"UPDATE topics SET status = ?, closed_at = {closed} WHERE id = ?", (status, topic_id))
             self._emit(c, topic_id, "topic", actor, {"action": status, "note": note})
+
+    def chair(self, topic_id: int) -> str | None:
+        """Who signs off here. Whoever opened the meeting, unless it named someone.
+
+        Anybody may call a meeting and argue in it. Closing a proposal and
+        concluding the meeting belong to one person, because "a human decided"
+        says very little when everybody in the room can decide and nobody in
+        particular is answerable for it.
+
+        `None` when nobody named is still on the board. A meeting must not become
+        undecidable because the person who chaired it was removed, so it falls
+        back to the rule that applied before chairs existed: any person may close
+        it. Deleting a seat clears the chair as well, and this is the second line
+        for a board where `opened_by` names somebody long gone.
+        """
+        t = self.topic(topic_id)
+        for candidate in (t["chair"], t["opened_by"]):
+            if candidate and self.is_human(candidate):
+                return candidate
+        return None
+
+    def set_chair(self, topic_id: int, who: str, actor: str) -> None:
+        """Hand the chair over. Only the sitting chair may, and only to a person."""
+        if not self.is_human(who):
+            raise NotAuthorised(
+                f"{who!r} is not a human seat; an agent cannot chair a meeting")
+        seated = self.chair(topic_id)
+        if seated and actor != seated:
+            raise NotAuthorised(f"only {seated} may hand over the chair")
+        if not self.is_human(actor):
+            raise NotAuthorised(f"{actor!r} is not a human seat")
+        with self.tx() as c:
+            c.execute("UPDATE topics SET chair = ? WHERE id = ?", (who, topic_id))
+            self._emit(c, topic_id, "topic", actor, {"action": "chair", "chair": who})
 
     # ----------------------------------------------------------------- settings
 
@@ -722,20 +976,213 @@ class Store:
             self._emit(c, topic_id, "remote", actor,
                        {"action": action, **(detail or {})})
 
+    # -------------------------------------------------------------------- rooms
+
+    #: Work with no chat behind it still happens somewhere. A terminal session
+    #: opens topics in the local room, so a room is never a special case that
+    #: half the code has to remember.
+    LOCAL_ROOM = ("local", "board")
+
+    def ensure_room(self, channel: str = "local", chat_id: str = "board",
+                    label: str = "") -> int:
+        """The room's id, creating it the first time it is used."""
+        with self.tx() as c:
+            c.execute("INSERT OR IGNORE INTO rooms (channel, chat_id, label) "
+                      "VALUES (?,?,?)", (channel, str(chat_id), label))
+            if label:
+                c.execute("UPDATE rooms SET label = ? WHERE channel = ? AND chat_id = ?",
+                          (label, channel, str(chat_id)))
+        return int(self.q1("SELECT id FROM rooms WHERE channel = ? AND chat_id = ?",
+                           (channel, str(chat_id)))["id"])
+
+    def room(self, channel: str, chat_id: str) -> sqlite3.Row | None:
+        return self.q1("SELECT * FROM rooms WHERE channel = ? AND chat_id = ?",
+                       (channel, str(chat_id)))
+
+    def rooms(self) -> list[sqlite3.Row]:
+        return self.q("SELECT * FROM rooms ORDER BY id")
+
+    def room_host(self, room_id: int) -> str | None:
+        """Whose room this is, if anybody's yet.
+
+        Not the same as a topic's chair. A chair runs one meeting and can be
+        handed over; a host owns the room and decides who is let into it. Being
+        let into a council is not being handed the ability to let others in.
+        """
+        row = self.q1("SELECT host FROM rooms WHERE id = ?", (room_id,))
+        return row["host"] if row and row["host"] else None
+
+    def claim_room(self, room_id: int, who: str) -> str:
+        """Make somebody the host, if the room has none. Returns the host."""
+        held = self.room_host(room_id)
+        if held:
+            return held
+        if not self.is_human(who):
+            raise NotAuthorised(f"{who!r} is not a human seat; an agent cannot "
+                                f"host a room")
+        with self.tx() as c:
+            c.execute("UPDATE rooms SET host = ? WHERE id = ?", (who, room_id))
+        return who
+
+    def set_room_topic(self, room_id: int, slug: str | None) -> None:
+        """Remember where a room is standing, across restarts."""
+        with self.tx() as c:
+            c.execute("UPDATE rooms SET topic = ? WHERE id = ?", (slug, room_id))
+
+    def room_topic(self, channel: str, chat_id: str) -> str | None:
+        """The topic a room was left on, if it is still there."""
+        row = self.room(channel, chat_id)
+        if row is None or not row["topic"]:
+            return None
+        try:
+            self.topic(row["topic"])
+        except StoreError:
+            return None
+        return row["topic"]
+
+    def topics_for_room(self, room_id: int | None) -> list[sqlite3.Row]:
+        """What this room may see: its own meetings, and the unbound ones.
+
+        A topic opened at a terminal is unbound and stays readable everywhere,
+        because starting at the desk and following on a phone is the workflow.
+        One opened in a chat belongs to that chat, which is what keeps two teams
+        on one board from reading each other.
+        """
+        if room_id is None:
+            # A terminal is the machine the board lives on, so it sees the whole
+            # board. Returning only the unbound ones hid every meeting opened in
+            # a chat from the one place that administers them.
+            return self.q("SELECT * FROM topics ORDER BY id DESC")
+        return self.q("SELECT * FROM topics WHERE room_id IS NULL OR room_id = ? "
+                      "ORDER BY id DESC", (room_id,))
+
+    def topic_visible_in(self, topic_id: int | None, room_id: int | None) -> bool:
+        """Whether a room may be told about something that happened on a topic."""
+        if topic_id is None or room_id is None:
+            # None asks as the terminal, which sees everything.
+            return True
+        row = self.q1("SELECT room_id FROM topics WHERE id = ?", (topic_id,))
+        if row is None or row["room_id"] is None:
+            return True
+        return row["room_id"] == room_id
+
+    def room_team(self, room_id: int) -> list[str]:
+        """The seats a meeting opened in this room starts with."""
+        return [r["agent"] for r in self.q(
+            "SELECT agent FROM room_seats WHERE room_id = ? ORDER BY position, agent",
+            (room_id,))]
+
+    def set_room_team(self, room_id: int, agents: Iterable[str], actor: str) -> list[str]:
+        """Redefine the room's team. A person only, and only over real seats.
+
+        Deliberately a replacement rather than a merge: `/seats add` on a single
+        meeting is the temporary gesture, and this is the one that sticks. Two
+        commands that both half-change a roster is how you end up unable to say
+        what the team is.
+        """
+        if not self.is_human(actor):
+            raise NotAuthorised(f"{actor!r} is not a human seat; a person sets the team")
+        wanted = list(dict.fromkeys(agents))
+        for name in wanted:
+            self.agent(name)                     # raises if it is not a seat
+        with self.tx() as c:
+            c.execute("DELETE FROM room_seats WHERE room_id = ?", (room_id,))
+            for slot, name in enumerate(wanted):
+                c.execute("INSERT INTO room_seats (room_id, agent, position) "
+                          "VALUES (?,?,?)", (room_id, name, slot))
+        return wanted
+
     # ------------------------------------------------------------------ pairing
 
     def pairing(self, chat_id: str, user_id: str, channel: str = "telegram"):
         return self.q1("SELECT * FROM pairings WHERE channel = ? AND chat_id = ? "
                        "AND user_id = ?", (channel, str(chat_id), str(user_id)))
 
+    #: How long a claim code is worth anything. Long enough to walk to a phone,
+    #: short enough that a code left on a screen is not a standing invitation.
+    CLAIM_TTL_S = 900.0
+
+    def new_claim(self, seat: str, ttl_s: float | None = None) -> str:
+        """A one-time code that proves whoever redeems it reached this machine.
+
+        Every other way of identifying the owner was something a stranger could
+        produce: a name passed on the command line, being the first to pair, or
+        creating the Telegram group. This one cannot be produced without reading
+        the terminal the board lives on, which is the thing an owner actually
+        has and nobody else does.
+        """
+        if not self.is_human(seat):
+            raise NotAuthorised(f"{seat!r} is not a human seat")
+        import time
+
+        code = new_handle()
+        self.set_setting("claim.code", code)
+        self.set_setting("claim.seat", seat)
+        self.set_setting("claim.expires",
+                         str(time.time() + (self.CLAIM_TTL_S if ttl_s is None else ttl_s)))
+        return code
+
+    def redeem_claim(self, code: str) -> str | None:
+        """The seat this code was for, once. `None` if it is wrong or stale."""
+        import time
+
+        want = self.setting("claim.code")
+        seat = self.setting("claim.seat")
+        until = self.setting("claim.expires")
+        if not want or not seat:
+            return None
+        if not secrets.compare_digest(str(code).strip().lower(), want):
+            return None
+        if until and time.time() > float(until):
+            self.drop_claim()
+            return None
+        self.drop_claim()
+        return seat
+
+    def drop_claim(self) -> None:
+        for key in ("claim.code", "claim.seat", "claim.expires"):
+            self.set_setting(key, None)
+
+    def bind_identity(self, seat: str, user_id: str) -> None:
+        """Bind a chat account to a seat, so identity is not a name in a message."""
+        if not self.is_human(seat):
+            raise NotAuthorised(f"{seat!r} is not a human seat")
+        with self.tx() as c:
+            c.execute("UPDATE agents SET tg_user_id = NULL WHERE tg_user_id = ?",
+                      (str(user_id),))
+            c.execute("UPDATE agents SET tg_user_id = ? WHERE name = ?",
+                      (str(user_id), seat))
+
+    def seat_for_identity(self, user_id: str) -> str | None:
+        """The seat this account has proved it holds, in any room or none."""
+        row = self.q1("SELECT name FROM agents WHERE tg_user_id = ?", (str(user_id),))
+        return row["name"] if row else None
+
+    def seat_for_user(self, user_id: str, channel: str = "telegram") -> str | None:
+        """The seat this account already holds, in any room.
+
+        Pairing is per room on purpose -- being trusted in one council is not
+        being trusted in another. This is the one question that is about the
+        person rather than the room, and it exists so the operator does not have
+        to bootstrap themselves from a terminal every time they open a group.
+        """
+        bound = self.seat_for_identity(user_id)
+        if bound:
+            return bound
+        row = self.q1(
+            "SELECT seat FROM pairings WHERE channel = ? AND user_id = ? "
+            "AND status = 'approved' AND seat IS NOT NULL LIMIT 1",
+            (channel, str(user_id)))
+        return row["seat"] if row else None
+
     def pair_request(self, chat_id: str, user_id: str, display: str = "",
                      channel: str = "telegram") -> int:
         """Record an unknown sender. Inert until somebody approves them."""
         with self.tx() as c:
             c.execute(
-                "INSERT OR IGNORE INTO pairings (channel, chat_id, user_id, display) "
-                "VALUES (?, ?, ?, ?)",
-                (channel, str(chat_id), str(user_id), display))
+                "INSERT OR IGNORE INTO pairings (channel, chat_id, user_id, display, ref) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (channel, str(chat_id), str(user_id), display, new_handle()))
         row = self.pairing(chat_id, user_id, channel)
         return int(row["id"])
 
@@ -797,10 +1244,39 @@ class Store:
             self._emit(c, None, "pairing", by,
                        {"pairing_id": pairing_id, "action": "denied"})
 
-    def pairings(self, status: str | None = None) -> list[sqlite3.Row]:
+    def pairings(self, status: str | None = None, chat_id: str | None = None,
+                 channel: str = "telegram") -> list[sqlite3.Row]:
+        """Pairings, optionally for one room.
+
+        Listing every room's pending requests in a chat told whoever asked that
+        other rooms exist and who is trying to get into them.
+        """
+        sql, args = "SELECT * FROM pairings WHERE 1=1", []
         if status:
-            return self.q("SELECT * FROM pairings WHERE status = ? ORDER BY id", (status,))
-        return self.q("SELECT * FROM pairings ORDER BY id")
+            sql, args = sql + " AND status = ?", args + [status]
+        if chat_id is not None:
+            sql = sql + " AND channel = ? AND chat_id = ?"
+            args = args + [channel, str(chat_id)]
+        return self.q(sql + " ORDER BY id", args)
+
+    def pairing_by_ref(self, ref: str, chat_id: str | None = None,
+                       channel: str = "telegram") -> sqlite3.Row | None:
+        """A request by the handle a person types, in this room only.
+
+        `chat_id` is not optional in a chat: approving is a decision about who
+        joins *this* council, and a request from another room is not this room's
+        to answer.
+        """
+        # The number is accepted only from a terminal, where the operator can see
+        # the whole board anyway. Inside a room it would leave the sequence
+        # guessable, which is the thing the handle was added to stop.
+        if chat_id is None:
+            return self.q1(
+                "SELECT * FROM pairings WHERE ref = ? OR CAST(id AS TEXT) = ? LIMIT 1",
+                [str(ref).strip().lower(), str(ref).strip()])
+        return self.q1(
+            "SELECT * FROM pairings WHERE ref = ? AND channel = ? AND chat_id = ? "
+            "LIMIT 1", [str(ref).strip().lower(), channel, str(chat_id)])
 
     def seat_for_chat(self, chat_id: str, user_id: str,
                       channel: str = "telegram") -> str | None:
@@ -944,6 +1420,7 @@ class Store:
         `count_turn` is False for system notes and for human interjections -- a
         human joining the discussion must never consume an agent's metered turns.
         """
+        body = clean_text(body, "the message")
         topic = self.topic(topic_id)
         if topic["status"] not in {"open", "paused"}:
             raise StoreError(f"topic {topic['slug']} is {topic['status']}; not accepting posts")
@@ -991,8 +1468,11 @@ class Store:
                 else []
             )
 
+            # The body lives in another table, so the chain would not notice it
+            # being rewritten. Its digest travels in the event that announces it.
             ev = self._emit(c, topic_id, "message", author,
                             {"message_id": msg_id, "kind": kind, "preview": body[:280],
+                             "digest": hashlib.sha256(body.encode("utf-8")).hexdigest(),
                              "mentions": mentioned})
             # The author has by definition seen everything up to its own message.
             c.execute("UPDATE seats SET last_seen = MAX(last_seen, ?) WHERE topic_id = ? AND agent = ?",
@@ -1065,15 +1545,49 @@ class Store:
             mention_targets=[target],
         )
 
-    def transcript(self, topic_id: int, after: int = 0, limit: int = 500) -> list[sqlite3.Row]:
+    def transcript(self, topic_id: int, after: int = 0, limit: int | None = 500,
+                   newest: bool = False) -> list[sqlite3.Row]:
+        """Messages after `after`, oldest first. `limit=None` for all of them.
+
+        `newest=True` takes the last `limit` rather than the first. Callers that
+        wanted the tail used to slice the returned list, which is the *oldest*
+        500 messages of the topic -- so once a council passed 500 messages every
+        one of them was showing the tail of the wrong window.
+        """
+        cap = -1 if limit is None else limit
+        if newest:
+            rows = self.q(
+                "SELECT * FROM messages WHERE topic_id = ? AND id > ? ORDER BY id DESC LIMIT ?",
+                (topic_id, after, cap),
+            )
+            return list(reversed(rows))
         return self.q(
             "SELECT * FROM messages WHERE topic_id = ? AND id > ? ORDER BY id LIMIT ?",
-            (topic_id, after, limit),
+            (topic_id, after, cap),
         )
+
+    def messages_by_id(self, ids: Iterable[int | None]) -> list[sqlite3.Row]:
+        """The named messages, oldest first.
+
+        Resolving ids by scanning a `transcript` window meant a message outside
+        that window silently had no body, which is how a seat came to be handed
+        an event it could not read.
+        """
+        wanted = sorted({int(i) for i in ids if i is not None})
+        if not wanted:
+            return []
+        marks = ",".join("?" * len(wanted))
+        return self.q(f"SELECT * FROM messages WHERE id IN ({marks}) ORDER BY id", wanted)
+
+    def message_count(self, topic_id: int) -> int:
+        """How many messages a topic holds. Counting a `transcript` stopped at 500."""
+        return int(self.q1("SELECT COUNT(*) c FROM messages WHERE topic_id = ?",
+                           (topic_id,))["c"])
 
     # ---------------------------------------------------------------- proposals
 
     def propose(self, topic_id: int, author: str, title: str, body: str) -> int:
+        title, body = clean_text(title, "the title"), clean_text(body, "the body")
         with self.tx() as c:
             cur = c.execute(
                 "INSERT INTO messages (topic_id, author, kind, body) VALUES (?,?,'propose',?)",
@@ -1134,7 +1648,20 @@ class Store:
     def votes(self, pid: int) -> list[sqlite3.Row]:
         return self.q("SELECT * FROM votes WHERE proposal_id = ? ORDER BY agent", (pid,))
 
-    def decide(self, pid: int, decider: str, approve: bool, rationale: str = "") -> None:
+    def executing_now(self) -> list[sqlite3.Row]:
+        """Seats holding a shell on this machine right now.
+
+        A seat woken for an approved task runs with its restrictions dropped so
+        it can do the work, which means a shell. That is the whole window this
+        project has: while it is open, a command typed on this machine cannot be
+        told apart from one that seat typed.
+        """
+        return self.q(
+            "SELECT k.id, k.title, k.assignee, t.slug FROM tasks k "
+            "JOIN topics t ON t.id = k.topic_id WHERE k.status = 'in_progress'")
+
+    def decide(self, pid: int, decider: str, approve: bool, rationale: str = "",
+               via: str = "local") -> None:
         """Close a proposal. Humans only -- this is the whole point of the platform.
 
         Agents deliberate and vote; votes are advisory. The transition that lets a
@@ -1147,7 +1674,38 @@ class Store:
                 f"{decider!r} is not a human seat; only a human closes a proposal. "
                 "Agents may vote (support/object) -- votes are advisory."
             )
+        # The two-key rule says a seat edits files only when a person approved
+        # the task and it was woken for one. It says nothing about the shell that
+        # comes with the editing, and `mooting approve 3` is one command away
+        # from there -- identity here is a name, and a seat running as the same
+        # user can pass any name. A decision typed on this machine while that is
+        # true cannot be attributed, so it is refused rather than trusted.
+        #
+        # Not a fence around the machine, which is not this project's to build.
+        # It closes the one window this project opens itself, and it names the
+        # way out: a chat account is something the seat does not hold.
+        # Anything reachable from this machine, which is HTTP as well as the
+        # terminal: a seat with a shell can read a token off the board and make
+        # the same request. Only a chat is genuinely elsewhere -- the bot token
+        # lets a seat speak *as the bot*, not as a paired person, and the sender
+        # is what the decide path checks.
+        running = [] if via in ON_ANOTHER_MACHINE else self.executing_now()
+        if running:
+            work = running[0]
+            raise NotAuthorised(
+                f"{work['assignee']} is executing task #{work['id']} "
+                f"({work['title']!r}) and holds a shell on this machine, so a "
+                f"sign-off typed here cannot be told from one it typed. Sign off "
+                f"from a chat, or wait for the task to finish.")
         p = self.proposal(pid)
+        # Anybody may call a meeting and argue in it; one person closes it. Without
+        # this, approving somebody into a room handed them the same authority as
+        # the person who opened it, and "a human decided" stopped identifying who.
+        seated = self.chair(int(p["topic_id"]))
+        if seated and decider != seated:
+            raise NotAuthorised(
+                f"{decider!r} is not the chair of this meeting — {seated} signs off "
+                f"here. Anybody may argue; one person closes it.")
         if p["status"] != "open":
             raise StoreError(f"proposal {pid} already {p['status']}")
         status = "approved" if approve else "rejected"
@@ -1186,7 +1744,7 @@ class Store:
         carries a topic_id but no foreign key, so the cascade does not reach it.
         """
         counts = {
-            "messages": len(self.transcript(topic_id)),
+            "messages": self.message_count(topic_id),
             "tasks": len(self.tasks(topic_id)),
             "proposals": len(self.proposals(topic_id)),
         }
@@ -1218,7 +1776,8 @@ class Store:
         return bool(row) and row["role"] == "manager"
 
     def draft_task(self, topic_id: int, manager: str, assignee: str, title: str,
-                   body: str = "", acceptance: str = "") -> int:
+                   body: str = "", acceptance: str = "",
+                   depends_on: int | None = None) -> int:
         """A manager writes a task. It is a *draft*: nothing runs until a human
         approves the plan. Assign-rights are checked here rather than asked for in
         a prompt, for the same reason `decide` checks humanity -- an instruction is
@@ -1231,9 +1790,10 @@ class Store:
             raise StoreError(f"{assignee!r} holds no seat on this topic")
         with self.tx() as c:
             cur = c.execute(
-                """INSERT INTO tasks (topic_id, title, body, acceptance, assignee, created_by)
-                   VALUES (?,?,?,?,?,?)""",
-                (topic_id, title, body, acceptance, assignee, manager),
+                """INSERT INTO tasks (topic_id, title, body, acceptance, assignee,
+                                        created_by, depends_on)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (topic_id, title, body, acceptance, assignee, manager, depends_on),
             )
             tid = int(cur.lastrowid)
             self._emit(c, topic_id, "task", manager,
@@ -1279,25 +1839,28 @@ class Store:
                       (pid, topic_id))
         return pid
 
-    def release_plan(self, proposal_id: int) -> int:
-        """Turn approved drafts into assigned work. Reached only from `decide`."""
-        with self.tx() as c:
-            cur = c.execute(
-                "UPDATE tasks SET status = 'assigned', updated_at = datetime('now') "
-                "WHERE proposal_id = ? AND status = 'draft'", (proposal_id,))
-            return cur.rowcount
-
     def update_task(self, task_id: int, agent: str, status: str, result: str = "") -> None:
         """A worker reports on its own task; a manager rules on a finished one."""
         t = self.task(task_id)
         worker_states = {"in_progress", "done", "blocked"}
-        manager_states = {"accepted", "rejected"}
+        # `assigned` puts it back in the queue. Without it the verdict a manager
+        # most needs after a blocked task whose cause has been fixed -- do it
+        # again -- was the one thing the state machine could not say, and using
+        # `rejected` for it dropped the task out of every code path: neither
+        # `_runnable_tasks` nor the review step reads that state.
+        manager_states = {"accepted", "rejected", "assigned"}
         if status not in worker_states | manager_states:
             raise StoreError(f"bad task status {status!r}")
         if status in worker_states and agent != t["assignee"]:
             raise NotAuthorised(f"{agent!r} is not the assignee of task {task_id}")
-        if status in manager_states and not self.is_manager(int(t["topic_id"]), agent):
-            raise NotAuthorised(f"only the manager accepts or rejects task {task_id}")
+        # The chair as well as the manager, because a work topic managed by an
+        # agent otherwise had no route for the person who signed off the plan to
+        # accept what came back.
+        if status in manager_states and not (
+                self.is_manager(int(t["topic_id"]), agent)
+                or agent == self.chair(int(t["topic_id"]))):
+            raise NotAuthorised(
+                f"only the manager or the chair accepts or rejects task {task_id}")
         if t["status"] == "draft":
             raise StoreError(f"task {task_id} is still a draft; the plan needs approving")
         note = f"task #{task_id} [{t['title']}] -> {status}"
@@ -1327,11 +1890,20 @@ class Store:
             )
             return int(cur.lastrowid)
 
-    def finish_wake(self, wake_id: int, outcome: str, detail: str = "") -> None:
+    def finish_wake(self, wake_id: int, outcome: str, detail: str = "",
+                    usage: dict | None = None) -> None:
+        """Close a wake, with whatever the CLI said the turn cost.
+
+        `usage` is what the vendor reported, not what we counted: only some CLIs
+        say, so the columns stay NULL rather than zero when they do not.
+        """
+        u = usage or {}
         with self.tx() as c:
             c.execute(
-                "UPDATE wakes SET outcome = ?, detail = ?, ended_at = datetime('now') WHERE id = ?",
-                (outcome, detail[:2000], wake_id),
+                "UPDATE wakes SET outcome = ?, detail = ?, ended_at = datetime('now'), "
+                "tokens_in = ?, tokens_out = ?, cost_usd = ? WHERE id = ?",
+                (outcome, detail[:2000], u.get("tokens_in"), u.get("tokens_out"),
+                 u.get("cost_usd"), wake_id),
             )
 
     def sweep_stale_wakes(self, older_than_s: int = 1800) -> int:
@@ -1359,6 +1931,37 @@ class Store:
                FROM wakes WHERE topic_id = ? AND outcome = 'pending' ORDER BY id""",
             (topic_id,),
         )
+
+    def usage(self, hours: float | None = None) -> list[dict]:
+        """What each seat has actually spent, from the wake ledger.
+
+        Wakes rather than turns, because a wake is what a metered CLI charges
+        for: one that fails or produces nothing still cost a request, and
+        `turns_used` counts neither. The ledger has been recording this since the
+        beginning and nothing ever showed it.
+        """
+        window = ("AND started_at > datetime('now', ?)" if hours else "")
+        args = [f"-{hours} hours"] if hours else []
+        rows = self.q(
+            f"""SELECT agent,
+                       COUNT(*)                                   AS wakes,
+                       SUM(outcome = 'ok')                        AS ok,
+                       SUM(outcome NOT IN ('ok', 'pending'))      AS failed,
+                       -- Integer epoch, not julianday: the float arithmetic
+                       -- lost seconds and reported 43 for 45.
+                       SUM(CAST(strftime('%s', ended_at) AS INTEGER)
+                           - CAST(strftime('%s', started_at) AS INTEGER))
+                                                                  AS seconds,
+                       SUM(tokens_in)                             AS tokens_in,
+                       SUM(tokens_out)                            AS tokens_out,
+                       SUM(cost_usd)                              AS cost_usd,
+                       MAX(started_at)                            AS last
+                FROM wakes WHERE 1=1 {window} GROUP BY agent
+                ORDER BY wakes DESC""", args)
+        return [{"agent": r["agent"], "wakes": r["wakes"], "ok": r["ok"] or 0,
+                 "failed": r["failed"] or 0, "seconds": r["seconds"] or 0,
+                 "tokens_in": r["tokens_in"], "tokens_out": r["tokens_out"],
+                 "cost_usd": r["cost_usd"], "last": r["last"]} for r in rows]
 
     def wakes_in_last_hour(self, agent: str) -> int:
         """Metered CLIs charge for a failed wake too, so this counts attempts,

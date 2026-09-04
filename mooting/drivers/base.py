@@ -32,6 +32,62 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+#: Names the vendors use for the same two numbers. Checked in order; the first
+#: that is present wins, and anything unrecognised is ignored rather than guessed.
+_TOKENS_IN = ("input_tokens", "prompt_tokens", "tokens_in", "inputTokens")
+_TOKENS_OUT = ("output_tokens", "completion_tokens", "tokens_out", "outputTokens")
+_COST = ("total_cost_usd", "cost_usd", "costUsd", "total_cost")
+
+
+def _first(blob: dict, keys) -> object | None:
+    for key in keys:
+        if isinstance(blob.get(key), (int, float)):
+            return blob[key]
+    return None
+
+
+def usage_in(text: str) -> dict:
+    """Tokens and cost from whatever JSON a CLI printed, or an empty dict.
+
+    Scans rather than parsing one shape: `--output-format json` gives one object
+    on claude, a stream of them elsewhere, and neither promises to keep its
+    shape. Missing is missing -- a turn nobody costed is left unpriced instead of
+    recorded as free.
+    """
+    import json as _json
+
+    found: dict = {}
+    for chunk in _candidates(text or ""):
+        try:
+            blob = _json.loads(chunk)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(blob, dict):
+            continue
+        pools = [blob]
+        if isinstance(blob.get("usage"), dict):
+            pools.append(blob["usage"])
+        for pool in pools:
+            for name, keys in (("tokens_in", _TOKENS_IN), ("tokens_out", _TOKENS_OUT),
+                               ("cost_usd", _COST)):
+                if name not in found:
+                    value = _first(pool, keys)
+                    if value is not None:
+                        found[name] = value
+    return found
+
+
+def _candidates(text: str):
+    """The whole thing first, then line by line: one object or a stream."""
+    body = text.strip()
+    if body.startswith("{"):
+        yield body
+    for line in body.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            yield line
+
+
 @dataclass(frozen=True)
 class Seat:
     """Everything a driver needs to reach one agent, flattened out of the DB."""
@@ -58,7 +114,26 @@ class Seat:
 
     @property
     def cwd(self) -> str:
+        """Where the CLI runs while it is deliberating.
+
+        Not the repository. A coding CLI reads whatever its working directory
+        means to it -- `CLAUDE.md`, `AGENTS.md`, its own per-directory memory --
+        before it ever sees the prompt this project wrote, so a seat pointed at a
+        working project brings that project's notes into an unrelated council.
+        Found live: a council asked "how can I make money" came back with the
+        person's age, city and profession, none of which was on the board.
+        """
         return self.cfg.get("cwd") or os.getcwd()
+
+    @property
+    def repo(self) -> str | None:
+        """The repository this seat works in, when it has been given one.
+
+        Separate from `cwd` because the two want opposite things: deliberation
+        wants a directory that says nothing, and work wants the project. One
+        setting could not be both, and the shared one silently chose leaking.
+        """
+        return self.cfg.get("repo") or None
 
     @property
     def capability(self) -> str:
@@ -73,6 +148,9 @@ class WakeResult:
     detail: str = ""
     #: Raw tail of the CLI's output. Diagnostics only -- never parsed for content.
     tail: str = ""
+    #: Tokens and cost the CLI reported for this turn. Empty when it said
+    #: nothing, which is not the same as free.
+    usage: dict = field(default_factory=dict)
 
     @classmethod
     def failure(cls, detail: str, tail: str = "") -> "WakeResult":
@@ -103,6 +181,16 @@ class Driver(abc.ABC):
     def working_dir(self, seat: Seat) -> str:
         """Where this CLI actually runs. Overridden where cwd IS the containment."""
         return seat.cwd
+
+    def usage_from(self, stdout: str, stderr: str) -> dict:
+        """What the CLI said this turn cost, if it said anything.
+
+        Read from the CLI's own JSON rather than counted here, because what
+        matters is what came off the subscription and only the vendor knows that.
+        Written to tolerate not being told: a CLI that reports nothing, or
+        changes its shape, yields an empty dict rather than a wrong number.
+        """
+        return usage_in(stdout) or usage_in(stderr)
 
     def tool_profile(self, seat: Seat) -> list[str]:
         """Argv restricting what this seat may touch.

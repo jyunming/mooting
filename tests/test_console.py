@@ -293,3 +293,26 @@ def test_rounds_sets_a_total_and_plus_adds(tmp_path):
     con._rounds("0")
     assert board.topic(tid)["max_rounds"] == 9
     board.close()
+
+
+def test_a_second_session_cannot_drive_the_same_topic(console, tmp_path):
+    """The claim lives on the board because that is all two processes share.
+
+    Guarding with an in-process flag alone let a second console start a second
+    supervisor and wake every seat twice against one budget.
+    """
+    from mooting.store import connect
+
+    other = connect(tmp_path / "board.db")
+    try:
+        assert other.take_drive(console.topic_id, "another-session") is None
+
+        said = []
+        console.emit = said.append
+        console._drive()
+
+        assert any("already being driven" in line for line in said)
+        # And the other session still holds it -- a refusal must not release it.
+        assert other.take_drive(console.topic_id, "a-third-session") == "another-session"
+    finally:
+        other.close()

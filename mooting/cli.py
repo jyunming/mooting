@@ -14,15 +14,34 @@ import os
 import sys
 from pathlib import Path
 
+from . import __version__
 from .store import (NotAuthorised, Store, StoreError, agenda_points,
                     agenda_text, connect, split_points)
 
 DIM_, RESET_ = "\033[2m", "\033[0m"
 
-# A console whose default codepage is not UTF-8 would garble non-ASCII output.
+# A console whose default codepage is not UTF-8 would garble non-ASCII output --
+# and stdin was left out of this for a long time, which was worse. `-` input was
+# decoded with the locale codec: bytes that map to cp1252 became mojibake stored
+# without complaint, and bytes that do not became lone surrogates that failed at
+# the SQLite write, three layers below the mistake. Reported as issue #2.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stdin, "reconfigure"):
+    sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+
+
+def read_stdin(what: str) -> str:
+    """Text piped in for a `-` argument.
+
+    Named rather than inlined so the four call sites cannot drift apart, and so
+    the failure says which argument was being read.
+    """
+    try:
+        return sys.stdin.read()
+    except UnicodeDecodeError as exc:
+        raise SystemExit(f"mooting: {what} is not valid UTF-8 ({exc})") from exc
 
 
 def _board(args: argparse.Namespace) -> Store:
@@ -92,7 +111,23 @@ def _human(board: Store, name: str | None) -> str:
         humans = [a["name"] for a in board.agents() if a["kind"] == "human"]
         if len(humans) == 1:
             return humans[0]
-        raise SystemExit("who are you? pass --as <name> or set MOOTING_HUMAN")
+        if not humans:
+            raise SystemExit(
+                "no person holds a seat on this board yet — `mooting setup` seats you.")
+        # `--as` is a global option, so it belongs before the command. The old
+        # message said to pass it and not where, and argparse answers
+        # `mooting telegram --as Jeremy` with "unrecognized arguments", which
+        # reads like the flag does not exist.
+        #
+        # Pairing a second person is what usually gets somebody here: a board
+        # with one person answers this on its own, so the command that worked
+        # yesterday stops the day a colleague joins.
+        raise SystemExit(
+            "who are you? more than one person holds a seat on this board:\n"
+            f"  {', '.join(humans)}\n"
+            "Say which, before the command:\n"
+            f"  mooting --as {humans[0]} <command>\n"
+            "or set MOOTING_HUMAN once for the whole session.")
     if not board.is_human(who):
         raise SystemExit(f"{who!r} is not a human seat; agent seats cannot use this command")
     return who
@@ -119,6 +154,8 @@ def cmd_setup(args) -> int:
 def cmd_agents_add(args) -> int:
     board = _board(args)
     cfg = {"cwd": os.path.abspath(args.cwd)} if args.cwd else {}
+    if args.repo:
+        cfg["repo"] = os.path.abspath(args.repo)
     if args.model:
         cfg["model"] = args.model
     if args.effort:
@@ -164,7 +201,7 @@ def cmd_topic_new(args) -> int:
     board = _board(args)
     brief = args.brief
     if brief == "-":
-        brief = sys.stdin.read()
+        brief = read_stdin("--brief")
     seats = [s.strip() for s in args.seats.split(",") if s.strip()]
     who = _human(board, args.as_)
     if who not in seats:
@@ -224,7 +261,7 @@ def cmd_topic_agenda(args) -> int:
         replacing = args.set is not None
         text = args.set if replacing else " ".join(args.points)
         if text.strip() == "-":
-            text = sys.stdin.read()
+            text = read_stdin("the agenda")
         added = split_points(text)
         points = added if replacing else [*points, *added]
         board.set_brief(tid, agenda_text(points), _human(board, args.as_))
@@ -245,7 +282,7 @@ def cmd_topic_rm(args) -> int:
     trees = board.orphan_worktrees(int(t["id"]))
     if not args.yes:
         print(f"would delete `{t['slug']}` — {t['title']}")
-        print(f"  {len(board.transcript(int(t['id'])))} message(s), "
+        print(f"  {board.message_count(int(t['id']))} message(s), "
               f"{len(board.tasks(int(t['id'])))} task(s), "
               f"{len(board.proposals(int(t['id'])))} proposal(s)")
         for w in trees:
@@ -308,7 +345,7 @@ def cmd_show(args) -> int:
     for s in board.seats(t["id"]):
         print(f"  {s['agent']:<10} {s['kind']:<9} {s['state']:<8} {s['turns_used']}/{s['max_turns']}")
     print("\n" + "-" * 60 + "\n")
-    for m in board.transcript(t["id"]):
+    for m in board.transcript(t["id"], limit=None):
         tag = "" if m["kind"] == "say" else f" [{m['kind']}]"
         print(f"#{m['id']} {m['author']}{tag}  {m['created_at']}")
         print(m["body"].strip() + "\n")
@@ -320,7 +357,7 @@ def cmd_say(args) -> int:
     board = _board(args)
     who = _human(board, args.as_)
     t = board.topic(int(args.topic) if args.topic.isdigit() else args.topic)
-    body = sys.stdin.read() if args.body == "-" else args.body
+    body = read_stdin("the message") if args.body == "-" else args.body
     mid = board.post(int(t["id"]), who, body, count_turn=False)
     print(f"posted #{mid} as {who}")
     return 0
@@ -331,7 +368,7 @@ def cmd_ask(args) -> int:
     board = _board(args)
     who = _human(board, args.as_)
     t = board.topic(int(args.topic) if args.topic.isdigit() else args.topic)
-    question = sys.stdin.read() if args.question == "-" else args.question
+    question = read_stdin("the question") if args.question == "-" else args.question
     mid = board.ask(int(t["id"]), who, args.agent, question)
     print(f"asked {args.agent} (#{mid}). They are next in line.")
     print(f"next: mooting nudge {t['slug']} {args.agent}    (or `mooting run {t['slug']}`)")
@@ -464,11 +501,18 @@ def cmd_run(args) -> int:
     if args.resume:
         board.set_topic_status(int(t["id"]), "open", _human(board, args.as_), "resumed by human")
         if args.rounds:
-            with board.tx() as c:
-                c.execute("UPDATE topics SET max_rounds = max_rounds + ? WHERE id = ?",
-                          (args.rounds, int(t["id"])))
+            # `grant_rounds` exists for exactly this and its docstring names the
+            # trap: raising rounds without the turns to use them leaves a council
+            # that looks alive and says nothing. The raw UPDATE here raised one
+            # of the two, and skipped the identity check as well, so
+            # `--as <agent> --resume --rounds N` let a seat grant itself more.
+            board.grant_rounds(int(t["id"]), args.rounds, _human(board, args.as_))
 
-    caps = Caps(max_turns_per_seat=args.max_turns, max_wakes_per_agent_per_hour=args.max_wakes,
+    # Whatever the seats actually hold, unless this run says lower.
+    seated = [r["max_turns"] for r in board.seats(int(t["id"]))]
+    ceiling = args.max_turns if args.max_turns is not None else (
+        max(seated) if seated else Caps.max_turns_per_seat)
+    caps = Caps(max_turns_per_seat=ceiling, max_wakes_per_agent_per_hour=args.max_wakes,
                 effort=args.effort or "low")
     sup = Supervisor(board, _drivers(board), caps,
                      turn_taking="sequential" if args.sequential else "concurrent")
@@ -554,6 +598,30 @@ def cmd_telegram(args) -> int:
                    topic=args.topic, remember=remember)
 
 
+def cmd_claim(args) -> int:
+    """Print a code that proves whoever redeems it reached this machine.
+
+    Every other way of saying who owns a board is something a stranger can
+    produce: a name passed on the command line, being first to pair, or creating
+    the Telegram group. Reading this terminal is not.
+    """
+    board = _board(args)
+    who = args.seat or _human(board, args.as_)
+    try:
+        code = board.new_claim(who)
+    except (StoreError, NotAuthorised) as exc:
+        print(f"mooting: {exc}", file=sys.stderr)
+        board.close()
+        return 1
+    minutes = int(board.CLAIM_TTL_S // 60)
+    print(f"send this to the bot, from the account that should be `{who}`:")
+    print(f"\n    /pair {code}\n")
+    print(f"good for {minutes} minutes, once. It binds that chat account to the")
+    print(f"seat and makes them the host of the room they send it in.")
+    board.close()
+    return 0
+
+
 def cmd_pair(args) -> int:
     """Approve, deny or list chat identities from the shell."""
     board = _board(args)
@@ -568,6 +636,12 @@ def cmd_pair(args) -> int:
         seat = args.seat or board.seat_name_for(want["display"],
                                                 fallback=f"guest{args.approve}")
         row = board.pair_approve(int(args.approve), seat, who)
+        # Approving from a terminal is how a room is bootstrapped, and it left
+        # the room with no host at all -- so the first person to approve
+        # somebody in the chat afterwards became one by accident.
+        if row["channel"] == "telegram":
+            board.claim_room(board.ensure_room("telegram", row["chat_id"]),
+                             row["seat"])
         print(f"{row['display'] or row['user_id']} speaks as {row['seat']}")
     elif args.deny:
         board.pair_deny(int(args.deny), who)
@@ -677,6 +751,8 @@ def cmd_doctor(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="mooting", description=__doc__.splitlines()[0])
+    ap.add_argument("--version", action="version", version=f"mooting {__version__}",
+                    help="which version this is, for a bug report")
     ap.add_argument("--db", help="board path (default ./.mooting/board.db, or $MOOTING_DB)")
     ap.add_argument("--as", dest="as_", help="act as this human seat (or $MOOTING_HUMAN)")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -694,7 +770,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = ag.add_parser("add")
     p.add_argument("name")
     p.add_argument("kind", choices=["claude", "codex", "copilot", "gemini", "agy", "human", "external"])
-    p.add_argument("--cwd", help="repo the agent works in")
+    p.add_argument("--cwd", help="where the seat runs while deliberating; keep it "
+                                 "empty, a coding CLI reads what it finds there")
+    p.add_argument("--repo", help="the repository this seat works in, for work "
+                                  "topics; separate from --cwd on purpose")
     p.add_argument("--model")
     p.add_argument("--driver", choices=["stdio_json", "acp", "spawn", "none"])
     p.add_argument("--effort", choices=["low", "medium", "high"],
@@ -810,13 +889,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("topic")
     p.add_argument("--resume", action="store_true", help="unpause first")
     p.add_argument("--rounds", type=int, default=0, help="with --resume: grant N more rounds")
-    p.add_argument("--max-turns", type=int, default=6, dest="max_turns")
+    # No default. This is a `min()` against the seat's own budget, so a number
+    # here can only ever lower it -- and a default of 6 silently overrode a
+    # budget the chair had deliberately granted, on a flag they never passed.
+    p.add_argument("--max-turns", type=int, default=None, dest="max_turns",
+                   help="lower the per-seat ceiling for this run; the seat's own "
+                        "budget applies when this is not given")
     p.add_argument("--max-wakes", type=int, default=30, dest="max_wakes",
                    help="per agent per hour; a failed wake still counts")
     p.add_argument("--effort", choices=["low", "medium", "high"],
                    help="council-wide effort for this run (default low)")
     p.add_argument("--sequential", action="store_true",
-                   help="one seat at a time so each sees the last; slower by ~N x")
+                   help="one seat at a time so each sees the last, and one task "
+                        "at a time on a work topic; slower by ~N x")
     p.set_defaults(fn=cmd_run)
 
     p = sub.add_parser("nudge", help="wake one seat by hand")
@@ -849,6 +934,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--forget-token", action="store_true",
                    help="remove the saved token and exit")
     p.set_defaults(fn=cmd_telegram)
+
+    p = sub.add_parser("claim", help="a one-time code that hands somebody a seat "
+                                     "and hosts them in the room they use it in")
+    p.add_argument("--seat", help="the human seat the code is for (default: you)")
+    p.set_defaults(fn=cmd_claim)
 
     p = sub.add_parser("pair", help="who may act as which seat in a chat")
     p.add_argument("--approve", help="pairing id to approve")

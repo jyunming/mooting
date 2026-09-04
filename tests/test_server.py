@@ -363,8 +363,15 @@ async def test_two_people_are_two_seats_not_one_shared_voice(client, board):
     assert said.get("alice") == "alice was here", \
         f"a second person's words landed under somebody else's name: {said}"
 
-    # and a ruling names whoever actually made it
+    # Speaking is everybody's; signing off is the chair's. Jeremy opened this
+    # topic, so it is his until he hands it over.
     pid = board.propose(tid, "santa", "Cap at 6", "body")
+    r = await client.post(f"/api/proposals/{pid}/decide",
+                          json={"approve": True}, headers=auth(alice))
+    assert r.status == 403, "a second person signed off on somebody else's meeting"
+
+    # and once she has the chair, a ruling names whoever actually made it
+    board.set_chair(tid, "alice", "jeremy")
     r = await client.post(f"/api/proposals/{pid}/decide",
                           json={"approve": True}, headers=auth(alice))
     assert r.status == 200

@@ -73,7 +73,7 @@ def mooting_inbox() -> str:
             continue
         new = b.events_since(seat["last_seen"], t["id"])
         msg_ids = {e.payload.get("message_id") for e in new if e.kind == "message"}
-        msgs = [m for m in b.transcript(t["id"]) if m["id"] in msg_ids and m["author"] != AGENT]
+        msgs = [m for m in b.messages_by_id(msg_ids) if m["author"] != AGENT]
         openp = b.proposals(t["id"], status="open")
 
         head = f"### `{t['slug']}` — {t['title']}  ({t['status']}, round {t['round'] + 1}/{t['max_rounds']})"
@@ -220,7 +220,7 @@ def mooting_pass(topic: str, why: str = "nothing to add") -> str:
 
 @mcp.tool()
 def mooting_assign(topic: str, agent: str, title: str, body: str = "",
-                 acceptance: str = "") -> str:
+                 acceptance: str = "", depends_on: int | None = None) -> str:
     """Draft a task for one teammate. Manager only, on a work topic.
 
     The task is a *draft*: it does not run, and nobody is woken for it, until a
@@ -230,10 +230,16 @@ def mooting_assign(topic: str, agent: str, title: str, body: str = "",
     Assign to the seat actually suited to the work, and only to seats registered
     with execute capability; a task assigned to a deliberation-only seat comes
     back blocked rather than silently doing nothing.
+
+    `depends_on` is the task id this one must follow -- use it when they touch
+    the same files, or when this one needs the other's output. It waits until
+    that task is accepted. Ordering written into the plan text instead is not
+    read by anything and will run in parallel.
     """
     tid = _topic_id(topic)
     try:
-        task_id = board().draft_task(tid, AGENT, agent, title, body, acceptance)
+        task_id = board().draft_task(tid, AGENT, agent, title, body, acceptance,
+                                     depends_on)
     except StoreError as exc:
         return f"refused: {exc}"
     return (f"task #{task_id} drafted for {agent}. It stays a draft until a human "
@@ -268,7 +274,12 @@ def mooting_task_update(task_id: int, status: str, result: str = "") -> str:
     changed and where, or precisely what stopped you -- your report is all the
     manager and the human will see.
 
-    As the manager: `accepted` or `rejected`, with the reason.
+    As the manager, with the reason:
+    `accepted`  the work is done and closes.
+    `assigned`  send it back to be done again -- use this when a blocked task's
+                cause has been fixed. It returns to the queue.
+    `rejected`  abandon it. Terminal: nothing reads a rejected task again, so it
+                is not the way to ask for a retry.
     """
     try:
         board().update_task(task_id, AGENT, status, result)

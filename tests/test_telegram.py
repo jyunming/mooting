@@ -7,6 +7,7 @@ wrapper around them.
 
 from __future__ import annotations
 
+import pathlib
 import pytest
 
 from mooting.store import NotAuthorised, StoreError, connect
@@ -552,7 +553,13 @@ def test_a_ruling_from_chat_is_the_pressers_own(board):
     assert board.seat_for_chat("-100", "42") == "jeremy"
     assert board.seat_for_chat("-100", "77") == "alice"
 
-    # alice presses, so alice rules
+    # Jeremy opened this meeting, so alice may argue in it but not close it.
+    with pytest.raises(NotAuthorised):
+        board.decide(pid, board.seat_for_chat("-100", "77"), approve=True,
+                     rationale="capped at 6")
+
+    # handed the chair, alice presses and alice rules
+    board.set_chair(tid, "alice", "jeremy")
     board.decide(pid, board.seat_for_chat("-100", "77"), approve=True,
                  rationale="capped at 6")
     assert board.proposal(pid)["status"] == "approved"
@@ -590,3 +597,910 @@ def test_a_second_person_can_speak_not_only_rule(board):
     # seating an agent is a decision about whose subscription gets spent
     with pytest.raises(NotAuthorised):
         board.seat_human(tid, "santa")
+
+
+# ------------------------------------------------------------- topic picker
+#
+# Switching used to be `/topic switch <slug>`: an identifier retyped from
+# memory on a phone keyboard, where a near miss moves the whole room somewhere
+# nobody meant. These cover the parts that decide what a tap does, which are
+# pure and need no bot.
+
+
+def test_a_bare_topic_command_asks_for_the_picker_and_a_verb_does_not():
+    from mooting.telegram import wants_picker
+
+    assert wants_picker("/topic")
+    assert wants_picker("/topics")
+    assert wants_picker("  /Topics  ")
+    assert wants_picker("/topic@council_bot")
+    # A verb still means what it always did.
+    assert not wants_picker("/topic new should we cap retries")
+    assert not wants_picker("/topic switch retries")
+    assert not wants_picker("/topical")
+
+
+def test_the_picker_marks_where_the_room_is_and_shortens_long_titles():
+    from mooting.telegram import picker_rows
+
+    rows = [
+        {"id": 3, "slug": "retries", "status": "open",
+         "title": "Should failed webhook deliveries use exponential backoff"},
+        {"id": 2, "slug": "aircon", "status": "paused", "title": "Aircon"},
+        {"id": 1, "slug": "old", "status": "resolved", "title": "Old thing"},
+    ]
+    labels = [lbl for lbl, _ in picker_rows(rows, "retries")]
+
+    assert labels[0].startswith("●")
+    assert "●" not in labels[1]
+    assert labels[1].startswith("⏸")
+    assert labels[2].startswith("✓")
+    # A button is one line on a phone, so a long title is cut at a word.
+    assert len(labels[0]) <= 40
+    assert labels[0].endswith("…") and not labels[0].endswith(" …")
+
+
+def test_every_picker_button_carries_its_own_topic_id():
+    """A chat scrolls. A button meaning "the third one" would drift with it."""
+    from mooting.telegram import parse_pick, pick_callback, picker_rows
+
+    rows = [{"id": 41, "slug": "a", "status": "open", "title": "A"},
+            {"id": 7, "slug": "b", "status": "open", "title": "B"}]
+    picked = [parse_pick(pick_callback(tid)) for _, tid in picker_rows(rows, "a")]
+
+    assert picked == [41, 7]
+    assert all(len(pick_callback(tid).encode("utf-8")) <= 64
+               for _, tid in picker_rows(rows, None))
+    # A sign-off button is not a picker button, and neither is anything else.
+    assert parse_pick("rule:ok:3") is None
+    assert parse_pick("") is None
+    assert parse_pick("pick:notanumber") is None
+
+
+def test_the_picker_shows_at_most_one_screen_of_topics():
+    from mooting.telegram import PICKER_LIMIT, picker_rows
+
+    many = [{"id": i, "slug": f"t{i}", "status": "open", "title": f"T{i}"}
+            for i in range(40)]
+    assert len(picker_rows(many, None)) == PICKER_LIMIT
+
+
+def test_the_help_a_chat_receives_is_the_one_that_is_maintained():
+    """`HELP` was defined twice, and the second copy won.
+
+    The live text was the older one, which had lost the line telling somebody
+    how to ask to join — the single thing a person who is not paired needs.
+    Editing the first copy changed nothing, silently.
+    """
+    import mooting.telegram as tg
+
+    source = pathlib.Path(tg.__file__).read_text(encoding="utf-8")
+    assert source.count("\nHELP = (") == 1, "HELP is defined more than once"
+    assert "ask to join" in tg.HELP
+    assert "/topics" in tg.HELP
+
+
+def test_a_chat_still_pointing_at_a_deleted_topic_can_open_a_new_one(tmp_path):
+    """Found live: `/reset` cleared the board and the chat went completely mute.
+
+    The room kept standing on the topic it was on. Building the session for the
+    next message raised in the constructor, before any command was dispatched,
+    so nothing answered at all — including `/topic new`, which was the only way
+    back. Two people each read it as "I am not allowed to create a topic".
+    """
+    from mooting.store import connect
+    from mooting.telegram import ChatBoard
+
+    db = tmp_path / "board.db"
+    s = connect(db, init=True)
+    s.add_agent("Jeremy", "human")
+    s.add_agent("Santa", "claude", driver="spawn")
+    s.open_topic("gone", "Gone", "brief", "Jeremy", seats=("Jeremy", "Santa"))
+    s.clear_topics()
+    s.close()
+
+    board = ChatBoard(db, "gone", "Jeremy")
+    try:
+        assert board.topic is None, "still standing on a topic that is not there"
+        out = board.handle("/topic new can we open one after a reset")
+        assert "can-we-open-one-after-a-reset" in out
+        assert board.topic == "can-we-open-one-after-a-reset"
+    finally:
+        board.close()
+
+
+def test_every_command_in_the_menu_actually_exists(tmp_path):
+    """The menu is a promise: a thumb taps it and something has to happen.
+
+    `/attach` sat in the help and the Telegram menu for weeks while the console
+    answered "unknown /attach", because nothing checked that an advertised
+    command was a reachable one. Driving each entry is the check — a command
+    that is missing answers "unknown", and one that merely needs arguments
+    answers with its usage.
+    """
+    from mooting.store import connect
+    from mooting.telegram import MENU, ChatBoard
+
+    #: Handled by the bot itself rather than by the shared console dispatch.
+    bot_side = {"pair", "topics", "help"}
+
+    db = tmp_path / "board.db"
+    s = connect(db, init=True)
+    s.add_agent("Jeremy", "human")
+    s.add_agent("Santa", "claude", driver="spawn")
+    s.open_topic("t", "A topic", "brief", "Jeremy", seats=("Jeremy", "Santa"))
+    s.close()
+
+    missing = []
+    for command, _ in MENU:
+        if command in bot_side:
+            continue
+        board = ChatBoard(db, "t", "Jeremy")
+        try:
+            out = board.handle(f"/{command}")
+        finally:
+            board.close()
+        if f"unknown /{command}" in out:
+            missing.append(command)
+
+    assert not missing, f"advertised in the menu and not reachable: {missing}"
+
+
+def test_the_destructive_commands_stay_off_the_menu(tmp_path):
+    """`/reset` clears every topic, and has already been run here by accident."""
+    from mooting.telegram import MENU, OFF_MENU
+
+    listed = {command for command, _ in MENU}
+    assert not (listed & set(OFF_MENU)), \
+        "a destructive command is one tap from a thumb"
+
+
+def test_a_meeting_opened_in_a_room_starts_with_that_rooms_team(tmp_path):
+    from mooting.store import connect
+    from mooting.telegram import ChatBoard
+
+    db = tmp_path / "board.db"
+    s = connect(db, init=True)
+    s.add_agent("Jeremy", "human")
+    for name in ("Santa", "Sam", "Kevin"):
+        s.add_agent(name, "claude", driver="spawn")
+    s.close()
+
+    room = ("telegram", "-100111")
+    chat = ChatBoard(db, None, "Jeremy", room=room)
+    try:
+        chat.handle("/team Santa Kevin")
+        chat.handle("/topic new which engine should we use")
+        seats = {r["agent"] for r in chat.console.store.seats(chat.console.topic_id)}
+    finally:
+        chat.close()
+
+    assert seats == {"Santa", "Kevin", "Jeremy"}, seats
+    assert "Sam" not in seats, "a seat outside the team was seated anyway"
+
+
+def test_two_rooms_on_one_board_seat_their_own_teams(tmp_path):
+    """The scenario this exists for: agents with A/B/C in one chat and D/E/F in
+    another, on one board, without either team leaking into the other."""
+    from mooting.store import connect
+    from mooting.telegram import ChatBoard
+
+    db = tmp_path / "board.db"
+    s = connect(db, init=True)
+    s.add_agent("Jeremy", "human")
+    for name in ("Santa", "Sam", "Kevin"):
+        s.add_agent(name, "claude", driver="spawn")
+    s.close()
+
+    seated = {}
+    for room_id, team, question in ((("telegram", "-100111"), "Santa Sam", "engine choice"),
+                                    (("telegram", "-100222"), "Kevin", "aircon efficiency")):
+        chat = ChatBoard(db, None, "Jeremy", room=room_id)
+        try:
+            chat.handle(f"/team {team}")
+            chat.handle(f"/topic new {question}")
+            seated[room_id[1]] = {r["agent"] for r in
+                                  chat.console.store.seats(chat.console.topic_id)}
+        finally:
+            chat.close()
+
+    assert seated["-100111"] == {"Santa", "Sam", "Jeremy"}
+    assert seated["-100222"] == {"Kevin", "Jeremy"}
+
+
+def test_seating_somebody_for_one_meeting_does_not_join_them_to_the_team(tmp_path):
+    """`/seats add` is the temporary gesture; `/team` is the one that sticks."""
+    from mooting.store import connect
+    from mooting.telegram import ChatBoard
+
+    db = tmp_path / "board.db"
+    s = connect(db, init=True)
+    s.add_agent("Jeremy", "human")
+    for name in ("Santa", "Sam"):
+        s.add_agent(name, "claude", driver="spawn")
+    s.close()
+
+    room = ("telegram", "-100111")
+    chat = ChatBoard(db, None, "Jeremy", room=room)
+    try:
+        chat.handle("/team Santa")
+        chat.handle("/topic new first question")
+        chat.handle("/seats add Sam")
+        first = {r["agent"] for r in chat.console.store.seats(chat.console.topic_id)}
+        assert "Sam" in first, "the temporary seat did not take"
+
+        # The next meeting starts from the team, not from what the last one grew into.
+        chat.handle("/topic new second question")
+        second = {r["agent"] for r in chat.console.store.seats(chat.console.topic_id)}
+        assert second == {"Santa", "Jeremy"}, second
+    finally:
+        chat.close()
+
+
+def test_a_terminal_session_has_a_room_of_its_own(tmp_path):
+    """No chat behind it, and still not a special case."""
+    from mooting.console import Console
+    from mooting.store import Store, connect
+
+    db = tmp_path / "board.db"
+    s = connect(db, init=True)
+    s.add_agent("me", "human")
+    s.add_agent("claude", "claude", driver="spawn")
+    s.close()
+
+    c = Console(db, None, "me")
+    try:
+        assert c.room == Store.LOCAL_ROOM
+        c.emit = lambda *_: None
+        c.handle("/team claude")
+        c.handle("/topic new a question at the desk")
+        assert {r["agent"] for r in c.store.seats(c.topic_id)} == {"claude", "me"}
+        # and it is a different room from any chat
+        assert c.store.room_team(c.store.ensure_room("telegram", "-100111")) == []
+    finally:
+        c.store.close()
+
+
+def test_a_command_is_not_a_lost_user(tmp_path):
+    """A chat with no topic answered every command with the topic list.
+
+    Reported from a phone: `/team` came back "This chat is not on a topic yet"
+    and a list of topics to tap. The list is right for somebody with something to
+    say and nowhere to say it. A command answers for itself.
+    """
+    from mooting.telegram import wants_picker
+
+    # Only the bare topic commands ask for the list.
+    assert wants_picker("/topic") and wants_picker("/topics")
+    for command in ("/team", "/effort", "/me Ege", "/seats", "/help", "/rounds 5"):
+        assert not wants_picker(command), command
+
+
+def test_a_room_remembers_its_topic_across_a_restart(tmp_path):
+    """`where` lived in the bot, so restarting it lost the room's place — and
+    then every command was answered with the topic list instead."""
+    from mooting.store import connect
+
+    db = tmp_path / "board.db"
+    s = connect(db, init=True)
+    s.add_agent("Jeremy", "human")
+    s.add_agent("Santa", "claude", driver="spawn")
+    s.open_topic("engine", "Which engine", "b", "Jeremy", seats=("Jeremy", "Santa"))
+    rid = s.ensure_room("telegram", "-100111")
+
+    assert s.room_topic("telegram", "-100111") is None
+    s.set_room_topic(rid, "engine")
+    s.close()
+
+    # A new process, which is what a restart is.
+    again = connect(db)
+    try:
+        assert again.room_topic("telegram", "-100111") == "engine"
+        # and a topic that has gone since is not offered back
+        again.clear_topics()
+        assert again.room_topic("telegram", "-100111") is None
+    finally:
+        again.close()
+
+
+def _two_room_board(tmp_path):
+    from mooting.store import connect
+
+    db = tmp_path / "board.db"
+    s = connect(db, init=True)
+    s.add_agent("Jeremy", "human")
+    for name in ("Santa", "Sam", "Kevin"):
+        s.add_agent(name, "claude", driver="spawn")
+    s.close()
+    return db
+
+
+def test_a_meeting_opened_in_a_chat_belongs_to_that_chat(tmp_path):
+    from mooting.store import connect
+    from mooting.telegram import ChatBoard
+
+    db = _two_room_board(tmp_path)
+    chat = ChatBoard(db, None, "Jeremy", room=("telegram", "-100111"))
+    try:
+        chat.handle("/topic new engine choice")
+    finally:
+        chat.close()
+
+    s = connect(db)
+    try:
+        mine = s.ensure_room("telegram", "-100111")
+        theirs = s.ensure_room("telegram", "-100222")
+        tid = int(s.topic("engine-choice")["id"])
+
+        assert s.topic_visible_in(tid, mine)
+        assert not s.topic_visible_in(tid, theirs), "the other room can see it"
+        assert [t["slug"] for t in s.topics_for_room(theirs)] == []
+    finally:
+        s.close()
+
+
+def test_a_meeting_opened_at_a_desk_belongs_to_everybody(tmp_path):
+    """Starting at the desk and following it on a phone is the workflow."""
+    from mooting.console import Console
+    from mooting.store import connect
+
+    db = _two_room_board(tmp_path)
+    c = Console(db, None, "Jeremy")
+    c.emit = lambda *_: None
+    try:
+        c.handle("/topic new a question at the desk")
+        tid = c.topic_id
+        assert c.store.topic(tid)["room_id"] is None
+        for chat in ("-100111", "-100222"):
+            assert c.store.topic_visible_in(
+                tid, c.store.ensure_room("telegram", chat))
+    finally:
+        c.store.close()
+
+
+def test_one_room_cannot_switch_into_another_rooms_meeting(tmp_path):
+    """Isolation that a remembered slug defeats is not isolation."""
+    from mooting.telegram import ChatBoard
+
+    db = _two_room_board(tmp_path)
+    a = ChatBoard(db, None, "Jeremy", room=("telegram", "-100111"))
+    try:
+        a.handle("/topic new private to room a")
+    finally:
+        a.close()
+
+    b = ChatBoard(db, None, "Jeremy", room=("telegram", "-100222"))
+    try:
+        out = b.handle("/topic switch private-to-room-a")
+        assert "no such topic" in out, out
+        assert b.topic is None
+        # and it is not offered in the list either
+        assert "private-to-room-a" not in b.handle("/topic list")
+    finally:
+        b.close()
+
+
+def test_the_pump_tells_a_room_only_about_its_own_meetings(tmp_path):
+    """The leak this closes: every event went to every paired chat.
+
+    Exercised through the same check the pump makes, rather than by faking
+    aiogram — the decision is `topic_visible_in`, and the loop only obeys it.
+    """
+    from mooting.store import connect
+    from mooting.telegram import ChatBoard, event_text
+
+    db = _two_room_board(tmp_path)
+    for chat, question in (("-100111", "engine choice"), ("-100222", "aircon")):
+        board = ChatBoard(db, None, "Jeremy", room=("telegram", chat))
+        try:
+            board.handle(f"/topic new {question}")
+        finally:
+            board.close()
+
+    s = connect(db)
+    try:
+        rooms = {c: s.ensure_room("telegram", c) for c in ("-100111", "-100222")}
+        s.post(int(s.topic("engine-choice")["id"]), "Santa", "Godot, and here is why",
+               count_turn=False)
+
+        delivered = {c: [] for c in rooms}
+        for ev in s.events_since(0, None):
+            text = event_text(s, ev)
+            if not text:
+                continue
+            for chat, rid in rooms.items():
+                if s.topic_visible_in(ev.topic_id, rid):
+                    delivered[chat].append(text)
+
+        assert any("Godot" in t for t in delivered["-100111"])
+        assert not any("Godot" in t for t in delivered["-100222"]), \
+            "the other room was told about a meeting that is not its own"
+    finally:
+        s.close()
+
+
+def test_topics_that_predate_rooms_stay_visible_everywhere(tmp_path):
+    """Nothing on an existing board should disappear when this lands."""
+    from mooting.store import connect
+
+    db = _two_room_board(tmp_path)
+    s = connect(db)
+    try:
+        tid = s.open_topic("older", "Older", "b", "Jeremy", seats=("Santa",))
+        assert s.topic(tid)["room_id"] is None
+        for chat in ("-100111", "-100222"):
+            assert s.topic_visible_in(tid, s.ensure_room("telegram", chat))
+    finally:
+        s.close()
+
+
+def test_the_account_running_the_bot_is_known_across_rooms(board):
+    """Pairing is per room, and that left the operator with nobody to ask.
+
+    Opening a group of your own meant sending `/pair` into a room where no
+    member existed yet, then going to a terminal to approve yourself. The one
+    question that is about the person rather than the room answers it.
+    """
+    board.pair_approve(board.pair_request("8770943593", "8770943593", "Jeremy"),
+                       "jeremy", "jeremy")
+
+    # The same Telegram account, seen in a room it has never been in.
+    assert board.seat_for_user("8770943593") == "jeremy"
+    # And nobody else is recognised this way.
+    assert board.seat_for_user("999999") is None
+
+
+def test_a_pending_request_does_not_make_somebody_known(board):
+    """Asking is not being approved, in any room."""
+    board.pair_request("-100999", "555", "A Stranger")
+    assert board.seat_for_user("555") is None
+
+
+def test_a_request_carries_a_handle_that_cannot_be_guessed(board):
+    """`1`, `2`, `3` invited `/pair approve 4` for a request nobody had seen."""
+    pid = board.pair_request("-100111", "42", "Someone")
+    row = board.pairing("-100111", "42")
+
+    assert row["ref"] and row["ref"] != str(pid)
+    assert len(row["ref"]) >= 6
+    second = board.pairing(
+        "-100111", "43") if board.pair_request("-100111", "43", "Other") else None
+    assert second["ref"] != row["ref"], "two requests share a handle"
+
+
+def test_one_room_cannot_answer_another_rooms_request(board):
+    """The hole the numbers invited: approving is a decision about who joins
+    *this* council, and nothing checked which room the request came from."""
+    board.pair_request("-100222", "77", "A Stranger")
+    theirs = board.pairing("-100222", "77")
+
+    # Reachable from the room it belongs to.
+    assert board.pairing_by_ref(theirs["ref"], chat_id="-100222") is not None
+    # And nowhere else.
+    assert board.pairing_by_ref(theirs["ref"], chat_id="-100111") is None
+    assert board.pairing_by_ref(str(theirs["id"]), chat_id="-100111") is None
+
+
+def test_listing_requests_shows_only_this_room(board):
+    """Listing every room's pending requests told whoever asked that other rooms
+    exist and who is trying to get into them."""
+    board.pair_request("-100111", "1", "Mine")
+    board.pair_request("-100222", "2", "Theirs")
+
+    here = board.pairings("pending", chat_id="-100111")
+    assert [r["display"] for r in here] == ["Mine"]
+    assert len(board.pairings("pending")) == 2, "the board still sees both"
+
+
+def test_handles_are_backfilled_onto_a_board_that_predates_them(board, tmp_path):
+    """An existing board has rows with no handle, and they must stay answerable."""
+    import sqlite3
+
+    from mooting.store import connect
+
+    board.pair_request("-100111", "42", "Someone")
+    path = board.path
+    board.close()
+
+    raw = sqlite3.connect(path)
+    raw.execute("UPDATE pairings SET ref = NULL")
+    raw.commit()
+    raw.close()
+
+    again = connect(path)                       # opening migrates
+    try:
+        row = again.pairing("-100111", "42")
+        assert row["ref"], "an older request was left with no handle"
+        assert again.pairing_by_ref(row["ref"], chat_id="-100111") is not None
+    finally:
+        again.close()
+
+
+def _guest_room(tmp_path):
+    """A host's board, with a guest let into one meeting."""
+    from mooting.store import connect
+
+    db = tmp_path / "board.db"
+    s = connect(db, init=True)
+    s.add_agent("Host", "human")
+    s.add_agent("Guest", "human")
+    s.add_agent("Santa", "claude", driver="spawn")
+    s.open_topic("theirs", "The host's meeting", "b", "Host",
+                 seats=("Host", "Guest", "Santa"))
+    s.close()
+    return db
+
+
+def test_a_guest_cannot_clear_the_board_from_a_chat(tmp_path):
+    """Letting somebody into one council handed them every council.
+
+    `/reset yes` had no identity check at all, and a paired guest is a human
+    seat like any other. There is no owner on the board to ask, so the gate is
+    the machine: whoever holds the file and the token.
+    """
+    from mooting.telegram import ChatBoard
+
+    db = _guest_room(tmp_path)
+    chat = ChatBoard(db, "theirs", "Guest", room=("telegram", "-100111"))
+    try:
+        out = chat.handle("/reset yes")
+        assert "at the machine" in out, out
+        assert chat.console.store.topics(), "a guest cleared the board"
+    finally:
+        chat.close()
+
+
+def test_the_board_can_still_be_cleared_at_the_machine(tmp_path):
+    from mooting.console import Console
+
+    db = _guest_room(tmp_path)
+    c = Console(db, "theirs", "Host")
+    c.emit = lambda *_: None
+    try:
+        c.handle("/reset yes")
+        assert c.store.topics() == []
+    finally:
+        c.store.close()
+
+
+def test_a_guest_cannot_delete_the_meeting_they_were_let_into(tmp_path):
+    from mooting.telegram import ChatBoard
+
+    db = _guest_room(tmp_path)
+    chat = ChatBoard(db, "theirs", "Guest", room=("telegram", "-100111"))
+    try:
+        out = chat.handle("/topic rm theirs yes")
+        assert "chairs" in out and "only they" in out, out
+        assert chat.console.store.topic("theirs") is not None
+    finally:
+        chat.close()
+
+
+def test_a_guest_cannot_unseat_anybody(tmp_path):
+    from mooting.telegram import ChatBoard
+
+    db = _guest_room(tmp_path)
+    chat = ChatBoard(db, "theirs", "Guest", room=("telegram", "-100111"))
+    try:
+        out = chat.handle("/seats rm Santa")
+        assert "chairs this meeting" in out, out
+        seats = {r["agent"] for r in
+                 chat.console.store.seats(chat.console.topic_id)}
+        assert "Santa" in seats, "a guest unseated an agent"
+    finally:
+        chat.close()
+
+
+def test_the_chair_can_still_remove_what_is_theirs(tmp_path):
+    """The guard is about who, not about making removal hard."""
+    from mooting.telegram import ChatBoard
+
+    db = _guest_room(tmp_path)
+    chat = ChatBoard(db, "theirs", "Host", room=("telegram", "-100111"))
+    try:
+        chat.handle("/seats rm Santa")
+        seats = {r["agent"] for r in
+                 chat.console.store.seats(chat.console.topic_id)}
+        assert "Santa" not in seats
+        chat.handle("/topic rm theirs yes")
+        assert chat.console.store.topics() == []
+    finally:
+        chat.close()
+
+
+def test_a_room_has_a_host_and_it_is_not_a_topics_chair(board):
+    """Two different things. A chair runs one meeting and can be handed over;
+    a host owns the room and decides who is let into it."""
+    board.add_agent("Guest", "human")
+    rid = board.ensure_room("telegram", "-100111")
+    assert board.room_host(rid) is None
+
+    assert board.claim_room(rid, "jeremy") == "jeremy"
+    # Claiming is once: a guest arriving later does not take the room.
+    assert board.claim_room(rid, "Guest") == "jeremy"
+    assert board.room_host(rid) == "jeremy"
+
+    # And a chair is per topic, assignable, and says nothing about the room.
+    tid = board.open_topic("t", "T", "b", "Guest", seats=("jeremy", "Guest"))
+    assert board.chair(tid) == "Guest"
+    assert board.room_host(rid) == "jeremy"
+
+
+def test_an_agent_cannot_host_a_room(board):
+    rid = board.ensure_room("telegram", "-100111")
+    with pytest.raises(NotAuthorised):
+        board.claim_room(rid, "santa")
+    assert board.room_host(rid) is None
+
+
+def test_a_guest_cannot_let_more_guests_in(tmp_path):
+    """The rule the removal guards were about, applied to the door.
+
+    Any paired member could approve a request, so somebody let into a council
+    could let in anybody else — which is the whole thing pairing exists to stop.
+    """
+    from mooting.store import connect
+
+    db = tmp_path / "board.db"
+    s = connect(db, init=True)
+    s.add_agent("Host", "human")
+    s.add_agent("Guest", "human")
+    rid = s.ensure_room("telegram", "-100111")
+    s.claim_room(rid, "Host")
+    try:
+        assert s.room_host(rid) == "Host"
+        # The check the chat and the button both make.
+        for presser, may in (("Host", True), ("Guest", False)):
+            assert (presser == s.room_host(rid)) is may
+    finally:
+        s.close()
+
+
+def test_owning_a_group_is_not_authority_over_somebody_elses_board(board):
+    """The hole: a stranger who knows the bot's name makes a group, adds it, and
+    is that group's creator. If creating a group were authority, every person
+    they added would be let onto a board that is not theirs -- and the first one
+    in could then hold the door for the rest.
+
+    The rule the join path applies: the person adding somebody must already hold
+    a seat here. Owning the group only says *which* seat is the host.
+    """
+    rid = board.ensure_room("telegram", "-100999")
+
+    # A stranger: not paired anywhere on this board.
+    added_by = board.seat_for_chat("-100999", "stranger")
+    assert added_by is None
+    # Which is the whole condition -- no seat, no auto-approval, whoever owns
+    # the group in Telegram.
+    assert not (added_by and True), "a stranger's invite was treated as a decision"
+    assert board.room_host(rid) is None, "a stranger took the room"
+
+
+def test_with_no_host_only_the_operator_answers_a_request(board):
+    """"Any paired member" let the first person through the door hold it open.
+
+    A room with no host has nobody established in it, so the fallback is the
+    person running the bot -- the only authority that does not depend on the
+    room being trustworthy.
+    """
+    board.add_agent("Guest", "human")
+    rid = board.ensure_room("telegram", "-100999")
+    operator = "jeremy"
+
+    answers = board.room_host(rid) or operator
+    assert answers == operator
+    for presser, may in ((operator, True), ("Guest", False), (None, False)):
+        assert (presser is not None and presser == answers) is may
+
+    # Once a host is established, it is theirs.
+    board.claim_room(rid, "Guest")
+    assert (board.room_host(rid) or operator) == "Guest"
+
+
+# ------------------------------------------------------------------- claiming
+#
+# Every earlier way of saying who owns a board was something a stranger could
+# produce: a name on the command line, being first to pair, or creating the
+# Telegram group. Reading the terminal the board lives on is not.
+
+
+def test_a_code_is_worth_one_use_and_then_nothing(board):
+    code = board.new_claim("jeremy")
+    assert board.redeem_claim(code) == "jeremy"
+    assert board.redeem_claim(code) is None, "a code worked twice"
+
+
+def test_a_wrong_or_stale_code_is_worth_nothing(board):
+    code = board.new_claim("jeremy")
+    assert board.redeem_claim("nope") is None
+    assert board.redeem_claim(code.upper()) == "jeremy", "case should not matter"
+
+    board.new_claim("jeremy", ttl_s=-1)
+    assert board.redeem_claim(board.setting("claim.code") or "x") is None
+    assert board.setting("claim.code") is None, "a stale code was left lying about"
+
+
+def test_a_code_cannot_hand_out_an_agent_seat(board):
+    with pytest.raises(NotAuthorised):
+        board.new_claim("santa")
+
+
+def test_identity_is_the_account_not_the_name(board):
+    """A name in a message is a claim anybody can make."""
+    board.add_agent("Guest", "human")
+    board.bind_identity("jeremy", "8770943593")
+
+    assert board.seat_for_identity("8770943593") == "jeremy"
+    assert board.seat_for_identity("999") is None
+    # And it outranks anything inferred from pairing rows.
+    assert board.seat_for_user("8770943593") == "jeremy"
+
+    # One account, one seat: rebinding moves it rather than duplicating it.
+    board.bind_identity("Guest", "8770943593")
+    assert board.seat_for_identity("8770943593") == "Guest"
+    assert board.q1("SELECT tg_user_id FROM agents WHERE name='jeremy'")["tg_user_id"] is None
+
+
+def test_an_unknown_chat_is_not_a_chat_this_bot_works_in(board):
+    """Default deny. Without an allowlist the bot answered anywhere it was added,
+    so anybody who knew its name could stand up a group and talk to this board.
+
+    This is the check `allowed` makes when no `--chat` was given.
+    """
+    assert board.pairings("approved", chat_id="-100999") == []
+
+    board.pair_approve(board.pair_request("-100111", "42", "Jeremy"),
+                       "jeremy", "jeremy")
+    assert board.pairings("approved", chat_id="-100111") != []
+    assert board.pairings("approved", chat_id="-100999") == [], \
+        "an unknown chat looked known"
+
+
+def test_a_room_is_not_told_what_it_just_said(board):
+    """Every message appeared twice: once from the person, once from the bot.
+
+    Telegram already put their words in the room. The pump sent every message
+    event to every listening chat, including the one it came from.
+    """
+    board.pair_approve(board.pair_request("-100111", "42", "Jeremy"),
+                       "jeremy", "jeremy")
+    seats_here = {r["seat"] for r in board.pairings("approved", chat_id="-100111")}
+    assert seats_here == {"jeremy"}
+
+    tid = board.open_topic("t", "T", "b", "jeremy", seats=("jeremy", "santa"))
+    board.post(tid, "jeremy", "what about the roof", count_turn=False)
+    board.post(tid, "santa", "the roof is the expensive half", count_turn=False)
+
+    # What the pump would send to that chat: the seat's answer, not the echo.
+    delivered = [e.actor for e in board.events_since(0, tid)
+                 if e.kind == "message" and e.actor not in seats_here]
+    assert "santa" in delivered
+    assert "jeremy" not in delivered, "the room was sent its own message back"
+
+
+def test_another_rooms_person_is_still_heard(board):
+    """The rule is "already in this room", not "is a person"."""
+    board.add_agent("ege", "human")
+    board.pair_approve(board.pair_request("-100111", "42", "Jeremy"),
+                       "jeremy", "jeremy")
+    tid = board.open_topic("t", "T", "b", "jeremy", seats=("jeremy", "ege", "santa"))
+    board.post(tid, "ege", "from the other chat", count_turn=False)
+
+    seats_here = {r["seat"] for r in board.pairings("approved", chat_id="-100111")}
+    delivered = [e.actor for e in board.events_since(0, tid)
+                 if e.kind == "message" and e.actor not in seats_here]
+    assert "ege" in delivered, "somebody outside this room went unheard"
+
+
+def test_each_seat_carries_a_mark_and_keeps_it(board):
+    """A chat has no colour, so a seat gets a mark. Scanning for who said what
+    should be a glance, which is what the full-screen view uses colour for."""
+    from mooting.telegram import mark_for
+
+    board.add_agent("kevin", "agy", driver="spawn")
+    first = {n: mark_for(board, n) for n in ("jeremy", "santa", "kevin")}
+
+    assert len(set(first.values())) == 3, "two seats share a mark"
+    assert mark_for(board, "santa") == first["santa"], "a mark moved on its own"
+    assert mark_for(board, "nobody") == ""
+
+
+def test_a_person_whose_account_is_known_is_really_mentioned(board):
+    """Being asked a question and finding out later are different things."""
+    from mooting.telegram import with_mentions
+
+    board.bind_identity("jeremy", "8770943593")
+
+    out = with_mentions(board, "@jeremy which rooms?")
+    assert 'tg://user?id=8770943593' in out
+    assert ">jeremy</a>" in out
+
+
+def test_a_name_with_no_account_is_left_as_written(board):
+    """Half a mention is worse than none: a broken link reads as a bug."""
+    from mooting.telegram import with_mentions
+
+    assert with_mentions(board, "@santa what about it") == "@santa what about it"
+    assert with_mentions(board, "no names here") == "no names here"
+    # And an address that is not a seat is not touched either.
+    assert "@nobody" in with_mentions(board, "ask @nobody")
+
+
+def test_a_command_addressed_to_this_bot_is_still_a_command():
+    """A group can hold several bots, so Telegram addresses a tapped command to
+    one of them: `/seats` arrives as `/seats@jeremy_mooting_bot`.
+
+    Commands with their own handler had the mention stripped for them and
+    worked. Everything through the shared dispatch arrived with it attached and
+    came back "unknown /seats@jeremy_mooting_bot" — invisible in a one-to-one
+    chat, where Telegram appends nothing, which is where this was all tested.
+    """
+    from mooting.telegram import addressed_here
+
+    us = "jeremy_mooting_bot"
+    assert addressed_here("/seats", us) == "/seats"
+    assert addressed_here("/seats@jeremy_mooting_bot", us) == "/seats"
+    assert addressed_here("/topic@jeremy_mooting_bot new a question", us) == \
+        "/topic new a question"
+    assert addressed_here("/run@JEREMY_MOOTING_BOT", us) == "/run", "case matters not"
+    assert addressed_here("plain talk", us) == "plain talk"
+
+
+def test_another_bots_command_is_not_ours_to_answer():
+    from mooting.telegram import addressed_here
+
+    assert addressed_here("/seats@someone_else_bot", "jeremy_mooting_bot") is None
+
+
+def test_nothing_is_stripped_before_the_name_is_known():
+    """Safer direction: a command nobody claims beats one answered twice."""
+    from mooting.telegram import addressed_here
+
+    assert addressed_here("/seats@any_bot", None) == "/seats"
+
+
+# ------------------------------------------------------- answers, not typing
+#
+# Typing on a phone is the cost this surface exists to avoid. A command whose
+# answers are a short fixed list should offer them rather than ask.
+
+
+def test_a_bare_command_asks_for_its_chooser():
+    from mooting.telegram import wants_choices
+
+    for command, which in (("/effort", "effort"), ("/rounds", "rounds"),
+                           ("/nudge", "nudge"), ("/chair", "chair"),
+                           ("/EFFORT", "effort")):
+        assert wants_choices(command) == which, command
+
+
+def test_a_command_that_already_has_its_answer_is_left_alone():
+    from mooting.telegram import wants_choices
+
+    for command in ("/effort high", "/rounds 5", "/nudge Santa", "/topics", "talk"):
+        assert wants_choices(command) is None, command
+
+
+def test_a_choice_carries_what_it_sets():
+    from mooting.telegram import parse_set, set_callback
+
+    for what, value in (("effort", "low"), ("rounds", "3"), ("chair", "Jeremy"),
+                        ("wake", "Santa")):
+        data = set_callback(what, value)
+        assert parse_set(data) == (what, value)
+        assert len(data.encode("utf-8")) <= 64
+
+    assert parse_set("pick:3") is None
+    assert parse_set("set:bogus:x") is None, "an unknown setting is not ours"
+    assert parse_set("set:effort:") is None, "an empty value is not a choice"
+
+
+def test_the_standing_keyboard_is_the_things_done_most_often():
+    """Two rows of three: more squeezes the chat off a phone screen."""
+    from mooting.telegram import DESK
+
+    assert len(DESK) == 2 and all(len(row) == 3 for row in DESK)
+    flat = [b for row in DESK for b in row]
+    assert flat == sorted(set(flat), key=flat.index), "a button appears twice"
+    for label in flat:
+        assert label.startswith("/"), label

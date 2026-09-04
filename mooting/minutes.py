@@ -46,7 +46,8 @@ def _fmt_when(stamp: str) -> str:
 def render(store: Store, topic_id: int, transcript: bool = True) -> str:
     t = store.topic(topic_id)
     seats = store.seats(topic_id)
-    msgs = store.transcript(topic_id)
+    # Minutes are the whole record, so no window: the default stops at 500.
+    msgs = store.transcript(topic_id, limit=None)
     said = [m for m in msgs if not _is_noise(m)]
     proposals = store.proposals(topic_id)
     tasks = store.tasks(topic_id)

@@ -84,6 +84,21 @@ should be reachable after the fact needs an explicit command — that is why
 so the live working board committed itself to a public repo. If this project is
 ever renamed again, grep `.gitignore` first.
 
+**A seat reads its working directory before it reads your prompt.** A coding
+CLI loads `CLAUDE.md`, `AGENTS.md` or its own per-directory memory from wherever
+it runs. Point a seat at a project and that project's notes join the council: a
+board asked "how can I make money" answered with the chair's age, city and
+profession, none of which was anywhere on the board. `cwd` is the seat's context
+and should say nothing; `repo` is what work topics branch from. `mooting doctor`
+reports a seat pointed somewhere with notes in it.
+
+**Output was reconfigured to UTF-8 and input was not.** `cli.py` set stdout and
+stderr and left `sys.stdin` on the locale codec, so piped UTF-8 came back through
+cp1252: bytes with a mapping became mojibake stored without complaint, and bytes
+without one became lone surrogates that failed at the SQLite write three layers
+below the mistake. Both sides now, and `clean_text` refuses surrogates where
+text enters the board rather than where it is finally written.
+
 **Tests that chdir still write to the real home directory.** `default_db_path`
 centralises boards under `~/.mooting/boards`, so a test that only monkeypatches
 the cwd leaves a board behind every run. Patch `mooting.store.HOME_BOARDS` too.
@@ -111,6 +126,26 @@ turn" is one measurement on one prompt on one machine and says so.
 
 **Commits.** Present tense, lower case, one line saying what changed and why it
 mattered. The body is for the failure being fixed, not a diff summary.
+
+**Answering the person you are working with.** Show it, then say one line about
+it. A wall of prose describing behaviour is harder to check than the behaviour:
+
+```
+/team Santa Sam   →  team here: Santa, Sam — new meetings start with them
+/topic new x      →  seats: Santa, Sam, Jeremy
+```
+
+Rules, in order of how much they matter:
+
+1. **Lead with the example.** A command and its output, a before/after table, or
+   the actual error text. Prose is the caption, not the substance.
+2. **Answer the question that was asked, and stop.** Related work is one line at
+   the end, or the next message.
+3. **One screen.** If it does not fit, the parts that do not fit are a separate
+   message the person can ask for.
+4. **No section headings for three sentences.** They make a short answer look
+   like a report.
+5. **Say the number.** "30 wakes down to 6" beats "significantly fewer wakes".
 
 ## Working here
 

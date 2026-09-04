@@ -89,3 +89,20 @@ reachability empirically rather than trusting that a flag did what its name says
 seat. Use it for one machine's problems — a broken plugin to switch off, a flag a
 newer build needs — so the adapters stay general instead of accumulating one
 person's environment.
+
+## What each CLI reports about cost
+
+Only the vendor knows what came off your subscription, so `/usage` shows what
+the CLI itself said and nothing where it said nothing. A seat that reports
+nothing is unmeasured, not free.
+
+| seat | reports tokens and cost |
+|---|---|
+| `claude` | yes — runs with `--output-format json`, which carries both |
+| `agy` | runs with `--output-format json`; whether it carries the numbers is measured, not assumed |
+| `codex` | no — `--json` silently defeats `--approve-for-me`, so it is deliberately not passed |
+| `copilot` | no structured output requested |
+| `gemini` | no structured output requested |
+
+`mooting doctor` answers it for your machine rather than from this table: it
+already spends one real turn per seat, and now says what that turn reported.

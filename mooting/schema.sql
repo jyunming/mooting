@@ -19,6 +19,10 @@ CREATE TABLE IF NOT EXISTS agents (
     -- they read the board themselves". See docs/DRIVERS.md for why this is per-CLI.
     driver      TEXT,                       -- stdio_json|acp|spawn|none
     driver_cfg  TEXT NOT NULL DEFAULT '{}', -- JSON: cwd, model, extra argv
+    -- The chat account this seat belongs to, once somebody has proved they hold
+    -- it. A name in a message is a claim anybody can make; this is the account
+    -- that redeemed a code only a person at the machine could read.
+    tg_user_id  TEXT,
     enabled     INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -42,6 +46,15 @@ CREATE TABLE IF NOT EXISTS topics (
     max_rounds  INTEGER NOT NULL DEFAULT 3,
     round       INTEGER NOT NULL DEFAULT 0,
     opened_by   TEXT NOT NULL,
+    -- The room this meeting belongs to, when it was opened in one. NULL means
+    -- it belongs to everybody: a topic opened at a terminal should still be
+    -- readable from a phone, which is the workflow. A topic opened in a chat
+    -- belongs to that chat, which is what keeps two teams apart on one board.
+    room_id     INTEGER REFERENCES rooms(id),
+    -- Who signs off here. Anybody may call a meeting and argue in it; one person
+    -- closes its proposals and concludes it. NULL means whoever opened it, so a
+    -- topic always has a chair without anyone having to name one.
+    chair       TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     closed_at   TEXT
 );
@@ -114,6 +127,11 @@ CREATE TABLE IF NOT EXISTS events (
     kind        TEXT NOT NULL,              -- message|proposal|decision|seat|topic
     actor       TEXT NOT NULL,
     payload     TEXT NOT NULL DEFAULT '{}', -- JSON
+    -- Each event chained to the one before it. The board records who signed off;
+    -- this is what makes that record answer back when somebody edits it, rather
+    -- than merely stating it. NULL on rows written before the chain began, which
+    -- is reported as such: history cannot be made tamper-evident afterwards.
+    hash        TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_events_topic ON events(topic_id, id);
@@ -127,6 +145,13 @@ CREATE TABLE IF NOT EXISTS wakes (
     agent       TEXT NOT NULL,
     outcome     TEXT NOT NULL,              -- ok|timeout|error|refused
     detail      TEXT NOT NULL DEFAULT '',
+    -- What the CLI itself said this turn cost. Only some report it, so NULL
+    -- means "not told", never "free". This is the vendor's own count of what
+    -- came off your subscription; the wake row beside it is only how often we
+    -- asked.
+    tokens_in   INTEGER,
+    tokens_out  INTEGER,
+    cost_usd    REAL,
     started_at  TEXT NOT NULL DEFAULT (datetime('now')),
     ended_at    TEXT
 );
@@ -174,6 +199,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- blocked  : worker cannot proceed and said why
     -- accepted / rejected : the manager's verdict
     status      TEXT NOT NULL DEFAULT 'draft',
+    -- The task this one must follow. A manager that works out two tasks touch
+    -- the same files -- exactly the reasoning you want from it -- could only
+    -- write that down in prose, where nothing read it.
+    depends_on  INTEGER REFERENCES tasks(id),
     proposal_id INTEGER REFERENCES proposals(id),   -- the plan gate
     branch      TEXT,                       -- work lands here, never on main
     worktree    TEXT,                       -- isolated checkout for this task
@@ -215,12 +244,49 @@ CREATE TABLE IF NOT EXISTS pairings (
     chat_id     TEXT NOT NULL,              -- the room; allowlisted separately
     user_id     TEXT NOT NULL,              -- the person
     display     TEXT NOT NULL DEFAULT '',   -- what they call themselves there
+    -- What a person types to answer this. A small integer invites `/pair approve
+    -- 4` for a request nobody has seen, and the row it lands on may belong to
+    -- another room entirely.
+    ref         TEXT,
     seat        TEXT REFERENCES agents(name),
     status      TEXT NOT NULL DEFAULT 'pending',   -- pending | approved | denied
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(channel, chat_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_pairings_status ON pairings(status);
+
+-- Where a council meets: a chat, or the board itself when the work is happening
+-- at a terminal. A room owns a roster, so a meeting opened there starts with the
+-- right seats instead of being seated by hand every time -- and two groups on
+-- one board stop sharing a team by accident.
+CREATE TABLE IF NOT EXISTS rooms (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel     TEXT NOT NULL DEFAULT 'telegram',   -- telegram | local
+    chat_id     TEXT NOT NULL,
+    label       TEXT NOT NULL DEFAULT '',
+    -- Whose room this is. Distinct from a topic's chair: a chair runs one
+    -- meeting and can be handed over, while the host owns the room itself and
+    -- decides who is let into it. The first person paired here.
+    host        TEXT,
+    -- Where this room is standing. Held on the board rather than in the bot,
+    -- because a bot restart forgot it and the room then answered every command
+    -- with the topic list instead of doing what was asked.
+    topic       TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(channel, chat_id)
+);
+
+-- The room's team. Seating a meeting copies this; changing that meeting's seats
+-- does not come back here, because a seat added for one question should not
+-- quietly join every later one. Redefining the team is its own gesture.
+CREATE TABLE IF NOT EXISTS room_seats (
+    room_id     INTEGER NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+    agent       TEXT NOT NULL REFERENCES agents(name),
+    -- Kept explicitly: a roster is written in an order somebody chose, and
+    -- `added_at` cannot separate two seats set in the same second.
+    position    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (room_id, agent)
+);
 
 -- Small facts about this board that are not about a topic: a bot token, a
 -- default, a channel setting. Kept here rather than in a config file so a board

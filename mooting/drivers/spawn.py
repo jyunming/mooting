@@ -152,6 +152,7 @@ class SpawnDriver(Driver):
             ok=True,
             cli_session=self.extract_session(out, err, proposed) if self.stateful else None,
             tail=tail,
+            usage=self.usage_from(out, err),
         )
 
 
@@ -329,7 +330,13 @@ class CopilotDriver(SpawnDriver):
         fails the run. Setting a model on the seat is the user saying they know
         it takes one.
         """
-        if seat.effort and seat.cfg.get("model"):
+        # `auto` named explicitly is the same model as no model, and rejects the
+        # flag the same way. It is also a reasonable thing to ask for: it is
+        # Copilot's own default and the cheap one on a metered plan -- 0.25
+        # premium requests against 27 for a frontier model on one measured
+        # prompt. An effort setting is a preference, so an unsupported one is
+        # dropped rather than allowed to cost a seat its turn.
+        if seat.effort and seat.cfg.get("model") not in (None, "", "auto"):
             return ["--effort", seat.effort]
         return []
 

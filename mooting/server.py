@@ -29,13 +29,19 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import secrets
+import uuid
 from pathlib import Path
 
 from .store import (NotAuthorised, Store, StoreError, agenda_points,
                     agenda_text, connect, split_points)
 
 log = logging.getLogger("mooting.server")
+
+#: This process, to the board's drive claim. Two servers on one board are two
+#: processes, so the in-process task table cannot be what decides.
+SESSION = f"serve-{os.getpid()}-{uuid.uuid4().hex[:6]}"
 
 #: Typed application keys; see build_app.
 try:
@@ -180,7 +186,7 @@ def build_app(db: Path | str | None, token: str, *, human: str,
         approve = bool(body["approve"])
         why = (body.get("why") or "").strip()
         try:
-            s.decide(pid, who, approve=approve, rationale=why)
+            s.decide(pid, who, approve=approve, rationale=why, via="http")
         except NotAuthorised as exc:
             return web.json_response({"error": str(exc)}, status=403)
         except StoreError as exc:
@@ -210,7 +216,8 @@ def build_app(db: Path | str | None, token: str, *, human: str,
             return web.json_response({"error": str(exc)}, status=404)
         tid = int(t["id"])
         out = _topic_json(s, t)
-        out["messages"] = [_message_json(m) for m in s.transcript(tid)[-100:]]
+        out["messages"] = [_message_json(m)
+                           for m in s.transcript(tid, limit=100, newest=True)]
         out["proposals"] = [
             {"id": p["id"], "title": p["title"], "body": p["body"],
              "author": p["author"], "status": p["status"]}
@@ -333,7 +340,7 @@ def build_app(db: Path | str | None, token: str, *, human: str,
                     c.execute("UPDATE topics SET effort = ? WHERE id = ?",
                               (patch["effort"], tid))
             if "rounds" in patch:
-                s.set_rounds(tid, int(patch["rounds"]))
+                s.set_rounds(tid, int(patch["rounds"]), who)
         except (StoreError, ValueError) as exc:
             return web.json_response({"error": str(exc)}, status=400)
         return web.json_response(_topic_json(s, s.topic(tid)))
@@ -377,6 +384,13 @@ def build_app(db: Path | str | None, token: str, *, human: str,
         if tid in running and not running[tid].done():
             return web.json_response({"error": "already running",
                                       "topic": t["slug"]}, status=409)
+        # `running` is this process only. A second `mooting serve` on the same
+        # board would pass that check and drive the same topic, so the claim that
+        # actually decides is the one on the board.
+        holder = s.take_drive(tid, SESSION)
+        if holder is not None:
+            return web.json_response({"error": "already being driven by another session",
+                                      "topic": t["slug"]}, status=409)
 
         make = request.app[SUPERVISOR]
         sup = make(s, tid)
@@ -389,6 +403,8 @@ def build_app(db: Path | str | None, token: str, *, human: str,
                 raise
             except Exception:
                 log.exception("council on %s failed", t["slug"])
+            finally:
+                s.release_drive(tid, SESSION)
 
         running[tid] = asyncio.create_task(drive())
         return web.json_response({"running": t["slug"]})

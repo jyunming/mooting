@@ -51,6 +51,25 @@ class Probe:
         return f"[{mark}] {self.agent:<12} {self.kind:<9} {self.detail}{sess}"
 
 
+def usage_line(usage: dict) -> str:
+    """What this CLI told us the probe turn cost, in one line.
+
+    Only some report it, and the ones that do not are not free -- they are
+    unmeasured. Saying which is which is the whole point: `doctor` already
+    spends one real turn per seat, so it is the one place that can answer this
+    without guessing from documentation.
+    """
+    if not usage:
+        return "reports no usage"
+    bits = []
+    if usage.get("tokens_in") or usage.get("tokens_out"):
+        bits.append(f"{int(usage.get('tokens_in') or 0):,} in / "
+                    f"{int(usage.get('tokens_out') or 0):,} out")
+    if usage.get("cost_usd"):
+        bits.append(f"${usage['cost_usd']:.4f}")
+    return "reports " + ", ".join(bits)
+
+
 async def probe_agent(board: Store, agent: str, kind: str, timeout: float) -> Probe:
     cls = DRIVER_CLASSES.get(kind)
     if cls is None:
@@ -82,7 +101,9 @@ async def probe_agent(board: Store, agent: str, kind: str, timeout: float) -> Pr
     if posted:
         if result.cli_session:
             board.set_cli_session(tid, agent, result.cli_session)
-        return Probe(agent, kind, True, "reached the board", result.cli_session, driver.stateful)
+        return Probe(agent, kind, True,
+                     f"reached the board; {usage_line(result.usage)}",
+                     result.cli_session, driver.stateful)
 
     if "NO-MOOTING-TOOLS" in (result.tail or ""):
         return Probe(agent, kind, False, _no_tools_hint(kind, agent))
@@ -111,6 +132,107 @@ def _no_tools_hint(kind: str, agent: str) -> str:
     return "MCP server not visible; check the per-run --mcp-config injection."
 
 
+#: What a coding CLI reads from its working directory before it sees anything
+#: this project wrote. Names, not contents: finding one is the finding.
+CONTEXT_FILES = ("CLAUDE.md", "AGENTS.md", "GEMINI.md", ".cursorrules",
+                 ".github/copilot-instructions.md")
+
+#: Per-directory memory a CLI keeps for itself, keyed by the directory it ran in.
+MEMORY_DIRS = (".claude/projects", ".gemini/tmp", ".codex/sessions")
+
+
+def context_leaks(cwd: str) -> list[str]:
+    """What a seat pointed at `cwd` would read before the council's own prompt.
+
+    Found live: a council asked "how can I make money" answered with the chair's
+    age, city and profession. None of it was on the board. The seat was pointed
+    at a working directory, and its CLI had four memory files there.
+    """
+    import os
+    from pathlib import Path
+
+    found = []
+    here = Path(cwd)
+    for folder in [here, *here.parents]:
+        for name in CONTEXT_FILES:
+            if (folder / name).is_file():
+                found.append(str(folder / name))
+        if folder == Path(folder.anchor):
+            break
+
+    # The CLI's own per-directory memory, which is keyed by the path and so is
+    # invisible from inside the directory itself.
+    # `C:\dev` is stored as `C--dev`: every separator becomes a dash, the colon
+    # included. Matched exactly, because `C--dev` and `C--dev-Something` are
+    # different projects and warning about the wrong one is noise.
+    slug = "".join("-" if ch in ':\/' else ch for ch in str(here))
+    for base in MEMORY_DIRS:
+        candidate = Path.home() / base / slug
+        if candidate.is_dir() and any(candidate.rglob("*.md")):
+            found.append(str(candidate))
+    return found
+
+
+def report_record(board: Store) -> int:
+    """Whether the record still says what it said. Returns the fault count.
+
+    Three things, because tampering has three places to hide: the chain of
+    events, the message bodies they announced, and the verdict column beside a
+    proposal. An intact chain with a rewritten `decided_by` is the failure this
+    project would care about most, and checking only the chain would miss it.
+    """
+    chain = board.verify_chain()
+    bodies = board.verify_bodies()
+    decisions = board.verify_decisions()
+
+    if chain["unchained"]:
+        print(f"  {chain['unchained']} event(s) predate the chain and cannot be "
+              f"checked; history is not made tamper-evident afterwards")
+    if chain["ok"]:
+        print(f"  chain     {chain['checked']} event(s) verify")
+    else:
+        print(f"  chain     BREAKS at event {chain['broken_at']} "
+              f"({chain['checked']} checked)")
+    if bodies:
+        print(f"  messages  {len(bodies)} no longer match what was announced: "
+              f"{bodies[:5]}")
+    else:
+        print("  messages  every body matches the event that announced it")
+    for bad in decisions:
+        print(f"  sign-off  proposal {bad['proposal_id']} records "
+              f"{bad['found']!r}; the event says {bad['expected']!r}")
+    if not decisions:
+        print("  sign-off  every decision matches the event that recorded it")
+    return (0 if chain["ok"] else 1) + len(bodies) + len(decisions)
+
+
+def report_context(board: Store, seats) -> int:
+    """Warn about seats that would read somebody's notes into a council."""
+    import json
+
+    hits = 0
+    for a in seats:
+        cwd = json.loads(a["driver_cfg"]).get("cwd")
+        if not cwd:
+            continue
+        leaks = context_leaks(cwd)
+        if not leaks:
+            continue
+        hits += 1
+        print(f"  {a['name']}: reads {len(leaks)} file(s) from {cwd} before this "
+              f"council's own prompt")
+        for path in leaks[:3]:
+            print(f"      {path}")
+        if len(leaks) > 3:
+            print(f"      … and {len(leaks) - 3} more")
+    if hits:
+        print("\n  A deliberating seat should sit in a directory that says nothing.")
+        print("  Point it somewhere empty, and name the repository separately:")
+        print("      mooting agents add <seat> <kind> --cwd <empty dir> "
+              "--repo <your project>")
+    return hits
+
+
 async def run_doctor(board: Store, only: str | None = None, timeout: float = 180.0) -> int:
     wanted = {s.strip() for s in only.split(",")} if only else None
     seats = [a for a in board.agents()
@@ -121,6 +243,12 @@ async def run_doctor(board: Store, only: str | None = None, timeout: float = 180
         return 1
 
     print(f"board: {board.path}")
+    # Before spending a turn: a seat that reads somebody's notes is wrong in a
+    # way no probe would show, because the wake succeeds and the answer is good.
+    if report_context(board, seats):
+        print()
+    faults = report_record(board)
+    print()
     print(f"probing {len(seats)} seat(s); each spends one real turn on that CLI.\n")
 
     # Sequential on purpose: a parallel probe makes a rate-limit look like a bug.
@@ -136,4 +264,6 @@ async def run_doctor(board: Store, only: str | None = None, timeout: float = 180
         print("and the supervisor records the failed wake rather than stalling the topic.")
     else:
         print(f"all {len(probes)} seat(s) reached the board.")
-    return 1 if failed else 0
+    if faults:
+        print(f"and the record does not verify: {faults} fault(s) above.")
+    return 1 if (failed or faults) else 0

@@ -34,14 +34,20 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import os
 import pathlib
 import re
 import shutil
 import sys
 import time
+import uuid
 from dataclasses import dataclass, field
 
 log = logging.getLogger("mooting.telegram")
+
+#: This bot process, to the board's drive claim. The `running` table below is
+#: this process only, and a board can have a bot and a console on it at once.
+SESSION = f"chat-{os.getpid()}-{uuid.uuid4().hex[:6]}"
 
 #: Telegram hard ceiling for one message.
 LIMIT = 4096
@@ -235,9 +241,16 @@ class ChatBoard:
     this is where that pays.
     """
 
-    def __init__(self, db, topic, me: str):
+    def __init__(self, db, topic, me: str, room: tuple[str, str] | None = None):
         from .console import Console
-        self.console = Console(db, topic, me)
+        from .store import StoreError
+        try:
+            self.console = Console(db, topic, me, room=room)
+        except StoreError:
+            # Second line for the same failure `topic_here` guards: a session
+            # with no topic still takes `/topic new`, and one that cannot be
+            # built takes nothing at all.
+            self.console = Console(db, None, me, room=room)
         self.console.auto = False        # the chat drives explicitly, with /run
         self.lines: list[str] = []
         self.console.emit = self.lines.append
@@ -276,6 +289,8 @@ HELP = (
     "<b>talk</b>\n"
     "  any message posts as you, and answers anything asked of you\n"
     "  <code>@Santa what about the windows?</code> asks one seat\n\n"
+    "<b>move around</b>\n"
+    "  <code>/topics</code> — every council as buttons; tap one to come here\n\n"
     "<b>run it</b>\n"
     "  <code>/topic new should we cap retries?</code>\n"
     "  <code>/topic agenda cap; jitter; who owns the runbook</code>\n"
@@ -296,16 +311,54 @@ HELP = (
 #: somebody who has not read any of this.
 MENU = [
     ("pair", "join this council, or approve someone who asked"),
-    ("topic", "new <question> · agenda <a; b> · switch <slug> · list"),
+    ("topics", "every council, as buttons — tap one to move this chat to it"),
+    ("topic", "new <question> · agenda <a; b> · chair <name> · list"),
+    ("seats", "who is here, and how many turns they have left"),
+    ("team", "the seats a new meeting here starts with; `team <a> <b>` sets it"),
+    ("rooms", "this room: its team, its topic, and its chat id"),
+    ("usage", "what each seat has spent; `usage hour` for the last hour"),
+    ("me", "<name> — what the council calls you"),
     ("run", "wake the seats and hold a round"),
     ("stop", "stop after the turn in flight"),
-    ("seats", "who is here, and how many turns they have left"),
+    ("nudge", "<seat> — wake one of them by hand"),
+    ("effort", "low · medium · high — how long they think before answering"),
+    ("rounds", "<n> — grant the council more rounds on this topic"),
     ("proposals", "what is waiting on your sign-off"),
     ("asks", "questions the council has put to you"),
+    ("tasks", "the work plan and where each task has got to"),
     ("attach", "feed a document to the council"),
+    ("show", "<id> — a message in full, however far back it scrolled"),
     ("minutes", "the meeting as a file; `minutes decisions` for the decisions"),
+    ("conclude", "<closing words> — close the meeting and write it up"),
+    ("reopen", "resume a meeting you concluded"),
     ("help", "all of the above, with examples"),
 ]
+
+#: Always above the keyboard, so the things done most often are one tap and
+#: never a menu. Two rows of three: more than that and the chat is squeezed off
+#: a phone screen, which costs more than it saves.
+DESK = (("/run", "/stop", "/proposals"),
+        ("/topics", "/seats", "/usage"))
+
+
+def desk_keyboard():
+    """The standing set of actions, as a keyboard that does not go away."""
+    from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=label) for label in row] for row in DESK],
+        resize_keyboard=True, is_persistent=True,
+        input_field_placeholder="say something to the council")
+
+
+#: Deliberately absent from the menu, though both still work when typed.
+#: `reset` clears every topic on the board and must not be one tap from a thumb
+#: — it has already been run by accident here. `capability` hands a seat the
+#: right to edit files, which is the one escalation in this project and should
+#: be a considered gesture rather than a menu item. `approve` and `reject` are
+#: absent for a different reason: the buttons on a proposal carry its id, and
+#: typing `/approve 3` from memory is how a sign-off lands on the wrong one.
+OFF_MENU = ("reset", "capability", "approve", "reject", "quit")
 
 
 def explain_start_failure(exc) -> list[str] | None:
@@ -370,6 +423,141 @@ def proposal_ref(text: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+#: Switching topics is the other gesture a thumb gets wrong. `/topic switch
+#: <slug>` asks somebody to retype an identifier from memory on a phone
+#: keyboard, and a near miss moves the whole room somewhere nobody meant.
+PICK_PREFIX = "pick"
+
+
+def pick_callback(topic_id: int) -> str:
+    data = f"{PICK_PREFIX}:{int(topic_id)}"
+    if len(data.encode("utf-8")) > 64:
+        raise ValueError("callback_data over Telegram's 64-byte limit")
+    return data
+
+
+def parse_pick(data: str) -> int | None:
+    """Topic id behind a picker button, or None if this is not one of ours."""
+    parts = (data or "").split(":")
+    if len(parts) != 2 or parts[0] != PICK_PREFIX or not parts[1].isdigit():
+        return None
+    return int(parts[1])
+
+
+def addressed_here(text: str, username: str | None) -> str | None:
+    """The command with our own `@mention` removed, or None if it is not ours.
+
+    A group can hold several bots, so Telegram addresses a tapped command to one
+    of them: `/seats` becomes `/seats@jeremy_mooting_bot`. Commands with their
+    own aiogram handler had the mention stripped for them and worked; everything
+    that goes through the shared dispatch arrived with it attached and came back
+    "unknown /seats@jeremy_mooting_bot". Invisible in a one-to-one chat, where
+    Telegram appends nothing, which is where all of this was tested.
+    """
+    body = (text or "").strip()
+    if not body.startswith("/"):
+        return body
+    head, sep, rest = body.partition(" ")
+    name, at, target = head.partition("@")
+    if not at:
+        return body
+    if username and target.lower() != username.lower():
+        return None                     # somebody else's bot was asked
+    return f"{name}{sep}{rest}" if sep else name
+
+
+def wants_picker(text: str) -> bool:
+    """`/topic` or `/topics` with nothing after it.
+
+    A verb after it still means what it always did, so `/topic new ...` and
+    `/topic agenda ...` keep working and go to the same console dispatch as
+    every other command.
+    """
+    return bool(re.fullmatch(r"/topics?(?:@\S+)?", (text or "").strip(), re.I))
+
+
+#: One topic per row: a thumb misses a shared row, and switching to the wrong
+#: council is the mistake this exists to prevent.
+PICKER_LIMIT = 12
+
+
+def picker_rows(topics, current: str | None) -> list[tuple[str, int]]:
+    """`(button label, topic id)` for a tap-to-switch list.
+
+    Pure, so it can be tested without faking aiogram.
+    """
+    marks = {"paused": "⏸", "resolved": "✓", "aborted": "✕"}
+    rows = []
+    for t in topics[:PICKER_LIMIT]:
+        here = "● " if t["slug"] == current else ""
+        title = " ".join((t["title"] or t["slug"]).split())
+        if len(title) > 34:
+            title = title[:34].rsplit(" ", 1)[0] + "…"
+        label = " ".join(bit for bit in (here.strip(), marks.get(t["status"], ""),
+                                         title) if bit)
+        rows.append((label, int(t["id"])))
+    return rows
+
+
+#: A request to join arrives with the answer attached. `/pair approve 3` asks
+#: somebody to read a number off an earlier message and retype it, which is the
+#: same gesture `/approve 3` was replaced for -- and the number is meaningless to
+#: the person being asked to trust somebody.
+JOIN_PREFIX = "join"
+
+
+def join_callback(action: str, pid: int) -> str:
+    if action not in {"ok", "no"}:
+        raise ValueError(f"unknown join action {action!r}")
+    data = f"{JOIN_PREFIX}:{action}:{int(pid)}"
+    if len(data.encode("utf-8")) > 64:
+        raise ValueError("callback_data over Telegram's 64-byte limit")
+    return data
+
+
+def parse_join(data: str) -> tuple[str, int] | None:
+    """`(action, pairing id)`, or None if this is not one of ours."""
+    parts = (data or "").split(":")
+    if len(parts) != 3 or parts[0] != JOIN_PREFIX:
+        return None
+    if parts[1] not in {"ok", "no"} or not parts[2].isdigit():
+        return None
+    return parts[1], int(parts[2])
+
+
+#: A value a person picks rather than types. `low`, `3`, a seat's name -- short
+#: enough that the 64-byte callback is never in question.
+SET_PREFIX = "set"
+
+
+def set_callback(what: str, value: str) -> str:
+    data = f"{SET_PREFIX}:{what}:{value}"
+    if len(data.encode("utf-8")) > 64:
+        raise ValueError("callback_data over Telegram's 64-byte limit")
+    return data
+
+
+def parse_set(data: str) -> tuple[str, str] | None:
+    """`(what, value)` behind a picker button, or None if this is not one."""
+    parts = (data or "").split(":", 2)
+    if len(parts) != 3 or parts[0] != SET_PREFIX:
+        return None
+    if parts[1] not in {"effort", "rounds", "chair", "wake"} or not parts[2]:
+        return None
+    return parts[1], parts[2]
+
+
+#: Bare commands that should offer their answers instead of asking for typing.
+#: The verb alone is the question; the buttons are the answer.
+def wants_choices(text: str) -> str | None:
+    """Which chooser a bare command is asking for, if any."""
+    import re as _re
+
+    m = _re.fullmatch(r"/(effort|rounds|nudge|chair)(?:@\S+)?", (text or "").strip(),
+                      _re.I)
+    return m.group(1).lower() if m else None
+
+
 def rule_callback(action: str, pid: int) -> str:
     if action not in {"ok", "no", "full"}:
         raise ValueError(f"unknown ruling action {action!r}")
@@ -394,6 +582,46 @@ def plain(rendered: str) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", rendered))
 
 
+#: A chat has no colour, so a seat gets a mark instead. Allocated by sorted
+#: position among the seats on the board rather than hashed, for the reason the
+#: full-screen view does the same: hashing put two of this project's own seats on
+#: one colour, and distinctness is the entire point.
+SEAT_MARKS = ("\U0001f535", "\U0001f7e2", "\U0001f7e1", "\U0001f7e3",
+              "\U0001f534", "\U0001f7e0", "\U0001f7e4", "\u26aa")
+
+
+def mark_for(store, name: str) -> str:
+    """The seat's mark, stable for as long as the roster is."""
+    names = sorted(a["name"] for a in store.agents())
+    if name not in names:
+        return ""
+    return SEAT_MARKS[names.index(name) % len(SEAT_MARKS)]
+
+
+def mention(store, name: str) -> str:
+    """A seat's name, as a real Telegram mention when the account is known.
+
+    A person whose account was bound by a claim code gets pinged rather than
+    merely written about -- which is the difference between being asked a
+    question and finding out later that one was asked.
+    """
+    row = store.q1("SELECT tg_user_id FROM agents WHERE name = ?", (name,))
+    if row and row["tg_user_id"]:
+        return f'<a href="tg://user?id={row["tg_user_id"]}">{html.escape(name)}</a>'
+    return html.escape(name)
+
+
+def with_mentions(store, body: str) -> str:
+    """Turn `@name` into a real mention for anybody whose account is known."""
+    import re as _re
+
+    def swap(m):
+        link = mention(store, m.group(1))
+        return link if link.startswith("<a ") else m.group(0)
+
+    return _re.sub(r"@([A-Za-z0-9_-]{2,32})", swap, body)
+
+
 def event_text(store, ev) -> str | None:
     """One board event as something worth putting in a chat, or nothing.
 
@@ -406,7 +634,8 @@ def event_text(store, ev) -> str | None:
                        (ev.payload.get("message_id"),))
         if row is None or row["kind"] == "system":
             return None
-        return f"**{row['author']}**\n{row['body']}"
+        head = f"{mark_for(store, row['author'])} **{row['author']}**".strip()
+        return f"{head}\n{row['body']}"
     if ev.kind == "proposal" and ev.payload.get("action") == "opened":
         # The pump normally sends these through `say_proposal`, so they arrive
         # with their buttons. This is the fallback when that could not render,
@@ -426,24 +655,6 @@ def event_text(store, ev) -> str | None:
     return None
 
 
-HELP = (
-    "<b>mooting</b> — a council in this chat\n\n"
-    "<b>talk</b>\n"
-    "  any message posts as you, and answers anything asked of you\n"
-    "  <code>@Santa what about the windows?</code> asks one seat\n\n"
-    "<b>run it</b>\n"
-    "  <code>/topic new should we cap retries?</code>\n"
-    "  <code>/topic agenda cap; jitter; who owns the runbook</code>\n"
-    "  <code>/run</code> · <code>/stop</code> · <code>/seats</code> "
-    "· <code>/proposals</code>\n\n"
-    "<b>who may speak</b>\n"
-    "  <code>/pair list</code> · <code>/pair approve &lt;id&gt;</code>\n\n"
-    "<b>rule on it</b>\n"
-    "  a proposal arrives with Approve / Reject buttons; the reason\n"
-    "  is the reply it asks you for"
-)
-
-
 def run(db, *, bot_token: str, chats, human: str, topic=None,
         remember: bool = False) -> int:        # pragma: no cover - needs a token
     """Long-poll Telegram and drive a council from a chat.
@@ -458,7 +669,7 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
     from aiogram.filters import Command
     from aiogram.types import Message
 
-    from .store import NotAuthorised, StoreError, connect
+    from .store import HUMAN_KINDS, NotAuthorised, StoreError, connect
 
     try:
         bot = Bot(token=bot_token)
@@ -475,9 +686,25 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
     chats = {str(c) for c in (chats or [])}
     #: A one-time code, only while nobody is paired. Once somebody is, approving
     #: is their job.
-    claim = {"code": None if store.pairings("approved") else secrets.token_hex(3)}
+    # One mechanism, not two. This used to mint its own code that only the
+    # bootstrap branch honoured; it is now an ordinary claim, so `mooting claim`
+    # and a first run produce the same thing and are redeemed the same way.
+    def _first_code() -> str | None:
+        if store.pairings("approved"):
+            return None
+        try:
+            return store.new_claim(human)
+        except (StoreError, NotAuthorised):
+            return None
+
+    claim = {"code": _first_code()}
+    #: Filled in at startup. Until then no mention is stripped, which is the safe
+    #: direction: a command nobody claims is better than one answered twice.
+    me: dict[str, str | None] = {"username": None}
     #: Which topic each chat is standing on; a council spans many messages.
-    where: dict[str, str] = {}
+    #: Where each chat is standing. `None` means the topic it was on has gone,
+    #: which is different from never having had one only in how it got here.
+    where: dict[str, str | None] = {}
     #: One council per topic. Two people pressing /run must not wake every seat
     #: twice on one budget.
     running: dict[int, "asyncio.Task"] = {}
@@ -492,7 +719,8 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         for piece in chunks(markdown):
             await t.wait()
             try:
-                await bot.send_message(chat_id, piece, parse_mode=ParseMode.HTML)
+                await bot.send_message(chat_id, with_mentions(store, piece),
+                                       parse_mode=ParseMode.HTML)
             except Exception as exc:
                 # A reply that cannot be formatted must still arrive. Losing a
                 # seat's argument to one stray character is the worst outcome.
@@ -500,6 +728,17 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
                 log.warning("fell back to plain text: %s", exc)
 
     def allowed(chat_id) -> bool:
+        # Default deny. Without an allowlist this answered anywhere it was
+        # added, so anybody who knew the bot's name could stand up a group and
+        # start talking to somebody else's board. A room is known once a code
+        # from the machine has been redeemed in it, or once somebody has been
+        # approved there; `--chat` still names them outright.
+        if not chats and not store.pairings("approved", chat_id=chat_id):
+            if str(chat_id) not in seen:
+                seen.add(str(chat_id))
+                print(f"  ignored a message from chat {chat_id} — `mooting claim`"
+                      f" prints a code that lets somebody in there")
+            return False
         if chats and str(chat_id) not in chats:
             # The id is the thing the operator needs and cannot otherwise get.
             # Ignoring the message silently leaves them no way to find it.
@@ -523,7 +762,25 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         return (paired & chats) if chats else paired
 
     def topic_here(chat_id):
-        return where.get(str(chat_id), topic)
+        """The slug this chat is standing on, if it is still there.
+
+        A topic can go away under a chat -- `/reset`, or `/topic rm` from the
+        terminal. The chat went on pointing at it, and building the session for
+        the next message then raised before any command was dispatched, so every
+        message died in the constructor and the room answered nothing at all.
+        Not even `/topic new`, which was the one way out.
+        """
+        slug = where.get(str(chat_id))
+        if slug is None:
+            slug = store.room_topic("telegram", str(chat_id)) or topic
+        if slug is None:
+            return None
+        try:
+            store.topic(slug)
+        except StoreError:
+            where[str(chat_id)] = None
+            return None
+        return slug
 
     @dp.message(Command("start", "help"))
     async def on_help(msg: Message):
@@ -531,7 +788,8 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             return
         if store.seat_for_chat(msg.chat.id, msg.from_user.id):
             return await bot.send_message(msg.chat.id, HELP,
-                                          parse_mode=ParseMode.HTML)
+                                          parse_mode=ParseMode.HTML,
+                                          reply_markup=desk_keyboard())
         # Not paired, so everything in HELP is unreachable and listing it is
         # noise. Say the one thing that is possible from here.
         if claim["code"]:
@@ -559,31 +817,55 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
 
     @dp.message(Command("pair"))
     async def on_pair(msg: Message):
+        args = (msg.text or "").split()[1:]
+        # Checked before the allowlist on purpose: a code read off the terminal
+        # is how a room nobody has been approved in becomes a room at all.
+        if len(args) == 1 and args[0] not in {"list", "approve", "deny"}:
+            got = store.redeem_claim(args[0])
+            if got:
+                pid = store.pair_request(msg.chat.id, msg.from_user.id,
+                                         msg.from_user.full_name or "")
+                store.pair_approve(pid, got, got)
+                store.bind_identity(got, msg.from_user.id)
+                store.claim_room(store.ensure_room("telegram", str(msg.chat.id)), got)
+                await bot.send_message(
+                    msg.chat.id, "Paired.", reply_markup=desk_keyboard())
+                return await say(
+                    msg.chat.id,
+                    f"You speak as **{got}** and host this room."
+                    f"\n\nThis chat is `{msg.chat.id}` — pass "
+                    f"`--chat {msg.chat.id}` when starting the bot to keep it to "
+                    f"this room only.")
         if not allowed(msg.chat.id):
             return
-        args = (msg.text or "").split()[1:]
         seat = store.seat_for_chat(msg.chat.id, msg.from_user.id)
 
         if args[:1] == ["list"]:
             if not seat:
                 return await say(msg.chat.id, "You are not paired here.")
-            rows = store.pairings("pending")
+            rows = store.pairings("pending", chat_id=msg.chat.id)
             if not rows:
-                return await say(msg.chat.id, "No pending requests.")
+                return await say(msg.chat.id, "No pending requests here.")
             return await say(msg.chat.id, "\n".join(
-                f"- `{r['id']}` {r['display'] or r['user_id']}" for r in rows))
+                f"- `{r['ref'] or r['id']}` {r['display'] or r['user_id']}"
+                for r in rows))
 
         if args[:1] == ["approve"]:
-            if not seat:
+            answers = (store.room_host(store.ensure_room("telegram", str(msg.chat.id)))
+                       or human)
+            if not seat or seat != answers:
                 return await say(msg.chat.id,
-                                 "Only a paired member can approve. Ask one.")
-            try:
-                pid = int(args[1])
-            except (IndexError, ValueError):
+                                 f"Only {answers} can let somebody into this "
+                                 f"council.")
+            if len(args) < 2:
                 return await say(msg.chat.id, "Usage: `/pair approve <id>`")
-            want = store.q1("SELECT * FROM pairings WHERE id = ?", (pid,))
+            # Scoped to this chat: a request from another room is not this
+            # room's to answer, and a small integer invited exactly that.
+            want = store.pairing_by_ref(args[1], chat_id=msg.chat.id)
             if want is None:
-                return await say(msg.chat.id, f"No pairing request `{pid}`.")
+                return await say(msg.chat.id,
+                                 f"No request `{args[1]}` waiting in this chat.")
+            pid = int(want["id"])
             # Naming them should not be part of approving them: their own
             # display name is the name they already answer to.
             target = (args[2] if len(args) > 2 else
@@ -594,42 +876,41 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
                 return await say(msg.chat.id, str(exc))
             return await say(msg.chat.id,
                              f"{row['display'] or row['user_id']} now speaks as "
-                             f"**{row['seat']}**.")
+                             f"**{row['seat']}**.\n\nThis chat is `{msg.chat.id}`.")
 
         if args[:1] == ["deny"]:
             if not seat:
                 return await say(msg.chat.id, "Only a paired member can do that.")
-            try:
-                store.pair_deny(int(args[1]), seat)
-            except (IndexError, ValueError):
+            if len(args) < 2:
                 return await say(msg.chat.id, "Usage: `/pair deny <id>`")
+            want = store.pairing_by_ref(args[1], chat_id=msg.chat.id)
+            if want is None:
+                return await say(msg.chat.id,
+                                 f"No request `{args[1]}` waiting in this chat.")
+            store.pair_deny(int(want["id"]), seat)
             return await say(msg.chat.id, f"Request `{args[1]}` denied.")
 
         if seat:
             return await say(msg.chat.id, f"You already speak as **{seat}**.")
 
-        # Bootstrap. The first person has nobody to approve them, so the code
-        # printed at startup stands in for the authority they do not have yet --
-        # holding it proves they can see the machine the bot runs on.
-        if claim["code"] and args[:1] == [claim["code"]]:
+        # The person running the bot holds the token, and a room they added it to
+        # is a room they authorised. Recognising them saves a trip to a terminal
+        # to approve themselves into their own group -- which was the one case
+        # where per-room approval had nobody to ask. Only this account, and only
+        # into the seat it already holds: everybody else still needs a member.
+        if store.seat_for_user(msg.from_user.id) == human:
             pid = store.pair_request(msg.chat.id, msg.from_user.id,
                                      msg.from_user.full_name or "")
-            target = store.seat_name_for(msg.from_user.full_name or "",
-                                         fallback=human)
-            row = store.pair_approve(pid, target, target)
-            claim["code"] = None                 # one use, then it is gone
+            store.pair_approve(pid, human, human)
+            store.claim_room(store.ensure_room("telegram", str(msg.chat.id)), human)
             return await say(
                 msg.chat.id,
-                f"Paired. You speak as **{row['seat']}**.\n\n"
-                f"Next: `/topic new <your question>`, then `/run`.\n\n"
-                f"This chat is `{msg.chat.id}` — pass `--chat {msg.chat.id}` "
-                f"when starting the bot to keep it to this room only.")
+                f"Paired. You speak as **{human}**, the seat you already hold."
+                f"\n\nThis chat is `{msg.chat.id}`.")
 
-        pid = store.pair_request(msg.chat.id, msg.from_user.id,
-                                 msg.from_user.full_name or "")
-        await say(msg.chat.id,
-                  f"Pairing request `{pid}` recorded. A paired member approves "
-                  f"it with `/pair approve {pid}`.")
+        who = msg.from_user.full_name or str(msg.from_user.id)
+        pid = store.pair_request(msg.chat.id, msg.from_user.id, who)
+        await say_join_request(msg.chat.id, pid, who)
 
     @dp.message(Command("minutes"))
     async def on_minutes(msg: Message):
@@ -672,7 +953,7 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             return await say(msg.chat.id, "No topic here.")
 
         note = (msg.text or "").partition(" ")[2].strip()
-        board = ChatBoard(db, slug, seat)
+        board = ChatBoard(db, slug, seat, room=("telegram", str(msg.chat.id)))
         try:
             out = board.handle(f"/conclude {note}".strip())
         finally:
@@ -708,6 +989,71 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             # If the upload is refused the meeting still has to arrive.
             log.warning("could not send minutes as a document: %s", exc)
             await say(chat_id, head + "\n\n" + text)
+
+    async def owns_this_group(chat_id, user_id) -> bool:
+        """Whether Telegram says this account created the group.
+
+        The room's own `host` is a name claimed by whoever paired first, which is
+        an inference about ordering rather than a fact about the group. Telegram
+        holds the fact, so ask it: the person who made the group is the host of
+        it, whatever order people were let in.
+
+        False for a one-to-one chat, which has no creator, and false when the
+        call fails -- a request that cannot be checked is one to put up for
+        somebody to answer, not one to wave through.
+        """
+        try:
+            member = await bot.get_chat_member(chat_id, user_id)
+        except Exception as exc:
+            log.warning("could not ask who owns %s: %s", chat_id, exc)
+            return False
+        return getattr(member, "status", None) == "creator"
+
+    @dp.message(lambda m: bool(getattr(m, "new_chat_members", None)))
+    async def on_join(msg: Message):
+        """Somebody was added to the group.
+
+        Telegram says who added them, and that is the fact this needs: an invite
+        from the host of the room is the host deciding, and anybody else adding
+        somebody is not. Without this the bot never saw a person arrive at all,
+        so joining did nothing and the newcomer had to know to type `/pair`.
+        """
+        if not allowed(msg.chat.id):
+            return
+        room_id = store.ensure_room("telegram", str(msg.chat.id))
+        host = store.room_host(room_id)
+        added_by = store.seat_for_chat(msg.chat.id, msg.from_user.id)
+
+        for member in msg.new_chat_members:
+            if getattr(member, "is_bot", False):
+                continue
+            if store.seat_for_chat(msg.chat.id, member.id):
+                continue                        # already one of us
+            who = member.full_name or str(member.id)
+            pid = store.pair_request(msg.chat.id, member.id, who)
+            # Owning the group is only ever a confirmation about somebody this
+            # board already knows. Taken on its own it is authority anybody can
+            # mint: make a group, add this bot, and every person you add is let
+            # onto a board that is not yours. `added_by` must be a seat here
+            # first -- the Telegram fact then says which seat is the host.
+            by_owner = bool(added_by) and await owns_this_group(
+                msg.chat.id, msg.from_user.id)
+            if added_by and (by_owner or (host and added_by == host)):
+                if by_owner:
+                    host = store.claim_room(room_id, added_by)
+                seat = store.seat_name_for(who, fallback=f"guest{pid}")
+                try:
+                    row = store.pair_approve(pid, seat, added_by or host or seat)
+                except (StoreError, NotAuthorised) as exc:
+                    await say(msg.chat.id, str(exc))
+                    continue
+                await say(msg.chat.id,
+                          f"{who} was added by {added_by or 'the group owner'} "
+                          f"and speaks as **{row['seat']}**.")
+                continue
+            await say_join_request(
+                msg.chat.id, pid,
+                f"{who}" + (f", added by {added_by}" if added_by else ""))
 
     @dp.message(lambda m: m.document is not None)
     async def on_document(msg: Message):
@@ -781,6 +1127,10 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         task = running.get(tid)
         if task is not None and not task.done():
             return await say(msg.chat.id, "Already running. `/stop` to stop it.")
+        holder = store.take_drive(tid, SESSION)
+        if holder is not None:
+            return await say(msg.chat.id,
+                             "Already being driven from another session.")
 
         from .drivers.registry import build_drivers
         from .supervisor import Caps, Supervisor
@@ -790,6 +1140,20 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         sup = Supervisor(store, build_drivers(store),
                          Caps(effort=t["effort"] or "low",
                               max_turns_per_seat=budget))
+
+        async def typing_while(task):
+            """Telegram's own thinking indicator, for as long as a round runs.
+
+            A turn takes tens of seconds. Without this the chat is silent and
+            indistinguishable from a bot that has died -- which is exactly what
+            it looked like this afternoon.
+            """
+            while not task.done():
+                try:
+                    await bot.send_chat_action(msg.chat.id, "typing")
+                except Exception:
+                    return                      # never let the indicator kill a round
+                await asyncio.sleep(4.0)        # Telegram clears it after ~5s
 
         async def drive():
             try:
@@ -805,8 +1169,11 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             except Exception as exc:
                 log.exception("council on %s failed", slug)
                 await say(msg.chat.id, f"council failed: {exc}")
+            finally:
+                store.release_drive(tid, SESSION)
 
         running[tid] = asyncio.create_task(drive())
+        asyncio.create_task(typing_while(running[tid]))
         await say(msg.chat.id,
                   f"Thinking at effort **{t['effort'] or 'low'}**. Replies "
                   f"arrive as each seat finishes — about 30 seconds a turn at "
@@ -866,6 +1233,98 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             log.warning("proposal keyboard failed: %s", exc)
             await say(chat_id, text)
 
+    async def say_join_request(chat_id, pid: int, who: str) -> None:
+        """A request to join, with the answer attached."""
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+        keys = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=f"\u2713 Let {who} in",
+                                 callback_data=join_callback("ok", pid)),
+            InlineKeyboardButton(text="\u2717 No",
+                                 callback_data=join_callback("no", pid)),
+        ]])
+        try:
+            await bot.send_message(
+                chat_id,
+                f"<b>{html.escape(who)}</b> asks to join this council.",
+                reply_markup=keys, parse_mode=ParseMode.HTML)
+        except Exception as exc:
+            log.warning("join keyboard failed: %s", exc)
+            row = store.q1("SELECT ref FROM pairings WHERE id = ?", (pid,))
+            handle = (row["ref"] if row and row["ref"] else pid)
+            await say(chat_id, f"{who} asks to join. `/pair approve {handle}` to "
+                               f"let them in.")
+
+    async def send_choices(chat_id, which: str, slug: str | None) -> None:
+        """The answers to a bare command, as buttons.
+
+        Typing on a phone is the cost this whole surface exists to avoid, and a
+        command whose answers are a short fixed list should never ask for them.
+        """
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+        rows, head = [], ""
+        if which == "effort":
+            head = "How long should they think?"
+            rows = [[InlineKeyboardButton(text=e, callback_data=set_callback("effort", e))
+                     for e in ("low", "medium", "high")]]
+        elif which == "rounds":
+            head = "How many more rounds?"
+            rows = [[InlineKeyboardButton(text=f"+{n}",
+                                          callback_data=set_callback("rounds", str(n)))
+                     for n in (1, 3, 5)]]
+        elif which in {"nudge", "chair"}:
+            if not slug:
+                return await say(chat_id, "No topic here yet.")
+            seats = store.seats(int(store.topic(slug)["id"]))
+            want_people = which == "chair"
+            names = [r["agent"] for r in seats
+                     if (r["kind"] in HUMAN_KINDS) == want_people]
+            if not names:
+                return await say(chat_id, "Nobody here to choose from.")
+            head = ("Who chairs this meeting?" if want_people
+                    else "Which seat should wake?")
+            rows = [[InlineKeyboardButton(text=n, callback_data=set_callback(which, n))]
+                    for n in names]
+        try:
+            await bot.send_message(chat_id, head,
+                                   reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        except Exception as exc:
+            log.warning("chooser %s failed: %s", which, exc)
+
+    async def send_picker(chat_id, *, message_id: int | None = None) -> None:
+        """The topic list, as one button per row.
+
+        Sent fresh, or edited in place after a tap so the same message keeps
+        working. A chat scrolls, and hunting back up for the picker is the
+        thing a phone is worst at.
+        """
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+        rows = picker_rows(store.topics_for_room(
+            store.ensure_room("telegram", str(chat_id))), topic_here(chat_id))
+        if not rows:
+            return await say(chat_id, "No topics yet — `/topic new <question>`.")
+        keys = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=label, callback_data=pick_callback(tid))]
+            for label, tid in rows
+        ])
+        here = topic_here(chat_id)
+        text = (f"<b>This chat is on</b> <code>{html.escape(here)}</code>"
+                if here else "<b>This chat is not on a topic yet</b>")
+        text += "\n\nTap one to move the room to it."
+        try:
+            if message_id is not None:
+                return await bot.edit_message_text(
+                    text, chat_id=chat_id, message_id=message_id,
+                    reply_markup=keys, parse_mode=ParseMode.HTML)
+            await bot.send_message(chat_id, text, reply_markup=keys,
+                                   parse_mode=ParseMode.HTML)
+        except Exception as exc:
+            # Telegram refuses an edit that changes nothing, and a picker that
+            # cannot redraw must not take the tap down with it.
+            log.warning("topic picker: %s", exc)
+
     @dp.callback_query()
     async def on_rule(call):
         """A button press. The presser's own seat is what rules.
@@ -875,17 +1334,89 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         """
         from aiogram.types import ForceReply
 
+        chat_id = call.message.chat.id
+        joining = parse_join(call.data or "")
+        if joining is not None:
+            action, pid = joining
+            if not allowed(chat_id):
+                return await call.answer("not this chat", show_alert=True)
+            presser = store.seat_for_chat(chat_id, call.from_user.id)
+            room_id = store.ensure_room("telegram", str(chat_id))
+            # No host yet means nobody has been established here, and "any paired
+            # member" would let the first person through the door hold it open
+            # for everybody behind them. Falls back to the person running the
+            # bot, who is the only one whose authority does not depend on this
+            # room being trustworthy.
+            answers = store.room_host(room_id) or human
+            if not presser or presser != answers:
+                return await call.answer(
+                    f"Only {answers} can answer that.", show_alert=True)
+            want = store.q1("SELECT * FROM pairings WHERE id = ?", (pid,))
+            if want is None:
+                return await call.answer("that request is gone", show_alert=True)
+            if want["status"] != "pending":
+                return await call.answer(f"already {want['status']}", show_alert=True)
+            try:
+                if action == "no":
+                    store.pair_deny(pid, presser)
+                    await call.answer("refused")
+                    return await say(chat_id, f"{want['display'] or pid} was not "
+                                              f"let in.")
+                seat = store.seat_name_for(want["display"], fallback=f"guest{pid}")
+                row = store.pair_approve(pid, seat, presser)
+                store.claim_room(store.ensure_room("telegram", str(chat_id)), presser)
+            except (StoreError, NotAuthorised) as exc:
+                return await call.answer(str(exc)[:180], show_alert=True)
+            await call.answer(f"{row['seat']} is in")
+            return await say(chat_id,
+                             f"{row['display'] or row['user_id']} now speaks as "
+                             f"**{row['seat']}**, let in by {presser}.")
+
+        chosen = parse_set(call.data or "")
+        if chosen is not None:
+            what, value = chosen
+            if not allowed(chat_id):
+                return await call.answer("not this chat", show_alert=True)
+            seat = store.seat_for_chat(chat_id, call.from_user.id)
+            if not seat:
+                return await call.answer("You are not paired here.", show_alert=True)
+            slug = topic_here(chat_id)
+            line = {"effort": f"/effort {value}", "rounds": f"/rounds {value}",
+                    "chair": f"/topic chair {value}", "wake": f"/nudge {value}"}[what]
+            board = ChatBoard(db, slug, seat, room=("telegram", str(chat_id)))
+            try:
+                out = board.handle(line)
+            finally:
+                board.close()
+            await call.answer(value)
+            return await say(chat_id, out or f"{what} → {value}")
+
+        picked = parse_pick(call.data or "")
+        if picked is not None:
+            if not allowed(chat_id):
+                return await call.answer("not this chat", show_alert=True)
+            if not store.seat_for_chat(chat_id, call.from_user.id):
+                return await call.answer(
+                    "You are not paired here — send /pair first.", show_alert=True)
+            try:
+                t = store.topic(picked)
+            except StoreError:
+                return await call.answer("that topic is gone", show_alert=True)
+            where[str(chat_id)] = t["slug"]
+            store.set_room_topic(store.ensure_room("telegram", str(chat_id)), t["slug"])
+            await call.answer(f"now on {t['slug']}")
+            return await send_picker(chat_id, message_id=call.message.message_id)
+
         parsed = parse_rule(call.data or "")
         if parsed is None:
             return await call.answer()
         what, pid = parsed
-        chat_id = call.message.chat.id
         if not allowed(chat_id):
             return await call.answer("not this chat", show_alert=True)
 
         seat = store.seat_for_chat(chat_id, call.from_user.id)
         if not seat:
-            # Pairing is the fence, and a button does not get to skip it.
+            # Pairing says who may take part, and a button does not get to skip it.
             return await call.answer(
                 "You are not paired here — send /pair first.", show_alert=True)
 
@@ -927,7 +1458,7 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             pending[key] = (pid, approve, seat)
             return True
         try:
-            store.decide(pid, seat, approve=approve, rationale=why)
+            store.decide(pid, seat, approve=approve, rationale=why, via="telegram")
         except (StoreError, NotAuthorised) as exc:
             await say(msg.chat.id, str(exc))
             return True
@@ -948,14 +1479,23 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         if not seat:
             # Inert on purpose. An unknown sender in a group must not be able to
             # open topics or spend anybody's subscription.
-            pid = store.pair_request(msg.chat.id, msg.from_user.id,
-                                     msg.from_user.full_name or "")
-            return await say(msg.chat.id,
-                             f"You are not paired here. Request `{pid}` is "
-                             f"waiting for a member to approve it.")
+            who = msg.from_user.full_name or str(msg.from_user.id)
+            pid = store.pair_request(msg.chat.id, msg.from_user.id, who)
+            await say(msg.chat.id, "You are not paired here yet.")
+            return await say_join_request(msg.chat.id, pid, who)
+        line = addressed_here(msg.text, me["username"])
+        if line is None:
+            return                      # addressed to another bot in this group
+        # `/topic` with no verb is somebody asking where they are and where
+        # else they could be. That is a list to tap, not a slug to retype.
+        if wants_picker(line):
+            return await send_picker(msg.chat.id)
+        chooser = wants_choices(line)
+        if chooser:
+            return await send_choices(msg.chat.id, chooser, topic_here(msg.chat.id))
         # Ask for a proposal by number and it comes back with its buttons,
         # whenever it was opened.
-        want = proposal_ref(msg.text)
+        want = proposal_ref(line)
         if want is not None:
             try:
                 pr = store.proposal(want)
@@ -964,6 +1504,16 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             return await say_proposal(msg.chat.id, pr)
 
         slug = topic_here(msg.chat.id)
+        if (not slug and not line.startswith("/")
+                and store.topics_for_room(
+                    store.ensure_room("telegram", str(msg.chat.id)))):
+            # Something to post and nowhere to post it. Offering the councils
+            # that exist beats an error that asks for a slug somebody has to
+            # type -- but only for talk. A command answers for itself: hijacking
+            # `/team` into the topic list is how this looked broken rather than
+            # empty, and every command that does not need a topic was caught by
+            # it after a restart forgot where the room was standing.
+            return await send_picker(msg.chat.id)
         if slug:
             # Pairing says they may take part; taking part needs a seat. Without
             # this a second person in the room could rule on a plan and not be
@@ -973,17 +1523,24 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
                     await say(msg.chat.id, f"_{seat} joined the council_")
             except StoreError:
                 pass
-        board = ChatBoard(db, slug, seat)
+        board = ChatBoard(db, slug, seat, room=("telegram", str(msg.chat.id)))
         try:
-            out = board.handle(msg.text.strip())
+            out = board.handle(line)
             # Remember where this chat is standing, so the next message from
             # anybody in the room lands on the same topic.
             if board.topic:
                 where[str(msg.chat.id)] = board.topic
+                store.set_room_topic(store.ensure_room("telegram", str(msg.chat.id)),
+                                     board.topic)
         finally:
             board.close()
         if out:
             await say(msg.chat.id, out)
+
+    def seats_in(chat_id) -> set[str]:
+        """The seats held by people in this chat."""
+        return {r["seat"] for r in store.pairings("approved", chat_id=chat_id)
+                if r["seat"]}
 
     async def pump() -> None:
         """Board events into the chat.
@@ -996,13 +1553,27 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             try:
                 targets = listeners()
                 for ev in store.events_since(cursor, None):
+                    # Every event went to every paired chat, so a second group
+                    # read the first group's council live. A room hears about its
+                    # own meetings and the unbound ones, and nothing else.
+                    allowed_here = {
+                        chat_id for chat_id in targets
+                        if store.topic_visible_in(
+                            ev.topic_id,
+                            store.ensure_room("telegram", str(chat_id)))
+                        # A person's own words are already in the room they typed
+                        # them in -- Telegram put them there. Sending them back
+                        # made every message appear twice, once from them and
+                        # once from the bot quoting them.
+                        and ev.actor not in seats_in(chat_id)
+                    }
                     if (ev.kind == "proposal"
                             and ev.payload.get("action") == "opened"):
                         # A proposal is the one thing only a human closes, so it
                         # arrives with the way to close it attached.
                         try:
                             pr = store.proposal(int(ev.payload["proposal_id"]))
-                            for chat_id in targets:
+                            for chat_id in allowed_here:
                                 await say_proposal(chat_id, pr)
                         except StoreError:
                             pass
@@ -1010,7 +1581,7 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
                         continue
                     text = event_text(store, ev)
                     if text:
-                        for chat_id in targets:
+                        for chat_id in allowed_here:
                             await say(chat_id, text)
                     cursor = ev.id
             except Exception:
@@ -1023,6 +1594,7 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         # Without this the client offers nothing and every command has to be
         # remembered -- which is what openclaw gets right and we did not.
         try:
+            me["username"] = (await bot.get_me()).username
             await bot.set_my_commands([BotCommand(command=c, description=d)
                                        for c, d in MENU])
             print(f"  menu    {len(MENU)} commands registered — type / in the "
@@ -1048,7 +1620,8 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         print(f"  pair    send  /pair {claim['code']}  to the bot to claim the "
               f"first seat")
     else:
-        print("  pair    an existing member approves with /pair approve <id>")
+        print("  pair    the host approves in the chat; `mooting claim` prints a "
+              "code for a new room")
     print(f"  chats   {', '.join(sorted(chats)) if chats else 'ANY (use --chat)'}")
     print("  polling; Ctrl-C to stop")
 

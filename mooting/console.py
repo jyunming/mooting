@@ -41,10 +41,11 @@ import shlex
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
-from .store import (MENTION_RE, Store, StoreError, agenda_text, connect,
-                    slugify, split_points)
+from .store import (MENTION_RE, NotAuthorised, Store, StoreError, agenda_text,
+                    connect, slugify, split_points)
 
 #: CLIs a seat can be created against from inside the session.
 AGENT_KINDS = frozenset({"claude", "codex", "copilot", "gemini", "agy"})
@@ -80,6 +81,9 @@ COMMANDS = {
     "/reopen": "resume a meeting you concluded",
     "/rounds": "<n> -- grant the council more rounds on this topic",
     "/seats": "who is here; /seats add <agent> | /seats rm <agent>",
+    "/team": "the seats a new meeting here starts with; /team <a> <b> sets it",
+    "/rooms": "where councils meet: the team, the topic, and the chat id",
+    "/usage": "what each seat has spent; /usage hour | day for a window",
     "/attach": "<file> -- feed a document to this council; /attach alone lists",
     "/topic": "new | switch | rename | agenda | mode | manager | rm | list",
     "/topic new": "<title> -- open a topic, same seats",
@@ -168,9 +172,15 @@ class _ConsoleCompleter:
 
 
 class Console:
-    def __init__(self, db: Path | str | None, topic_ref: str | None, me: str):
+    def __init__(self, db: Path | str | None, topic_ref: str | None, me: str,
+                 room: tuple[str, str] | None = None):
         self.db = db
         self.store = connect(db)
+        #: Which room this session is in. A terminal is the board's own room, so
+        #: rooms are never a special case half the code has to remember. Resolved
+        #: lazily -- a chat rebuilds this object for every message, and creating
+        #: the row each time would be a write per message for nothing.
+        self.room = room or Store.LOCAL_ROOM
         #: A session with no topic is a real state, not an error. You have to be
         #: able to open the thing on an empty board and start from inside it --
         #: being told to go back to the shell first is exactly the break this
@@ -184,6 +194,10 @@ class Console:
         self.me = me
         self.stop = threading.Event()
         self.driving = threading.Event()
+        #: Identifies this session to the board's drive claim. Two `mooting
+        #: console` processes on one board are two processes, so "am I already
+        #: driving" cannot live in either of them.
+        self._session_id = f"{os.getpid()}-{uuid.uuid4().hex[:6]}"
         #: Posting wakes the council without you typing /run. This is the whole
         #: difference between a meeting and a batch job: you say something, they
         #: pick it up, you see the replies, you answer again. /auto off restores
@@ -214,8 +228,12 @@ class Console:
 
     def _require_topic(self) -> bool:
         if self.topic_id is None:
-            self.emit(f"{DIM}no topic yet — /new <what you want to discuss>"
-                      f"{', or /topic <slug>' if self.store.topics() else ''}{RESET}")
+            # `/new` moved under `/topic` and this line did not follow it, so
+            # the one message a person sees when they have no topic named a
+            # command that answers "unknown".
+            self.emit(f"{DIM}no topic yet — /topic new <what you want to discuss>"
+                      f"{', or /topic to pick one' if self.store.topics() else ''}"
+                      f"{RESET}")
             return False
         return True
 
@@ -247,7 +265,7 @@ class Console:
                 time.sleep(1.0)
             store.close()
             return
-        for m in store.transcript(self.topic_id)[-6:]:
+        for m in store.transcript(self.topic_id, limit=6, newest=True):
             self.emit(f"\n{DIM}{m['author']}{RESET}  {m['body'].strip()[:400]}")
         for a in store.open_mentions(self.topic_id, self.me):
             self.emit(_ask_banner(a["asker"], a["question"]))
@@ -270,6 +288,15 @@ class Console:
         from .supervisor import Caps, Supervisor
 
         store = connect(self.db)
+        # The claim lives on the board because that is the only thing two console
+        # processes share. Guarding with `self.driving` alone let a second session
+        # start a second supervisor and wake every seat twice on one budget.
+        holder = store.take_drive(self.topic_id, self._session_id)
+        if holder is not None:
+            self.emit(f"{YELLOW}— already being driven by another session{RESET}")
+            store.close()
+            self.driving.clear()
+            return
         try:
             if store.topic(self.topic_id)["status"] == "paused":
                 store.set_topic_status(self.topic_id, "open", self.me, "resumed from console")
@@ -288,6 +315,7 @@ class Console:
         except Exception as exc:
             self.emit(f"\n{RED}— council failed: {exc}{RESET}")
         finally:
+            store.release_drive(self.topic_id, self._session_id)
             store.close()
             self.driving.clear()
 
@@ -310,6 +338,12 @@ class Console:
             "effort": self._effort, "asks": self._asks, "nudge": self._nudge,
             "auto": self._auto,
             "proposals": self._proposals, "seats": self._seats, "topic": self._topic,
+            "team": self._team, "rooms": self._rooms, "room": self._rooms,
+            "usage": self._usage, "cost": self._usage,
+            # Advertised in the help, in the README's own transcript and in the
+            # chat menu, and reachable from none of them: it was only ever wired
+            # into the `/topic` verb map, which does not list it either.
+            "attach": self._attach,
             "tasks": self._tasks,
             "reset": self._reset,
             "capability": self._capability,
@@ -379,7 +413,7 @@ class Console:
             # running away unattended, not to make you ask permission to continue
             # a conversation you are sitting in -- so one round is granted, and
             # only one, so it still cannot run off on its own.
-            self.store.grant_rounds(self.topic_id, 1)
+            self.store.grant_rounds(self.topic_id, 1, self.me)
             topic = self.store.topic(self.topic_id)
             self.emit(f"{DIM}was out of rounds — granted one more "
                       f"(round {topic['round'] + 1}/{topic['max_rounds']}); "
@@ -481,10 +515,14 @@ class Console:
             return
         """The brainstorming dial: cheap and wide, then deep on what survived."""
         if rest not in {"low", "medium", "high"}:
+            from .supervisor import BUDGET_BY_EFFORT, WORDS_BY_EFFORT
+
             self.emit(f"  effort is {BOLD}{self.effort()}{RESET}   "
                   f"{DIM}/effort low|medium|high{RESET}")
-            self.emit(f"  {DIM}low ≈ 9x faster and thinner; high for a call that turns on "
-                  f"catching a flaw{RESET}")
+            for level, budget in BUDGET_BY_EFFORT.items():
+                self.emit(f"  {DIM}{level:<7} {budget['rounds']} rounds, "
+                          f"{budget['turns']} turns each, "
+                          f"under {WORDS_BY_EFFORT[level]} words a turn{RESET}")
             return
         with self.store.tx() as c:
             c.execute("UPDATE topics SET effort = ? WHERE id = ?", (rest, self.topic_id))
@@ -492,8 +530,16 @@ class Console:
         # once, but wake_seat re-reads the topic row every time and topic effort
         # outranks the council default. A concurrent round's wakes all start
         # together, so the change lands on the round after the current one.
+        # One dial: how long they think, how much they may say, and how big the
+        # meeting is. Raising only, so a budget granted on purpose survives.
+        from .supervisor import BUDGET_BY_EFFORT
+
+        budget = BUDGET_BY_EFFORT[rest]
+        rounds, turns = self.store.raise_budget(
+            self.topic_id, budget["rounds"], budget["turns"], self.me)
         when = " — from the next round" if self.driving.is_set() else ""
         self.emit(f"{DIM}council effort → {rest}{when}{RESET}")
+        self.emit(f"  {DIM}{rounds} rounds, {turns} turns each{RESET}")
 
     def _asks(self, _: str) -> None:
         if not self._require_topic():
@@ -603,7 +649,7 @@ class Console:
             self.emit(f"{DIM}(recorded in the minutes){RESET}")
 
         try:
-            self.store.conclude(self.topic_id, self.me, note)
+            self.store.conclude(self.topic_id, self.me, note, via=self.via())
         except StoreError as exc:
             self.emit(f"{RED}{exc}{RESET}")
             return
@@ -721,9 +767,9 @@ class Console:
         n = int(digits)
         try:
             if add:
-                self.store.grant_rounds(self.topic_id, n)
+                self.store.grant_rounds(self.topic_id, n, self.me)
             else:
-                self.store.set_rounds(self.topic_id, n)
+                self.store.set_rounds(self.topic_id, n, self.me)
         except StoreError as exc:
             self.emit(f"{RED}{exc}{RESET}")
             return
@@ -777,6 +823,11 @@ class Console:
                           f"<{'|'.join(sorted(AGENT_KINDS))}>{RESET}")
                 return
 
+        chaired_by = self.store.chair(self.topic_id)
+        if verb in {"rm", "remove"} and chaired_by and self.me != chaired_by:
+            self.emit(f"{RED}{chaired_by} chairs this meeting — only they can "
+                      f"remove a seat from it{RESET}")
+            return
         seated = self.store.seat(self.topic_id, agent) is not None
         if verb == "add":
             if seated:
@@ -905,11 +956,18 @@ class Console:
             self.emit(f"{RED}{exc}{RESET}")
             return True
         tid = int(t["id"])
+        seated = self.store.chair(tid)
+        if seated and self.me != seated:
+            # Being let into a council is not being handed the ability to delete
+            # it. Somebody invited into one meeting could clear the board.
+            self.emit(f"{RED}{seated} chairs `{t['slug']}` — only they can "
+                      f"delete it{RESET}")
+            return True
         trees = self.store.orphan_worktrees(tid)
 
         if not confirmed:
             self.emit(f"{YELLOW}delete `{t['slug']}` — {t['title']}?{RESET}")
-            self.emit(f"  {len(self.store.transcript(tid))} message(s), "
+            self.emit(f"  {self.store.message_count(tid)} message(s), "
                       f"{len(self.store.tasks(tid))} task(s), "
                       f"{len(self.store.proposals(tid))} proposal(s)")
             for w in trees:
@@ -925,6 +983,15 @@ class Console:
         return self._land_somewhere() if was_current else True
 
     def _reset(self, rest: str) -> bool:
+        # There is no owner on the board -- only chairs, per meeting -- so there
+        # is nobody this could ask about a board-wide delete. The honest gate is
+        # the machine: whoever holds the board file and the token. A guest in a
+        # chat has neither, and clearing every council was one message away.
+        if tuple(self.room) != Store.LOCAL_ROOM:
+            self.emit(f"{RED}clearing the board is done at the machine it lives "
+                      f"on, not from a chat{RESET}")
+            self.emit(f"  {DIM}mooting reset   in a terminal{RESET}")
+            return True
         topics = self.store.topics()
         if rest.strip() != "yes":
             self.emit(f"{YELLOW}clear all {len(topics)} topic(s)?{RESET}")
@@ -960,7 +1027,8 @@ class Console:
     #: Everything you can do *to* a topic, reachable as `/topic <verb>`. Kept in
     #: one place so the session has one obvious noun to ask about rather than six
     #: unrelated verbs at the top level.
-    TOPIC_VERBS = ("new", "switch", "rename", "agenda", "mode", "manager", "rm", "list")
+    TOPIC_VERBS = ("new", "switch", "rename", "agenda", "chair", "mode", "manager",
+                   "rm", "list")
 
     def _topic(self, rest: str) -> None:
         """`/topic` is the noun; the verbs live under it.
@@ -976,8 +1044,9 @@ class Console:
             return self._topic_overview()
         if verb in self.TOPIC_VERBS:
             return {"new": self._new, "switch": self._switch, "rename": self._rename,
-                    "agenda": self._agenda, "attach": self._attach, "mode": self._mode,
-                    "manager": self._manager, "rm": self._rm}[verb](tail.strip())
+                    "agenda": self._agenda, "mode": self._mode,
+                    "chair": self._chair, "manager": self._manager,
+                    "rm": self._rm}[verb](tail.strip())
         # Not guessing that an unknown word is a slug. `/topic mode` would have
         # been ambiguous forever, and a wrong guess here silently switches you
         # somewhere instead of saying it did not understand.
@@ -989,7 +1058,8 @@ class Console:
         """Where you are, what it is to settle, and what else is open."""
         if self.topic_id is not None:
             self._show_agenda()
-        rows = [t for t in self.store.topics() if not t["slug"].startswith("doctor-")]
+        rows = [t for t in self.store.topics_for_room(self._visible_room())
+                if not t["slug"].startswith("doctor-")]
         if rows:
             self.emit(f"  {DIM}topics{RESET}")
             for t in rows:
@@ -997,9 +1067,23 @@ class Console:
                 self.emit(f"  {here} {t['slug']:<28} {DIM}{t['mode']}  {t['status']}{RESET}")
         self.emit(f"  {DIM}/topic {' | '.join(self.TOPIC_VERBS)}{RESET}")
 
+    def _visible_room(self) -> int | None:
+        """Which room's meetings this session may see. None at a terminal.
+
+        A terminal sees everything, because unbound topics are everybody's and a
+        desk is where they are opened. A chat sees its own and the unbound ones.
+        """
+        return None if tuple(self.room) == Store.LOCAL_ROOM else self.room_id()
+
     def _switch(self, rest: str) -> None:
         try:
             self.topic = self.store.topic(rest)
+            here = self._visible_room()
+            if here is not None and not self.store.topic_visible_in(
+                    int(self.topic["id"]), here):
+                # Otherwise the isolation is one remembered slug from useless.
+                self.topic = None
+                raise StoreError(f"no such topic: {rest!r}")
             self.topic_id = int(self.topic["id"])
         except StoreError as exc:
             self.emit(f"{RED}{exc}{RESET}")
@@ -1035,11 +1119,21 @@ class Console:
             mode, effort = here["mode"], here["effort"]
             manager = next((s["agent"] for s in self.store.seats(self.topic_id)
                             if s["role"] == "manager"), None)
+        # A room with a team overrides whatever would have been carried over,
+        # because deciding the team is exactly what setting one is for.
+        team = self.store.room_team(self.room_id())
+        if team:
+            seats = list(team)
+        # A meeting opened in a chat belongs to that chat. One opened at a
+        # terminal belongs to everybody, because starting at the desk and
+        # following it on a phone is the workflow, not a leak.
+        room_id = None if tuple(self.room) == Store.LOCAL_ROOM else self.room_id()
         if self.me not in seats:
             seats.append(self.me)
         try:
             self.store.open_topic(slug, title, title, self.me, seats=seats,
-                                  mode=mode, effort=effort, manager=manager)
+                                  mode=mode, effort=effort, manager=manager,
+                                  room_id=room_id)
         except StoreError as exc:
             self.emit(f"{RED}{exc}{RESET}")
             return
@@ -1315,6 +1409,149 @@ class Console:
         self.emit(f"{DIM}only for a task you have approved on a work topic, and only "
                   f"in its own git worktree{RESET}")
 
+    def via(self) -> str:
+        """Which machine this session speaks from.
+
+        A terminal session is the machine the board lives on, and a chat is not.
+        The difference matters when a seat is executing: a command typed beside
+        a running seat cannot be told from one that seat typed, and a message
+        from a chat account can.
+        """
+        return "local" if tuple(self.room) == Store.LOCAL_ROOM else "telegram"
+
+    def room_id(self) -> int:
+        """This room's id, created the first time something needs it."""
+        return self.store.ensure_room(*self.room)
+
+    def _team(self, rest: str) -> None:
+        """The seats a meeting opened here starts with.
+
+        Separate from `/seats`, which changes the meeting in front of you and
+        stops there. A seat added for one question should not quietly join every
+        later one, so the lasting change is its own gesture.
+        """
+        rid = self.room_id()
+        names = [w.lstrip("@") for w in rest.split()]
+        if not names:
+            team = self.store.room_team(rid)
+            if team:
+                self.emit(f"  team here: {BOLD}{', '.join(team)}{RESET}")
+            else:
+                self.emit(f"  {DIM}no team set here — a new meeting seats whoever "
+                          f"is on the one you are standing on{RESET}")
+            self.emit(f"  {DIM}/team <agent> <agent> … sets it{RESET}")
+            return
+        try:
+            got = self.store.set_room_team(rid, names, self.me)
+        except (StoreError, NotAuthorised) as exc:
+            self.emit(f"{RED}{exc}{RESET}")
+            return
+        self.emit(f"{DIM}team here: {', '.join(got)} — new meetings start with them"
+                  f"{RESET}")
+
+    def _usage(self, rest: str = "") -> None:
+        """What each seat has spent, and how close it is to the hourly ceiling.
+
+        The ceiling is per agent across the whole board, so two rooms running at
+        once compete for it and neither can see why the other slowed down.
+        """
+        hours = None
+        word = rest.strip().lower()
+        if word in {"hour", "today", "day"}:
+            hours = 1 if word == "hour" else 24
+        rows = self.store.usage(hours)
+        if not rows:
+            self.emit(f"  {DIM}nothing spent yet{RESET}")
+            return
+        span = {None: "all time", 1: "the last hour", 24: "the last day"}[hours]
+        self.emit(f"  {DIM}{span}{RESET}")
+        here = {r["agent"]: r for r in self.store.seats(self.topic_id)} \
+            if self.topic_id else {}
+        for r in rows:
+            mins, secs = divmod(int(r["seconds"]), 60)
+            spent = f"{mins}m {secs:02d}s" if mins else f"{secs}s"
+            line = (f"  {r['agent']:<10} {r['wakes']:>3} wakes  {r['ok']:>3} ok"
+                    f"{'  ' + str(r['failed']) + ' failed' if r['failed'] else ''}"
+                    f"   {spent:>8}")
+            seat = here.get(r["agent"])
+            if seat:
+                line += f"   {DIM}{seat['turns_used']}/{seat['max_turns']} turns here{RESET}"
+            self.emit(line)
+            # What the CLI itself said it spent. Absent for a CLI that does not
+            # say, which is not the same as free, so the line is simply omitted.
+            if r["tokens_in"] or r["tokens_out"] or r["cost_usd"]:
+                bits = []
+                if r["tokens_in"] or r["tokens_out"]:
+                    bits.append(f"{int(r['tokens_in'] or 0):,} in / "
+                                f"{int(r['tokens_out'] or 0):,} out tokens")
+                if r["cost_usd"]:
+                    bits.append(f"${r['cost_usd']:.4f}")
+                self.emit(f"  {DIM}{'':<10} {' · '.join(bits)}  (reported by the CLI)"
+                          f"{RESET}")
+        # The ceiling that actually bites, and the one nothing showed.
+        self.emit("")
+        for r in rows:
+            used = self.store.wakes_in_last_hour(r["agent"])
+            if used:
+                self.emit(f"  {DIM}{r['agent']}: {used}/30 wakes this hour{RESET}")
+
+    def _rooms(self, _: str = "") -> None:
+        """Where councils meet, and what each room is set up with.
+
+        A chat sees only itself. Listing the other rooms there would hand a guest
+        the existence, the chat id and the roster of every room on the board,
+        which is the thing the rooms are for keeping apart.
+        """
+        here = tuple(self.room) != Store.LOCAL_ROOM
+        rows = ([self.store.room(*self.room)] if here else self.store.rooms())
+        rows = [r for r in rows if r is not None]
+        if not rows:
+            self.emit(f"  {DIM}no rooms yet — a chat becomes one the first time "
+                      f"it sets a team or opens a topic{RESET}")
+            return
+        for r in rows:
+            team = ", ".join(self.store.room_team(int(r["id"]))) or "not set"
+            people = self.store.q1(
+                "SELECT COUNT(*) c FROM pairings WHERE channel = ? AND chat_id = ? "
+                "AND status = 'approved'", (r["channel"], r["chat_id"]))["c"]
+            name = r["label"] or r["chat_id"]
+            self.emit(f"  {BOLD}{name}{RESET}  {DIM}{r['channel']}{RESET}")
+            self.emit(f"     team    {team}")
+            self.emit(f"     on      {r['topic'] or '—'}")
+            self.emit(f"     host    {self.store.room_host(int(r['id'])) or '—'}")
+            self.emit(f"     people  {people} paired")
+            if r["channel"] == "telegram":
+                self.emit(f"     {DIM}--chat {r['chat_id']}   to keep the bot to "
+                          f"this room{RESET}")
+
+    def _chair(self, rest: str) -> None:
+        """Who signs off here. Anybody may call a meeting and argue in it.
+
+        Kept separate from `manager`, which is about work: a manager splits a goal
+        into tasks and reviews what comes back, and may be an agent. A chair is
+        always a person, because the whole point is that one is answerable.
+        """
+        if not self._require_topic():
+            return
+        seated = self.store.chair(self.topic_id)
+        who = rest.strip().lstrip("@")
+        if not who:
+            if seated is None:
+                self.emit(f"  {DIM}nobody chairs this meeting — the person who "
+                          f"opened it is no longer on the board, so any person "
+                          f"may sign off{RESET}")
+            else:
+                self.emit(f"  {BOLD}{seated}{RESET} chairs this meeting")
+            self.emit(f"  {DIM}/topic chair <name> to hand it over{RESET}")
+            return
+        try:
+            self.store.set_chair(self.topic_id, who, self.me)
+        except (StoreError, NotAuthorised) as exc:
+            self.emit(f"{RED}{exc}{RESET}")
+            return
+        self.emit(f"{DIM}{who} now chairs this meeting{RESET}")
+        self.on_topic_change()
+
     def _manager(self, rest: str) -> None:
         if not self._require_topic():
             return
@@ -1388,7 +1625,8 @@ class Console:
             self.emit(f"{RED}usage: /{cmd} <proposal id> [reason]{RESET}")
             return
         try:
-            self.store.decide(int(pid_s), self.me, cmd == "approve", why.strip())
+            self.store.decide(int(pid_s), self.me, cmd == "approve", why.strip(),
+                              via=self.via())
         except StoreError as exc:
             self.emit(f"{RED}{exc}{RESET}")
 
@@ -1397,7 +1635,7 @@ class Console:
     def run(self) -> int:
         self.emit(BANNER)
         if self.topic is None:
-            self.emit(f"{DIM}no topic yet — /new <slug> <title> to start one{RESET}")
+            self.emit(f"{DIM}no topic yet — /topic new <what you want to discuss>{RESET}")
         else:
             self.emit(f"{BOLD}{self.topic['title']}{RESET}  {DIM}(`{self.topic['slug']}`, "
                       f"{self.topic['status']}, effort {self.effort()}){RESET}")

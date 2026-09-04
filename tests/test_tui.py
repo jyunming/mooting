@@ -1254,3 +1254,22 @@ async def test_opening_a_proposal_renders_its_markdown(tmp_path, board):
             for piece in (parts if isinstance(parts, list) else [parts])]
     assert any(isinstance(p, Markdown) for p in flat), \
         f"the proposal body was not rendered as markdown: {[type(p).__name__ for p in flat]}"
+
+
+@pytest.mark.asyncio
+async def test_a_repaint_before_the_panes_exist_does_nothing(tmp_path, board):
+    """The poll interval can fire before compose has mounted, and again during
+    teardown. It looked like a flake and was not one: it took the Windows 3.10
+    job on CI, where `#seats` was not there yet and `NoMatches` killed the timer.
+    """
+    app = app_for(tmp_path, board)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        # What the timer sees when it fires a moment too early or too late.
+        app.query = lambda *a, **k: []
+        app.refresh_board()          # must not raise
+
+        del app.query
+        app.refresh_board()
+        assert app.query_one("#seats", DataTable).row_count == 3

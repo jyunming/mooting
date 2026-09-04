@@ -485,6 +485,13 @@ class MootApp(App):
             # which has none of these widgets. The timer kept firing behind the
             # model picker and raised NoMatches a second after it opened.
             return
+        if not self.query("#seats"):
+            # The same failure from the other end: the poll interval can fire
+            # before compose has mounted the panes, and again while the app is
+            # tearing down. Rare enough to look like a flake and it is not one --
+            # it took the Windows 3.10 job on CI. A repaint that cannot find its
+            # widgets has nothing to repaint, and raising here kills the timer.
+            return
         store = self.board.store
         if self.board.topic_id is None:
             self.query_one("#seats", DataTable).clear()
@@ -676,7 +683,7 @@ class MootApp(App):
         self._tints = {name: tint_for(col, base) for name, col in self._palette.items()}
         self.title = t["title"]
         self.sub_title = f"{t['slug']} · {t['mode']}"
-        for m in self.board.store.transcript(self.board.topic_id)[-40:]:
+        for m in self.board.store.transcript(self.board.topic_id, limit=40, newest=True):
             self.write_line(self._render_message(m))
         for a in self.board.pending_asks():
             self.write_line(self._render_ask(a["asker"], a["question"]))
@@ -807,7 +814,8 @@ class MootApp(App):
         if not lines and self.board.topic_id is not None:
             # Nothing saved yet, but the board remembers what you said here, and
             # that is the more useful thing to reach for on a first run.
-            lines = [m["body"] for m in self.board.store.transcript(self.board.topic_id)
+            lines = [m["body"] for m in self.board.store.transcript(
+                         self.board.topic_id, newest=True)
                      if m["author"] == self.board.me and m["kind"] != "system"]
         self._history = [ln for ln in lines if ln.strip()][-self.HISTORY_MAX:]
 
