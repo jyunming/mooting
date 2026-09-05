@@ -765,6 +765,7 @@ class Console:
             return
 
         n = int(digits)
+        before = self.store.topic(self.topic_id)["max_rounds"]
         try:
             if add:
                 self.store.grant_rounds(self.topic_id, n, self.me)
@@ -775,6 +776,14 @@ class Console:
             return
 
         t = self.store.topic(self.topic_id)
+        if t["max_rounds"] == before:
+            # `/rounds 5` on a topic already at 5 changes nothing, and reporting
+            # "5 of 5" reads as success. Somebody meaning "five more" typed it
+            # twice and watched a capped council stay capped.
+            self.emit(f"{DIM}still {BOLD}{before}{RESET}{DIM} rounds — nothing "
+                      f"changed. {BOLD}/rounds +{n}{RESET}{DIM} adds {n} "
+                      f"more{RESET}")
+            return
         seats = self.store.seats(self.topic_id)
         turns = min((s["max_turns"] for s in seats), default=t["max_rounds"])
         self.emit(f"{DIM}round {t['round'] + 1} of {t['max_rounds']} — "

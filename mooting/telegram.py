@@ -322,7 +322,7 @@ MENU = [
     ("stop", "stop after the turn in flight"),
     ("nudge", "<seat> — wake one of them by hand"),
     ("effort", "low · medium · high — how long they think before answering"),
-    ("rounds", "<n> — grant the council more rounds on this topic"),
+    ("rounds", "<n> sets the total · +<n> adds more"),
     ("proposals", "what is waiting on your sign-off"),
     ("asks", "questions the council has put to you"),
     ("tasks", "the work plan and where each task has got to"),
@@ -556,6 +556,20 @@ def wants_choices(text: str) -> str | None:
     m = _re.fullmatch(r"/(effort|rounds|nudge|chair)(?:@\S+)?", (text or "").strip(),
                       _re.I)
     return m.group(1).lower() if m else None
+
+
+def command_for(what: str, value: str) -> str:
+    """The command a chooser button stands for.
+
+    `+` on the rounds line is the whole point: the button is labelled "+5" and
+    the chooser asks "how many more". Sending `/rounds 5` *sets* the total, so
+    on a topic already at five the button did nothing and reported the number
+    it had not changed as though it had worked.
+    """
+    return {"effort": f"/effort {value}",
+            "rounds": f"/rounds +{value}",
+            "chair": f"/topic chair {value}",
+            "wake": f"/nudge {value}"}[what]
 
 
 def rule_callback(action: str, pid: int) -> str:
@@ -1439,8 +1453,7 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             if not seat:
                 return await call.answer("You are not paired here.", show_alert=True)
             slug = topic_here(chat_id)
-            line = {"effort": f"/effort {value}", "rounds": f"/rounds {value}",
-                    "chair": f"/topic chair {value}", "wake": f"/nudge {value}"}[what]
+            line = command_for(what, value)
             board = ChatBoard(db, slug, seat, room=("telegram", str(chat_id)))
             try:
                 out = board.handle(line)
