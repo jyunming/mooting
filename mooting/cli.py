@@ -225,14 +225,14 @@ def cmd_attach(args) -> int:
     for f in args.files:
         aid = board.attach(tid, f, who, note=args.note or "")
         a = board.q1("SELECT * FROM attachments WHERE id = ?", (aid,))
-        kind = "text, inlined into every prompt" if a["is_text"] else "binary, path only"
+        kind = "readable, inlined into every prompt" if a["is_text"] else "binary, path only"
         print(f"#{a['id']} {a['name']}  ({a['bytes']:,} bytes — {kind})")
     rows = board.attachments(tid)
     if not args.files and not args.rm:
         if not rows:
             print(f"nothing attached to `{topic['slug']}`")
         for a in rows:
-            mark = "text  " if a["is_text"] else "binary"
+            mark = "read  " if a["is_text"] else "binary"
             print(f"  #{a['id']} {mark} {a['name']:<24} {a['bytes']:>9,}B"
                   + (f"  — {a['note']}" if a["note"] else ""))
     board.close()

@@ -1198,7 +1198,7 @@ class Console:
                 self.emit(f"  {DIM}nothing attached — /attach <file>{RESET}")
                 return
             for a in rows:
-                mark = "text" if a["is_text"] else "binary"
+                mark = "read" if a["is_text"] else "binary"
                 self.emit(f"  {DIM}#{a['id']}{RESET} {a['name']}  "
                           f"{DIM}{a['bytes']:,}B, {mark}"
                           + (f" — {a['note']}" if a["note"] else "") + RESET)

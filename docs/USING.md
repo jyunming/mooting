@@ -53,7 +53,7 @@ recognized, so replying in prose is enough.
 `/effort low|medium|high` retunes the whole council mid-session. Default
 is `low`.
 
-`/attach <file>` feeds a document to the council — its text is inlined
+`/attach <file>` feeds a document to the council — text, PDF and Word are inlined
 into every seat's prompt.
 
 ## Topics

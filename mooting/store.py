@@ -145,6 +145,22 @@ def looks_like_text(path: Path) -> bool:
     return True
 
 
+def _readable(path: Path) -> bool:
+    """Whether a council can actually read this, not whether it is text.
+
+    `is_text` drives one thing: does the file's content go into every seat's
+    prompt. A PDF is not text and a seat still ought to be able to read it, so
+    the question is whether any characters came out -- which is why this runs
+    the extraction rather than trusting the extension. Imported late: `extract`
+    imports `looks_like_text` from here.
+    """
+    if looks_like_text(path):
+        return True
+    from .extract import text_of
+
+    return bool(text_of(path))
+
+
 class StoreError(RuntimeError):
     pass
 
@@ -1338,7 +1354,7 @@ class Store:
                 "INSERT INTO attachments (topic_id, name, path, bytes, is_text, "
                 "note, added_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (topic_id, dest.name, str(dest.resolve()), dest.stat().st_size,
-                 int(looks_like_text(dest)), note, by))
+                 int(_readable(dest)), note, by))
             aid = int(cur.lastrowid)
             self._emit(c, topic_id, "attachment", by,
                        {"attachment_id": aid, "name": dest.name})

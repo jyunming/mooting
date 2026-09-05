@@ -74,7 +74,7 @@ terminal — see [Using it](USING.md)), and its input history lasts only that ru
 | `/topic agenda <a>; <b>; <c>` | set it — semicolons become separate points |
 | `/topic agenda +<line>` | add one more point to what is there |
 | `/topic agenda clear` | drop it; back to the bare title |
-| `/attach <file>` | feed a document in; text is inlined into every prompt |
+| `/attach <file>` | feed a document in; text, PDF and Word are inlined into every prompt |
 | `/attach` | list them; `/attach rm <id>` removes one |
 | `/topic` | where you are, the agenda, and what else is open |
 | `/topic switch <slug>` | move to another topic |
