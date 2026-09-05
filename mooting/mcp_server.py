@@ -150,7 +150,7 @@ def mooting_propose(topic: str, title: str, body: str) -> str:
 
     A proposal is the only thing that can become action, and only a human closes
     it. Other agents may support or object; those votes are advisory. Propose when
-    the discussion has converged enough that a human could rule on it -- state the
+    the discussion has converged enough that a human could sign it off -- state the
     decision, the reasoning, and what changes if it is approved.
     """
     tid = _topic_id(topic)

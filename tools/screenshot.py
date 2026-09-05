@@ -76,7 +76,7 @@ CHROME = [
 ]
 
 
-def write_png(svg: str) -> pathlib.Path | None:
+def write_png(svg: str, name: str = "session") -> pathlib.Path | None:
     """Rasterise the same SVG through headless Chrome, at 2x for sharp text."""
     browser = next((c for c in CHROME if pathlib.Path(c).exists()), None) or shutil.which("chromium")
     if not browser:
@@ -96,7 +96,7 @@ def write_png(svg: str) -> pathlib.Path | None:
         "</style></head><body>" + svg + "</body></html>",
         encoding="utf-8")
 
-    out = OUT / "session.png"
+    out = OUT / f"{name}.png"
     r = subprocess.run(
         [browser, "--headless", "--disable-gpu", "--hide-scrollbars",
          "--default-background-color=00000000", "--force-device-scale-factor=2",
@@ -104,6 +104,56 @@ def write_png(svg: str) -> pathlib.Path | None:
         capture_output=True, text=True, encoding="utf-8", errors="replace")
     shutil.rmtree(tmp, ignore_errors=True)
     return out if out.exists() and r.returncode == 0 else None
+
+
+def build_unanimous(path):
+    """A board where every seat is in favour and it still has not passed.
+
+    The one-screen proof. Agreement among agents is loud and a status field that
+    does not change is quiet, which is the whole idea in one line: all of them
+    said yes, and it waited for you anyway. Built from the real board rather than
+    drawn, so it cannot claim something the code does not do.
+    """
+    b = connect(path, init=True)
+    b.add_agent("you", "human")
+    for name, kind in (("Santa", "claude"), ("Algae", "codex"), ("Gravity", "agy")):
+        b.add_agent(name, kind, driver="spawn")
+    tid = b.open_topic(
+        "retries", "Should webhook retries use exponential backoff?",
+        "The gateway retries on a fixed 30s schedule. Ops says that stampedes on "
+        "recovery. Decide.",
+        "you", seats=("Santa", "Algae", "Gravity", "you"), max_rounds=4)
+
+    pid = b.propose(tid, "Santa", "Cap retries at 6 with partial jitter",
+                    "Fixed 30s intervals stampede the gateway on recovery. Six "
+                    "attempts with partial jitter bounds the worst case without "
+                    "dropping deliveries that would have succeeded.")
+    for seat, why in (
+        ("Algae", "Agreed. Partial over full jitter is right when ordering matters."),
+        ("Gravity", "Support. Six is the number the runbook already assumes."),
+        ("Santa", "Mine, and I still think it is the smallest change that works."),
+    ):
+        b.vote(pid, seat, "support", why)
+
+    # Every seat in favour, and the proposal is still a draft. Nothing here
+    # decides it: there is no tool that could, and `Store.decide` would refuse.
+    assert b.proposal(pid)["status"] == "open", "the point of the picture"
+    b.close()
+    return pid
+
+
+async def shot_of(db, slug, typed, size=(118, 34)):
+    """One screenshot of the real TUI against a real board."""
+    app = MootApp(db, slug, "you")
+    app.board.auto = False              # never spawn a real CLI for a picture
+    async with app.run_test(size=size) as pilot:
+        await pilot.pause()
+        app.query_one("#say").value = typed
+        await pilot.pause()
+        svg = app.export_screenshot(title="mooting")
+    app.board.store.close()
+    app.drive_store.close()
+    return svg
 
 
 async def main() -> None:
@@ -131,6 +181,19 @@ async def main() -> None:
         print(f"wrote {png}  ({png.stat().st_size:,} bytes)")
     else:
         print("no Chrome found -- session.png not refreshed; it is now stale")
+
+    # The second picture: unanimous, and still waiting on a person.
+    tmp2 = tempfile.mkdtemp()
+    db2 = pathlib.Path(tmp2) / "board.db"
+    pid = build_unanimous(db2)
+    svg2 = await shot_of(db2, "retries", f"/approve {pid} agreed")
+    shutil.rmtree(tmp2, ignore_errors=True)
+    signoff = OUT / "signoff.svg"
+    signoff.write_text(svg2, encoding="utf-8")
+    print(f"wrote {signoff}  ({len(svg2):,} bytes)")
+    png2 = write_png(svg2, name="signoff")
+    if png2:
+        print(f"wrote {png2}  ({png2.stat().st_size:,} bytes)")
 
 
 if __name__ == "__main__":

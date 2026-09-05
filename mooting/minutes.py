@@ -112,7 +112,7 @@ def render(store: Store, topic_id: int, transcript: bool = True) -> str:
 
     still_open = [p for p in proposals if p["status"] == "open"]
     if still_open:
-        out += ["### Still awaiting a ruling", ""]
+        out += ["### Still awaiting sign-off", ""]
         out += [f"- **{p['title']}** — proposed by {p['author']}" for p in still_open]
         out += [""]
 

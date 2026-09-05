@@ -299,7 +299,7 @@ HELP = (
     "<b>who may speak</b>\n"
     "  <code>/pair</code> — ask to join; an existing member approves\n"
     "  <code>/pair list</code> · <code>/pair approve &lt;id&gt; &lt;seat&gt;</code>\n\n"
-    "<b>rule on it</b>\n"
+    "<b>sign it off</b>\n"
     "  a proposal arrives with Approve / Reject buttons; the reason\n"
     "  is the reply it asks you for"
 )

@@ -517,3 +517,110 @@ def test_setup_and_init_agree_about_where_a_board_lives(tmp_path, monkeypatch):
 
 async def _noop_coroutine():
     return None
+
+
+# ---------------------------------------------------- the absence, pinned
+#
+# The claim this project rests on is that an agent cannot sign off, and it rests
+# on a tool not existing. An absence is not something a reader can screenshot,
+# but it is something a test can hold: this one goes red the day anybody adds
+# the tool, the maintainer included.
+
+
+#: Words that would name a tool for closing a proposal. Matched loosely on
+#: purpose -- the point is not to ban a spelling, it is that the surface an agent
+#: sees never grows a way to end a deliberation.
+DECIDING_WORDS = ("decide", "approve", "reject", "rule", "signoff", "sign_off",
+                  "conclude", "resolve", "accept_proposal", "close_proposal")
+
+
+def _registered_tools() -> list[str]:
+    """Every tool the MCP server exposes, read from the server itself."""
+    import mooting.mcp_server as server
+
+    return [name for name in dir(server)
+            if name.startswith("mooting_") and callable(getattr(server, name))]
+
+
+def test_no_tool_an_agent_can_call_closes_a_proposal():
+    """The whole claim, as a check somebody else can run.
+
+    `Store.decide` refusing a non-human is the second line. This is the first:
+    there is nothing to call, so there is nothing to be talked into calling.
+    """
+    tools = _registered_tools()
+    assert tools, "found no tools -- the reading method broke, not the surface"
+
+    offending = [t for t in tools
+                 if any(word in t.lower() for word in DECIDING_WORDS)]
+    assert offending == [], (
+        f"a tool that reads as closing a proposal is on the agent surface: "
+        f"{offending}. Only a person closes one, and the way that is enforced is "
+        f"that there is nothing here to call."
+    )
+
+
+def test_the_task_verdict_tool_is_not_a_way_round_it():
+    """`mooting_task_update` takes `accepted`, which is the nearest thing to a
+    sign-off an agent holds. It rules on work inside an approved plan, and the
+    plan itself is a proposal only a person closes."""
+    import inspect
+
+    import mooting.mcp_server as server
+
+    source = inspect.getsource(server.mooting_task_update)
+    assert "update_task" in source
+    assert "decide" not in source, "the task path reaches the proposal gate"
+
+
+def test_the_gate_is_a_second_line_and_still_there(board):
+    """Belt and braces, and the braces are testable: even handed a proposal id
+    directly, a seat is refused."""
+    topic = board.open_topic("t", "T", "brief", "me", seats=("claude", "me"))
+    pid = board.propose(topic, "claude", "Adopt backoff", "body")
+
+    with pytest.raises(NotAuthorised):
+        board.decide(pid, "claude", approve=True, rationale="I approve of myself")
+    assert board.proposal(pid)["status"] == "open"
+
+
+# ------------------------------------------------- doctor asks for the refusal
+
+
+@pytest.mark.asyncio
+async def test_a_seat_asked_to_approve_reports_that_it_could_not(board):
+    """Reading the tool list proves the absence about the code. This proves it
+    about the CLI actually installed, which is the one that will be in a council.
+    """
+    from mooting.doctor import probe_refusal
+    from mooting.drivers import FakeDriver
+    from mooting.drivers.base import Seat
+
+    topic = board.open_topic("t", "T", "brief", "me", seats=("claude", "me"))
+    driver = FakeDriver(board)
+    seat = Seat(topic_id=topic, topic_slug="t", agent="claude", kind="claude",
+                cli_session=None)
+
+    said = await probe_refusal(board, driver, seat, topic, "claude")
+
+    assert said == "could not approve"
+    opened = [p for p in board.proposals(topic) if "Self-test" in p["title"]]
+    assert opened and opened[0]["status"] == "open", "a seat closed its own proposal"
+
+
+@pytest.mark.asyncio
+async def test_a_probe_that_blows_up_does_not_fail_the_run(board):
+    """`doctor` reports on seats; it is not a place to lose the report."""
+    from mooting.doctor import probe_refusal
+    from mooting.drivers.base import Seat
+
+    class Exploding:
+        async def wake(self, *a, **k):
+            raise RuntimeError("the CLI fell over")
+
+    topic = board.open_topic("t", "T", "brief", "me", seats=("claude", "me"))
+    seat = Seat(topic_id=topic, topic_slug="t", agent="claude", kind="claude",
+                cli_session=None)
+
+    said = await probe_refusal(board, Exploding(), seat, topic, "claude")
+    assert "could not be asked" in said

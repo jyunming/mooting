@@ -531,7 +531,7 @@ class Supervisor:
                 # an exhausted manager look like a successful run that did
                 # nothing: the only way to see it was to read `_has_budget`.
                 self._say_once(topic_id, f"budget:{manager}",
-                               f"{manager} has {len(reviewable)} task(s) to rule on "
+                               f"{manager} has {len(reviewable)} task(s) to sign off on "
                                f"and no turns left. `/rounds <n>` grants more.")
 
             # 4. Drafts the manager wrote go to the human as one plan.

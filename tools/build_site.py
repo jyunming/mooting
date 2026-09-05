@@ -73,7 +73,8 @@ def main() -> int:
     build_docs()
 
     (OUT / "assets").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ROOT / "docs" / "assets" / "session.svg", OUT / "assets" / "session.svg")
+    for shot in ("session.svg", "signoff.svg"):
+        shutil.copy2(ROOT / "docs" / "assets" / shot, OUT / "assets" / shot)
 
     html = landing_page()
     (OUT / "index.html").write_text(html, encoding="utf-8")

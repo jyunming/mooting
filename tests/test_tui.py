@@ -848,7 +848,7 @@ async def test_force_closes_it_as_it_stands(tmp_path, board, monkeypatch):
     assert board.topic("t")["status"] == "resolved"
     text = (tmp_path / "t-minutes.md").read_text(encoding="utf-8")
     assert "no agreement reached" in text
-    assert "Still awaiting a ruling" in text, "an unruled proposal must still show"
+    assert "Still awaiting sign-off" in text, "a proposal nobody closed shows"
 
 
 @pytest.mark.asyncio

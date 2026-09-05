@@ -461,7 +461,7 @@ class MootApp(App):
         pid = field(m, "proposal_id")
         if m["kind"] == "propose" and pid:
             pieces.append(Padding(
-                Text(f"◆ proposal #{pid} — /approve {pid} <why> to rule on it",
+                Text(f"◆ proposal #{pid} — /approve {pid} <why> to sign it off",
                      "bold yellow"), (0, 1), style=bg))
         # Padding, not a bare style: it extends the band across the full width, so
         # a reply is one block rather than a ragged right edge following the text.
@@ -530,7 +530,7 @@ class MootApp(App):
             return self._render_message(row)
         if ev.kind == "proposal" and ev.payload.get("action") == "opened":
             pid = ev.payload["proposal_id"]
-            self.notify_turn(f"proposal #{pid} needs your ruling")
+            self.notify_turn(f"proposal #{pid} needs your sign-off")
             try:
                 return self._render_proposal(store.proposal(pid))
             except Exception as exc:
@@ -617,7 +617,7 @@ class MootApp(App):
             # council has stopped and cannot continue until you answer. Recover
             # it from the board instead of from an event that already happened.
             self._waiting = (f"{waiting[0]['asker']} is waiting on your answer"
-                             if waiting else "a proposal is waiting on your ruling")
+                             if waiting else "a proposal is waiting on your sign-off")
 
         # The clearest place to say "answer here" is the box you would type in.
         box = self.query_one("#say", Input)

@@ -63,7 +63,13 @@ does, on the plan you already pay for.
 **The call is yours.** Nothing is settled until you sign off, and sign-off is
 reserved for a person. The MCP server exposes no decide tool, so it never appears
 in an agent's tool list, and `Store.decide` accepts only a human. Both are in code,
-not in prompts.
+not in prompts, and [a test in CI](tests/test_audit.py) goes red the day either
+stops being true — for the maintainer too.
+
+<img alt="A Mooting board where all three agents voted support, the proposal is still open, and the status bar reads: a proposal is waiting on your sign-off." src="https://raw.githubusercontent.com/jyunming/mooting/main/docs/assets/signoff.png" width="820">
+
+<sub>Every seat in favour, and the proposal is still open. Exported from the
+running program.</sub>
 
 **Crashes are cheap.** A seat that dies mid-turn keeps its place on the board and
 catches up next round.
