@@ -357,3 +357,42 @@ def test_the_private_room_and_the_group_keep_separate_teams(tmp_path):
         assert seats["dinner-plans"] == (rooms["-100"], ["agy", "claude", "codex", "me"])
     finally:
         s.close()
+
+
+# -------------------------------- setting a budget to what it already is
+
+
+def test_setting_the_rounds_to_what_they_already_are_says_so(console):
+    """Silence-shaped failure: `/rounds 5` on a five-round topic is a no-op, and
+    printing "round 3 of 5" back reads as though it worked. Somebody meaning
+    "five more" typed it twice and watched a capped council stay capped."""
+    console.store.set_rounds(console.topic_id, 5, "me")
+    out = []
+    console.emit = out.append
+
+    console._rounds("5")
+
+    said = " ".join(out)
+    assert "nothing changed" in said, f"a no-op reported as a change: {said}"
+    assert "/rounds +5" in said, "the way to actually get five more was not named"
+    assert console.store.topic(console.topic_id)["max_rounds"] == 5
+
+
+def test_asking_for_more_rounds_gets_them(console):
+    console.store.set_rounds(console.topic_id, 5, "me")
+    console.emit = lambda *a, **k: None
+
+    console._rounds("+5")
+
+    assert console.store.topic(console.topic_id)["max_rounds"] == 10
+
+
+def test_raising_the_total_outright_still_works(console):
+    console.store.set_rounds(console.topic_id, 5, "me")
+    out = []
+    console.emit = out.append
+
+    console._rounds("9")
+
+    assert console.store.topic(console.topic_id)["max_rounds"] == 9
+    assert "nothing changed" not in " ".join(out)

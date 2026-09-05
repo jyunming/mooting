@@ -1623,3 +1623,25 @@ def test_a_message_with_no_file_is_not_one():
 
     assert file_in(_Msg()) == (None, None)
     assert file_in(_Msg(photo=[])) == (None, None), "an empty photo list is not a file"
+
+
+# ------------------------------------ a button must send what it says
+
+
+def test_the_rounds_button_adds_rather_than_sets():
+    """The button is labelled `+5` and the chooser asks "how many more", but it
+    sent `/rounds 5` -- which sets the total. On a topic already at five rounds
+    that changed nothing, twice, and reported the unchanged number as success."""
+    from mooting.telegram import command_for
+
+    assert command_for("rounds", "5") == "/rounds +5"
+    assert command_for("rounds", "1") == "/rounds +1"
+
+
+def test_the_other_choosers_are_not_additive():
+    """Only rounds is a quantity to add to. `/effort +high` is nonsense."""
+    from mooting.telegram import command_for
+
+    assert command_for("effort", "high") == "/effort high"
+    assert command_for("chair", "Amber") == "/topic chair Amber"
+    assert command_for("wake", "Santa") == "/nudge Santa"
