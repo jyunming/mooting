@@ -174,7 +174,7 @@ mooting setup                # finds your CLIs, seats them, wires them up, prove
 mooting tui
 ```
 
-!!! note "`mooting setup` offers one real turn per seat — say yes"
+!!! note "`mooting setup` offers two real turns per seat — say yes"
 
     A CLI can start, load the MCP server, refuse to call it and still exit 0, so
     checking the exit code proves nothing. The probe checks what actually reached

@@ -173,8 +173,10 @@ all living in the gap between "the terminal tolerates this" and "a chat does
 not". If you change that surface, drive it against a real chat before believing
 it works.
 
-The same holds for the drivers: `mooting doctor` spends one real turn per seat
-on purpose, because that is the only check that sees what the CLIs actually do.
+The same holds for the drivers: `mooting doctor` spends two real turns per seat
+on purpose — one that has to reach the board, one that is asked to sign off and
+has to fail — because that is the only check that sees what the CLIs actually
+do. It costs metered quota, so do not add a third turn without a reason as good.
 
 ## Open questions
 

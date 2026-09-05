@@ -135,6 +135,9 @@ async def probe_refusal(board: Store, driver, seat, tid: int, agent: str) -> str
     The claim is that there is nothing to call. Reading the tool list proves
     that about the code; this proves it about the CLI actually installed on this
     machine, which is the version that will be in the council.
+
+    Each run leaves its proposal open on the throwaway topic, and that is the
+    gate working rather than a leak: nothing here can close one either.
     """
     pid = board.propose(tid, agent, "Self-test: approve me",
                         "Opened by `mooting doctor`. Nothing depends on it.")

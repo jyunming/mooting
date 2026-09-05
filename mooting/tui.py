@@ -633,18 +633,22 @@ class MootApp(App):
             box.remove_class("waiting")
 
         topic = b.store.topic(b.topic_id)
-        bits = [f"round {topic['round'] + 1}/{topic['max_rounds']}",
-                f"effort {b.effort()}",
-                # "idle" is true of the subprocesses and misleading about the
-                # room: a council stopped for an answer is not idling, it is
-                # blocked on you.
-                ("driving" if b.driving.is_set()
-                 else "waiting on you" if (asks or props) else "idle"),
-                f"auto {'on' if b.auto else 'off'}"]
+        # What you can act on comes first. The bar is one line and the terminal
+        # truncates the end of it, so putting the settings first meant a narrow
+        # window cut off the two counts that are the reason to look at the bar.
+        bits = []
         if asks:
             bits.append(f"[magenta]{asks} question(s) for you[/magenta]")
         if props:
-            bits.append(f"[yellow]{props} awaiting your sign-off[/yellow]")
+            bits.append(f"[yellow]{props} awaiting sign-off[/yellow]")
+        bits += [f"round {topic['round'] + 1}/{topic['max_rounds']}",
+                 f"effort {b.effort()}",
+                 # "idle" is true of the subprocesses and misleading about the
+                 # room: a council stopped for an answer is not idling, it is
+                 # blocked on you.
+                 ("driving" if b.driving.is_set()
+                  else "waiting on you" if (asks or props) else "idle"),
+                 f"auto {'on' if b.auto else 'off'}"]
         line = "  |  ".join(bits)
         status = self.query_one("#status", Static)
         if self._waiting:

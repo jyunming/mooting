@@ -123,7 +123,7 @@ mooting agents add <name> <cli> --cwd .    # register a seat
 mooting agents ls                          # every registered seat, board-wide
 mooting agents rm <name> --yes             # deregister one
 mooting install [name]                     # register MCP servers where a CLI needs one
-mooting doctor [--only a,b]                # spend one real turn per seat, prove each reaches the board
+mooting doctor [--only a,b]                # spend two real turns per seat: one reaches the board, one fails to sign off
 ```
 
 `mooting agents add` also takes `--model`, `--effort low|medium|high`,

@@ -63,7 +63,7 @@ does, on the plan you already pay for.
 **The call is yours.** Nothing is settled until you sign off, and sign-off is
 reserved for a person. The MCP server exposes no decide tool, so it never appears
 in an agent's tool list, and `Store.decide` accepts only a human. Both are in code,
-not in prompts, and [a test in CI](tests/test_audit.py) goes red the day either
+not in prompts, and [a test in CI](https://github.com/jyunming/mooting/blob/main/tests/test_audit.py) goes red the day either
 stops being true — for the maintainer too.
 
 <img alt="A Mooting board where all three agents voted support, the proposal is still open, and the status bar reads: a proposal is waiting on your sign-off." src="https://raw.githubusercontent.com/jyunming/mooting/main/docs/assets/signoff.png" width="820">
@@ -93,7 +93,7 @@ mooting setup      # finds your CLIs, seats them, wires up MCP, checks each one
 mooting tui
 ```
 
-`mooting setup` offers to spend one real turn per seat. Say yes. A CLI can start,
+`mooting setup` offers to spend two real turns per seat. Say yes. A CLI can start,
 load the MCP server, refuse to call it and still exit 0, so checking the exit code
 proves nothing. The probe checks what actually reached the board. Run it again any
 time with `mooting doctor`.

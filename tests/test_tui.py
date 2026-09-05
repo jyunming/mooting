@@ -782,7 +782,7 @@ async def test_an_open_proposal_is_visible_when_you_open_the_topic(tmp_path, boa
 
         # And the status bar and input both say something is waiting.
         app.refresh_board()
-        assert "awaiting your sign-off" in str(app.query_one("#status", Static).content)
+        assert "awaiting sign-off" in str(app.query_one("#status", Static).content)
         assert "/approve" in app.query_one("#say", Input).placeholder
 
 

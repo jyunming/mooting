@@ -105,4 +105,4 @@ nothing is unmeasured, not free.
 | `gemini` | no structured output requested |
 
 `mooting doctor` answers it for your machine rather than from this table: it
-already spends one real turn per seat, and now says what that turn reported.
+already spends real turns on each seat, and now says what they reported.

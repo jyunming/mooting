@@ -149,7 +149,10 @@ async def shot_of(db, slug, typed, size=(118, 34)):
     async with app.run_test(size=size) as pilot:
         await pilot.pause()
         app.query_one("#say").value = typed
-        await pilot.pause()
+        # One pause is not enough: the key bar along the bottom fills in a frame
+        # later, and a picture that caught it half-drawn shipped once already.
+        for _ in range(4):
+            await pilot.pause()
         svg = app.export_screenshot(title="mooting")
     app.board.store.close()
     app.drive_store.close()
@@ -168,7 +171,8 @@ async def main() -> None:
     async with app.run_test(size=(118, 34)) as pilot:
         await pilot.pause()
         app.query_one("#say").value = "the gateway uses a fixed 30s, no cap"
-        await pilot.pause()
+        for _ in range(4):
+            await pilot.pause()
         svg = app.export_screenshot(title="mooting")
     app.board.store.close()
     app.drive_store.close()
