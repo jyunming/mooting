@@ -577,6 +577,29 @@ def parse_rule(data: str) -> tuple[str, int] | None:
     return parts[1], int(parts[2])
 
 
+#: Everything a phone can put in a chat, and what to call it once it is a
+#: file on disk. Only `document` was handled, so attaching worked for a file
+#: picked out of Files and did nothing at all for a photo -- which is what
+#: the share sheet sends, and the most likely thing anybody attaches from a
+#: phone. Silence looked like a broken bot rather than an unsupported kind.
+def file_in(msg: Message):
+    """The attachment on this message as (object, filename), or (None, None)."""
+    doc = getattr(msg, "document", None)
+    if doc is not None:
+        return doc, doc.file_name or f"attachment-{doc.file_unique_id}"
+    shots = getattr(msg, "photo", None)
+    if shots:
+        # A list of sizes, smallest first. The last one is the original.
+        return shots[-1], f"photo-{shots[-1].file_unique_id}.jpg"
+    for attr, ext in (("video", "mp4"), ("audio", "mp3"), ("voice", "ogg"),
+                      ("animation", "gif"), ("video_note", "mp4")):
+        got = getattr(msg, attr, None)
+        if got is not None:
+            named = getattr(got, "file_name", None)
+            return got, named or f"{attr}-{got.file_unique_id}.{ext}"
+    return None, None
+
+
 def plain(rendered: str) -> str:
     """Tags stripped, for when Telegram rejects the formatted version."""
     return html.unescape(re.sub(r"<[^>]+>", "", rendered))
@@ -1081,13 +1104,13 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
                 msg.chat.id, pid,
                 f"{who}" + (f", added by {added_by}" if added_by else ""))
 
-    @dp.message(lambda m: m.document is not None)
+    @dp.message(lambda m: file_in(m)[0] is not None)
     async def on_document(msg: Message):
         """A file sent to the chat becomes an attachment on the topic.
 
         `/attach <path>` names a file on the machine running the bot, which is
-        not the machine you are holding. Sending the document *is* the gesture
-        on a phone, so it is the one that works.
+        not the machine you are holding. Sending the file *is* the gesture on a
+        phone, so it is the one that works -- whatever the share sheet made it.
         """
         if not await allowed(msg.chat.id, msg.from_user.id,
                              msg.chat.type == "private"):
@@ -1102,8 +1125,7 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
 
         import tempfile
 
-        doc = msg.document
-        name = doc.file_name or f"attachment-{doc.file_unique_id}"
+        doc, name = file_in(msg)
         try:
             buf = await bot.download(doc)
         except Exception as exc:
