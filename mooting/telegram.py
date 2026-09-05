@@ -1125,6 +1125,8 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
 
         import tempfile
 
+        from .extract import missing_reader
+
         doc, name = file_in(msg)
         try:
             buf = await bot.download(doc)
@@ -1143,8 +1145,13 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             shutil.rmtree(tmp.parent, ignore_errors=True)
 
         row = store.q1("SELECT * FROM attachments WHERE id = ?", (aid,))
-        how = ("its text goes into every seat's next prompt" if row["is_text"]
-               else "binary — the seats get its name and path, not its contents")
+        if row["is_text"]:
+            how = "its text goes into every seat's next prompt"
+        else:
+            # "binary" alone reads as a limit of the tool. When the only thing
+            # in the way is an extra nobody installed, say which one.
+            how = (missing_reader(row["name"])
+                   or "the seats get its name and path, not its contents")
         await say(msg.chat.id,
                   f"Attached **{row['name']}** ({row['bytes']:,} bytes) — {how}.")
 

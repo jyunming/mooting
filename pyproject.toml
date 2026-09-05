@@ -30,8 +30,11 @@ dependencies = [
 serve = ["aiohttp>=3.9"]
 telegram = ["aiogram>=3"]
 web = ["textual-serve>=1"]
+# Word and PowerPoint files are zip archives of XML and need nothing. A PDF
+# needs a parser, and a board that never sees one should not carry it.
+pdf = ["pypdf>=4"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "aiohttp>=3.9", "aiogram>=3",
-       "textual-serve>=1"]
+       "textual-serve>=1", "pypdf>=4"]
 
 [project.urls]
 Homepage = "https://jyunming.github.io/mooting/"

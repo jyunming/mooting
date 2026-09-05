@@ -191,8 +191,9 @@ question to one seat and the others wait for the answer.
   by number, buttons included, whenever it was opened.
 - `/minutes` sends the write-up as a file; `/minutes decisions` returns the
   decisions as text; `/conclude` ends the meeting and delivers both.
-- Send a file to the chat and it is attached to the topic. Text goes into every
-  seat's next prompt.
+- Send anything to the chat -- a file, a photo, a voice note -- and it is
+  attached to the topic. Text, PDF and Word go into every seat's next prompt;
+  anything else the seats get by name and path only.
 - `/topic agenda`, `/rounds`, `/effort`, `/seats` — the same commands as the
   terminal session, because it is the same dispatch behind them.
 

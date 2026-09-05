@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from .drivers.base import Driver, Seat, WakeResult
+from .extract import text_of
 from .store import Store, StoreError
 
 log = logging.getLogger("mooting.supervisor")
@@ -78,13 +79,13 @@ def _attachment_section(store, topic_id: int, budget: int) -> list[str]:
         if a["note"]:
             head += f" — {a['note']}"
         lines += [head, f"`{a['path']}`", ""]
-        if not a["is_text"]:
+        # Asked here rather than trusting the `is_text` recorded at attach time.
+        # A file attached before this machine could read its format -- a PDF on
+        # a board without the extra installed -- starts being inlined once it
+        # can, instead of needing to be sent again.
+        body = text_of(a["path"])
+        if body is None:
             lines += ["_Not text; open it from that path if you can._", ""]
-            continue
-        try:
-            body = pathlib.Path(a["path"]).read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            lines += [f"_Could not be read back: {exc}_", ""]
             continue
         room = budget - spent
         if room <= 0:
