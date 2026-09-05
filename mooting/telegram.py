@@ -727,7 +727,28 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
                 await bot.send_message(chat_id, plain(piece))
                 log.warning("fell back to plain text: %s", exc)
 
-    def allowed(chat_id) -> bool:
+    async def allowed(chat_id, user_id=None, private=False) -> bool:
+        # A direct message is your own room: one person, and whatever the group
+        # has no business seeing. It opens on the first message, but only for an
+        # account bound to a seat by a redeemed claim code -- a room nobody can
+        # look into still spends the owner's metered CLIs, so being trusted in
+        # somebody's group does not earn one.
+        if private and user_id is not None:
+            if store.private_room(str(user_id)):
+                pass                        # the check below now finds the room
+            elif store.seat_for_user(str(user_id)):
+                # Known in a group, unbound here. Silence would read as a broken
+                # bot to somebody the board has already met, so say the one
+                # thing that would change it.
+                await bot.send_message(
+                    chat_id,
+                    "You hold a seat in a group I run, but a private room needs "
+                    "a code from the machine hosting the board.\n\n"
+                    "Ask the host to run <code>mooting claim</code> and send you "
+                    "the code, then send it here as <code>/pair &lt;code&gt;</code>.",
+                    parse_mode=ParseMode.HTML)
+                return False
+
         # Default deny. Without an allowlist this answered anywhere it was
         # added, so anybody who knew the bot's name could stand up a group and
         # start talking to somebody else's board. A room is known once a code
@@ -784,7 +805,8 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
 
     @dp.message(Command("start", "help"))
     async def on_help(msg: Message):
-        if not allowed(msg.chat.id):
+        if not await allowed(msg.chat.id, msg.from_user.id,
+                             msg.chat.type == "private"):
             return
         if store.seat_for_chat(msg.chat.id, msg.from_user.id):
             return await bot.send_message(msg.chat.id, HELP,
@@ -836,7 +858,8 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
                     f"\n\nThis chat is `{msg.chat.id}` — pass "
                     f"`--chat {msg.chat.id}` when starting the bot to keep it to "
                     f"this room only.")
-        if not allowed(msg.chat.id):
+        if not await allowed(msg.chat.id, msg.from_user.id,
+                             msg.chat.type == "private"):
             return
         seat = store.seat_for_chat(msg.chat.id, msg.from_user.id)
 
@@ -922,7 +945,8 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         comes back, and the decisions come back as text you can read without
         opening anything.
         """
-        if not allowed(msg.chat.id):
+        if not await allowed(msg.chat.id, msg.from_user.id,
+                             msg.chat.type == "private"):
             return
         if not store.seat_for_chat(msg.chat.id, msg.from_user.id):
             return await say(msg.chat.id, "You are not paired here.")
@@ -943,7 +967,8 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         Same reason as `/minutes`: the console closes a topic and tells you
         where it put the file, which on a phone names a place you cannot reach.
         """
-        if not allowed(msg.chat.id):
+        if not await allowed(msg.chat.id, msg.from_user.id,
+                             msg.chat.type == "private"):
             return
         seat = store.seat_for_chat(msg.chat.id, msg.from_user.id)
         if not seat:
@@ -1018,7 +1043,8 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         somebody is not. Without this the bot never saw a person arrive at all,
         so joining did nothing and the newcomer had to know to type `/pair`.
         """
-        if not allowed(msg.chat.id):
+        if not await allowed(msg.chat.id, msg.from_user.id,
+                             msg.chat.type == "private"):
             return
         room_id = store.ensure_room("telegram", str(msg.chat.id))
         host = store.room_host(room_id)
@@ -1063,7 +1089,8 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         not the machine you are holding. Sending the document *is* the gesture
         on a phone, so it is the one that works.
         """
-        if not allowed(msg.chat.id):
+        if not await allowed(msg.chat.id, msg.from_user.id,
+                             msg.chat.type == "private"):
             return
         seat = store.seat_for_chat(msg.chat.id, msg.from_user.id)
         if not seat:
@@ -1109,7 +1136,8 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         having just said it was thinking. The supervisor has to outlive the
         message that started it, so the bot owns it, one task per topic.
         """
-        if not allowed(msg.chat.id):
+        if not await allowed(msg.chat.id, msg.from_user.id,
+                             msg.chat.type == "private"):
             return
         seat = store.seat_for_chat(msg.chat.id, msg.from_user.id)
         if not seat:
@@ -1181,7 +1209,8 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
 
     @dp.message(Command("stop"))
     async def on_stop(msg: Message):
-        if not allowed(msg.chat.id):
+        if not await allowed(msg.chat.id, msg.from_user.id,
+                             msg.chat.type == "private"):
             return
         if not store.seat_for_chat(msg.chat.id, msg.from_user.id):
             return await say(msg.chat.id, "You are not paired here.")
@@ -1338,7 +1367,7 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         joining = parse_join(call.data or "")
         if joining is not None:
             action, pid = joining
-            if not allowed(chat_id):
+            if not await allowed(chat_id):
                 return await call.answer("not this chat", show_alert=True)
             presser = store.seat_for_chat(chat_id, call.from_user.id)
             room_id = store.ensure_room("telegram", str(chat_id))
@@ -1375,7 +1404,7 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         chosen = parse_set(call.data or "")
         if chosen is not None:
             what, value = chosen
-            if not allowed(chat_id):
+            if not await allowed(chat_id):
                 return await call.answer("not this chat", show_alert=True)
             seat = store.seat_for_chat(chat_id, call.from_user.id)
             if not seat:
@@ -1393,7 +1422,7 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
 
         picked = parse_pick(call.data or "")
         if picked is not None:
-            if not allowed(chat_id):
+            if not await allowed(chat_id):
                 return await call.answer("not this chat", show_alert=True)
             if not store.seat_for_chat(chat_id, call.from_user.id):
                 return await call.answer(
@@ -1411,7 +1440,7 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         if parsed is None:
             return await call.answer()
         what, pid = parsed
-        if not allowed(chat_id):
+        if not await allowed(chat_id):
             return await call.answer("not this chat", show_alert=True)
 
         seat = store.seat_for_chat(chat_id, call.from_user.id)
@@ -1471,7 +1500,8 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
 
     @dp.message()
     async def on_message(msg: Message):
-        if not allowed(msg.chat.id) or not (msg.text or "").strip():
+        if not (msg.text or "").strip() or not await allowed(
+                msg.chat.id, msg.from_user.id, msg.chat.type == "private"):
             return
         if await finish_ruling(msg):
             return

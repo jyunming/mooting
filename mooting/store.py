@@ -1158,6 +1158,31 @@ class Store:
         row = self.q1("SELECT name FROM agents WHERE tg_user_id = ?", (str(user_id),))
         return row["name"] if row else None
 
+    def private_room(self, user_id: str, channel: str = "telegram") -> str | None:
+        """Open this account's own room, if it is entitled to one. Its seat, or None.
+
+        A direct message is a room with one person in it, and it is where you
+        keep work the group has no business seeing. That makes it worth more
+        than a group chat, not less: a room nobody else can look into still
+        spends the owner's metered CLIs, so being trusted in somebody's group is
+        not enough to get one. The gate is a bound identity -- a code redeemed
+        from the terminal the board lives on -- which is the one thing a person
+        who is merely in the group cannot produce.
+
+        Idempotent: the second message from the same account finds the room.
+        """
+        seat = self.seat_for_identity(user_id)
+        if not seat:
+            return None
+        room = self.ensure_room(channel, str(user_id))
+        self.claim_room(room, seat)
+        if not self.pairing(str(user_id), str(user_id), channel):
+            pid = self.pair_request(str(user_id), str(user_id), seat, channel)
+            # Approved by the seat itself, which is the honest record: nobody
+            # else vouched for this, the code from the machine did.
+            self.pair_approve(pid, seat, seat)
+        return seat
+
     def seat_for_user(self, user_id: str, channel: str = "telegram") -> str | None:
         """The seat this account already holds, in any room.
 

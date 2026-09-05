@@ -1504,3 +1504,66 @@ def test_the_standing_keyboard_is_the_things_done_most_often():
     assert flat == sorted(set(flat), key=flat.index), "a button appears twice"
     for label in flat:
         assert label.startswith("/"), label
+
+
+# ------------------------------------------------- a private chat is a room
+
+
+def test_a_bound_account_gets_its_own_room(board):
+    """A direct message is where you keep work the group has no business
+    seeing, so it is a room like any other -- with one person in it."""
+    board.bind_identity("jeremy", "111")          # redeemed a code from the machine
+
+    assert board.private_room("111") == "jeremy"
+
+    room = board.room("telegram", "111")
+    assert room is not None and room["host"] == "jeremy"
+    assert board.pairings("approved", chat_id="111"), "the room refuses its own owner"
+
+
+def test_opening_the_same_private_room_twice_is_the_same_room(board):
+    """Every message from that account calls this. It must not stack up rooms."""
+    board.bind_identity("jeremy", "111")
+    first, second = board.private_room("111"), board.private_room("111")
+
+    assert first == second == "jeremy"
+    assert len([r for r in board.rooms() if r["chat_id"] == "111"]) == 1
+
+
+def test_being_trusted_in_a_group_does_not_earn_a_private_room(board):
+    """The hole this closes: a room nobody else can look into still spends the
+    owner's metered CLIs. Somebody approved into a group was vouched for *in
+    that group*, where the host can see what they are doing. A private room is
+    the opposite of that, so it takes the stronger proof -- a code redeemed from
+    the terminal the board lives on, which a group member cannot produce."""
+    board.add_agent("amber", "human")
+    pid = board.pair_request("-100", "222", "Amber")
+    board.pair_approve(pid, "amber", "jeremy")
+    assert board.seat_for_user("222") == "amber", "she is known to the board"
+
+    assert board.private_room("222") is None, "a group member let herself in"
+    assert board.room("telegram", "222") is None
+
+
+def test_a_stranger_gets_no_private_room(board):
+    assert board.private_room("999") is None
+    assert board.room("telegram", "999") is None
+
+
+def test_a_private_topic_stays_out_of_the_group(board):
+    """The whole point of the split: private projects in the direct message,
+    friends in the group, and neither one leaking into the other."""
+    board.bind_identity("jeremy", "111")
+    board.private_room("111")
+    mine = board.room("telegram", "111")["id"]
+    theirs = board.ensure_room("telegram", "-100")
+
+    private = board.open_topic("taxes", "T", "b", "jeremy", seats=("santa",),
+                               room_id=mine)
+    shared = board.open_topic("dinner", "T", "b", "jeremy", seats=("santa",),
+                              room_id=theirs)
+
+    assert board.topic_visible_in(private, mine)
+    assert not board.topic_visible_in(private, theirs), "a private topic reached the group"
+    assert board.topic_visible_in(shared, theirs)
+    assert not board.topic_visible_in(shared, mine), "the group reached into the private room"
