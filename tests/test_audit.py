@@ -640,6 +640,8 @@ def _tools_over_stdio(db_path) -> list[str]:
     import json
     import subprocess
     import sys
+    import tempfile
+    import threading
 
     calls = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
@@ -648,19 +650,44 @@ def _tools_over_stdio(db_path) -> list[str]:
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
     ]
-    out = subprocess.run(
-        [sys.executable, "-X", "utf8", "-m", "mooting.mcp_server",
-         "--agent", "claude", "--db", str(db_path)],
-        input="\n".join(json.dumps(c) for c in calls),
-        capture_output=True, text=True, encoding="utf-8", timeout=60).stdout
+    # stderr goes to a file, not a pipe: a pipe nobody drains fills up and stops
+    # the server mid-answer, which would be a hang rather than a failure.
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as errfile:
+        proc = subprocess.Popen(
+            [sys.executable, "-X", "utf8", "-m", "mooting.mcp_server",
+             "--agent", "claude", "--db", str(db_path)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errfile,
+            text=True, encoding="utf-8", bufsize=1)
 
-    for line in out.splitlines():
-        if not line.startswith("{"):
-            continue
-        msg = json.loads(line)
-        if msg.get("id") == 2:
-            return sorted(t["name"] for t in msg["result"]["tools"])
-    raise AssertionError(f"no tools/list answer from the server; got: {out[:400]}")
+        # stdin stays open until the answer is in hand. Closing it after writing
+        # -- what `subprocess.run(input=...)` does -- is an EOF the server reads
+        # as shutdown, and on a slow runner it shut down before answering.
+        watchdog = threading.Timer(60, proc.kill)
+        watchdog.start()
+        seen: list[str] = []
+        try:
+            try:
+                for call in calls:
+                    proc.stdin.write(json.dumps(call) + "\n")
+                proc.stdin.flush()
+            except OSError:
+                pass                      # it died early; the error is below
+            for line in proc.stdout:
+                seen.append(line)
+                if not line.startswith("{"):
+                    continue
+                msg = json.loads(line)
+                if msg.get("id") == 2:
+                    return sorted(t["name"] for t in msg["result"]["tools"])
+        finally:
+            watchdog.cancel()
+            proc.kill()
+            proc.wait(timeout=10)
+
+        errfile.seek(0)
+        raise AssertionError(
+            f"no tools/list answer from the server.\n"
+            f"stdout: {''.join(seen)[:400]}\nstderr: {errfile.read()[:300]}")
 
 
 def test_the_server_serves_no_deciding_tool_over_the_protocol(board):
