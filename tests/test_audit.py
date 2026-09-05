@@ -624,3 +624,60 @@ async def test_a_probe_that_blows_up_does_not_fail_the_run(board):
 
     said = await probe_refusal(board, Exploding(), seat, topic, "claude")
     assert "could not be asked" in said
+
+
+
+# ----------------------------------------------- the absence, on the wire
+
+
+def _tools_over_stdio(db_path) -> list[str]:
+    """Every tool name the server answers `tools/list` with.
+
+    Reading `dir(mcp_server)` reads Python names. This reads the protocol, which
+    is what a CLI is actually handed -- and `@mcp.tool(name=...)` can register a
+    wire name that has nothing to do with the function's.
+    """
+    import json
+    import subprocess
+    import sys
+
+    calls = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2024-11-05", "capabilities": {},
+            "clientInfo": {"name": "audit", "version": "0"}}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+    ]
+    out = subprocess.run(
+        [sys.executable, "-X", "utf8", "-m", "mooting.mcp_server",
+         "--agent", "claude", "--db", str(db_path)],
+        input="\n".join(json.dumps(c) for c in calls),
+        capture_output=True, text=True, encoding="utf-8", timeout=60).stdout
+
+    for line in out.splitlines():
+        if not line.startswith("{"):
+            continue
+        msg = json.loads(line)
+        if msg.get("id") == 2:
+            return sorted(t["name"] for t in msg["result"]["tools"])
+    raise AssertionError(f"no tools/list answer from the server; got: {out[:400]}")
+
+
+def test_the_server_serves_no_deciding_tool_over_the_protocol(board):
+    """The same absence as above, checked where an agent meets it.
+
+    This also catches the version of the failure that has nothing to do with
+    intent: `mcp` 2.x renamed FastMCP, and the server that would not start is a
+    server whose tool list nobody can read.
+    """
+    names = _tools_over_stdio(board.path)
+
+    assert names, "the server answered with no tools at all"
+    assert "mooting_say" in names, "the tool list does not look like Mooting's"
+
+    offending = [n for n in names
+                 if any(word in n.lower() for word in DECIDING_WORDS)]
+    assert offending == [], (
+        f"the server offers {offending} over the protocol. That is the tool list "
+        f"a CLI is handed, so this is the surface that decides the claim."
+    )

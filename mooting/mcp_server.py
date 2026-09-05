@@ -24,7 +24,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+try:
+    # mcp 2.x renamed FastMCP to MCPServer. The three things used here -- the
+    # constructor, `.tool()` and `.run()` over stdio -- are the same on both, so
+    # a seat works either way. Without this a fresh `pip install mooting` picks
+    # up 2.x and every seat fails to load its server.
+    from mcp.server.mcpserver import MCPServer as _Server
+except ModuleNotFoundError:                                          # mcp 1.x
+    from mcp.server.fastmcp import FastMCP as _Server
 
 from .store import Store, StoreError, connect
 
@@ -33,7 +40,7 @@ from .store import Store, StoreError, connect
 AGENT: str = os.environ.get("MOOTING_AGENT", "unknown")
 BOARD: Store | None = None
 
-mcp = FastMCP("mooting")
+mcp = _Server("mooting")
 
 
 def board() -> Store:
