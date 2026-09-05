@@ -316,3 +316,44 @@ def test_a_second_session_cannot_drive_the_same_topic(console, tmp_path):
         assert other.take_drive(console.topic_id, "a-third-session") == "another-session"
     finally:
         other.close()
+
+
+# ------------------------------- a private room keeps its own team
+
+
+def test_the_private_room_and_the_group_keep_separate_teams(tmp_path):
+    """Private projects in a direct message, friends in a group. Setting the
+    team in one must not touch the other, and a meeting opened in either must
+    start with that room's people -- otherwise the split is cosmetic."""
+    db = tmp_path / "board.db"
+    s = connect(db, init=True)
+    s.add_agent("me", "human")
+    for name, kind in (("claude", "claude"), ("codex", "codex"), ("agy", "agy")):
+        s.add_agent(name, kind, driver="spawn")
+    s.bind_identity("me", "111")
+    s.private_room("111")                      # the direct message
+    s.ensure_room("telegram", "-100")          # the group
+    s.close()
+
+    def run(chat, *lines):
+        con = Console(db, None, "me", room=("telegram", chat))
+        con.emit = lambda *a, **k: None
+        for line in lines:
+            con.handle(line)
+        con.store.close()
+
+    run("111", "/team claude", "/topic new my taxes")
+    run("-100", "/team claude codex agy", "/topic new dinner plans")
+
+    s = connect(db)
+    try:
+        rooms = {r["chat_id"]: int(r["id"]) for r in s.rooms()}
+        assert s.room_team(rooms["111"]) == ["claude"]
+        assert s.room_team(rooms["-100"]) == ["claude", "codex", "agy"]
+
+        seats = {t["slug"]: (t["room_id"], sorted(x["agent"] for x in s.seats(t["id"])))
+                 for t in s.topics()}
+        assert seats["my-taxes"] == (rooms["111"], ["claude", "me"])
+        assert seats["dinner-plans"] == (rooms["-100"], ["agy", "claude", "codex", "me"])
+    finally:
+        s.close()
