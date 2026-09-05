@@ -1567,3 +1567,59 @@ def test_a_private_topic_stays_out_of_the_group(board):
     assert not board.topic_visible_in(private, theirs), "a private topic reached the group"
     assert board.topic_visible_in(shared, theirs)
     assert not board.topic_visible_in(shared, mine), "the group reached into the private room"
+
+
+# ----------------------------------------- what a phone can actually attach
+
+
+class _Thing:
+    """Stands in for a Telegram media object: an id and maybe a name."""
+
+    def __init__(self, uid, file_name=None):
+        self.file_unique_id, self.file_name = uid, file_name
+
+
+class _Msg:
+    """A message carrying one kind of attachment, and nothing else."""
+
+    def __init__(self, **kinds):
+        for attr in ("document", "photo", "video", "audio", "voice",
+                     "animation", "video_note"):
+            setattr(self, attr, kinds.get(attr))
+
+
+def test_a_photo_is_a_file_too():
+    """The share sheet on a phone sends a picture as `photo`, not `document`.
+    Matching only on `document` meant attaching a screenshot did nothing at
+    all -- no attachment, and no word about why."""
+    from mooting.telegram import file_in
+
+    shot = _Thing("abc")
+    got, name = file_in(_Msg(photo=[_Thing("small"), shot]))
+
+    assert got is shot, "took a thumbnail instead of the original"
+    assert name == "photo-abc.jpg"
+
+
+def test_every_kind_a_phone_sends_arrives_as_something():
+    from mooting.telegram import file_in
+
+    for attr, want in (("video", "video-x.mp4"), ("audio", "audio-x.mp3"),
+                       ("voice", "voice-x.ogg"), ("animation", "animation-x.gif"),
+                       ("video_note", "video_note-x.mp4")):
+        got, name = file_in(_Msg(**{attr: _Thing("x")}))
+        assert got is not None and name == want, f"{attr} was dropped"
+
+
+def test_a_named_file_keeps_its_name():
+    from mooting.telegram import file_in
+
+    assert file_in(_Msg(document=_Thing("z", "rfc-114.md")))[1] == "rfc-114.md"
+    assert file_in(_Msg(video=_Thing("z", "demo.mov")))[1] == "demo.mov"
+
+
+def test_a_message_with_no_file_is_not_one():
+    from mooting.telegram import file_in
+
+    assert file_in(_Msg()) == (None, None)
+    assert file_in(_Msg(photo=[])) == (None, None), "an empty photo list is not a file"
