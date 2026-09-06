@@ -3,16 +3,21 @@
 Design decisions, and the measurements behind them. None of this is needed
 to use the tool — see [Home](index.md) for that.
 
-## Three invariants
+## Four invariants
 
-1. **The board is the substrate; the supervisor is an accelerator.** Everything the
+1. **Only a human decides.** There is no `mooting_decide` tool — not disabled,
+   absent, so it never appears in an agent's tool list and there is nothing to
+   talk one into calling. `Store.decide` refuses a non-human caller as a second
+   line, and a test in CI fails the day either stops being true. This is the one
+   property no comparable project has, which is why it is first.
+2. **The board is the substrate; the supervisor is an accelerator.** Everything the
    loop does, you can do by hand with `mooting nudge`. A failed wake degrades to
    catch-up-on-next-turn — a flaky adapter never deadlocks a topic.
-2. **Caps pause, they never silently continue.** Live debate spends real
+3. **Caps pause, they never silently continue.** Live debate spends real
    subscription quota with nobody watching. Per-seat turn ceilings and per-hour wake
    ceilings park the topic for a human instead of burning a monthly allowance on
    chatter. A *failed* wake counts too, because metered CLIs charge for it.
-3. **Execution needs two independent keys.** A seat edits files only if it was
+4. **Execution needs two independent keys.** A seat edits files only if it was
    registered `--capability execute` **and** it is woken for an approved task on a
    `work` topic. An execute-capable seat sitting on a meeting topic stays read-only.
    Each adapter narrows itself in one place — a `tool_profile()` method, except
@@ -49,7 +54,7 @@ topic → seat → council. The default is `low`, because that is what most sess
 are — a question, a few readings, keep moving — and at 31.8s a turn against 279s
 it is the difference between a conversation and a wait. The tradeoff is real in
 the other direction: the sharpest argument in our first live debate came from a
-default-effort turn. Raise it with `/effort high` when the ruling hangs on
+default-effort turn. Raise it with `/effort high` when the call hangs on
 catching a flaw.
 
 ## Debate or discussion
@@ -73,7 +78,7 @@ decision, and exactly wrong when the room is trying to design something.
 
 An earlier version of this file claimed that message buses move messages,
 orchestrators fan out worktrees, and neither does structured deliberation with a
-human arbiter. **That was wrong.** A proper survey found the space is crowded and
+human deciding. **That was wrong.** A proper survey found the space is crowded and
 several projects are ahead of this one:
 
 - **[LoopTroop](https://github.com/looptroop-ai/LoopTroop)** (MIT, ~1.3k commits) —
@@ -82,6 +87,10 @@ several projects are ahead of this one:
   the losing drafts; **a human approves before execution**; then "beads" execute in
   isolated git worktrees with Ralph-style retry. That is this project's meeting
   mode, plan gate and work mode, already built, with rubric scoring on top.
+  One difference worth stating precisely, because it is the whole margin
+  here: its own README labels that approval step *optional in future
+  releases*. A gate that can be turned off is a setting; this project's is
+  the absence of a tool.
 - **[Concord MCP](https://github.com/Get-Concord-AI/concord-mcp)** (MIT, TS) —
   architecturally near-identical to Mooting's core: an MCP server over local SQLite
   in `.concord/`, several vendor CLIs attached to one store, durable agent-to-agent
@@ -232,10 +241,10 @@ write to that machine.
 | | |
 |---|---|
 | B1 | **done.** `mooting serve` — loopback, one bearer token, `GET /topics`, `GET /topics/{slug}`, `POST /messages`, an SSE stream that resumes from a cursor, and a read-only page that follows a live round. |
-| B2 | **done.** `PATCH /topics/{slug}` (agenda, effort, rounds), `POST .../run` and `.../stop` with one supervisor per topic — a second start is refused — and `GET /proposals/{id}`. Rulings still have no route. |
-| B3 | **done.** `mooting serve --grant <seat>` issues one token per human seat. The shared startup token may read but cannot speak or rule. Every remote action leaves a `remote` event on the board. |
+| B2 | **done.** `PATCH /topics/{slug}` (agenda, effort, rounds), `POST .../run` and `.../stop` with one supervisor per topic — a second start is refused — and `GET /proposals/{id}`. Sign-off had no route at that point; B3 gave it one. |
+| B3 | **done.** `mooting serve --grant <seat>` issues one token per human seat, and `POST /api/proposals/{id}/decide` became the remote path for a sign-off. The shared startup token may read but cannot speak or sign anything off. Every remote action leaves a `remote` event on the board. |
 | B4 | **not built, and probably should not be.** It needs a `Store` implemented over HTTP — some fifty methods — to gain what SSH, `--web` and the Telegram bot already give: a council reachable from elsewhere. Worth revisiting only if a terminal client against a remote board is wanted for its own sake. |
-| B5 | **done.** Two people are two seats: each speaks under their own name, holds their own token, and rules as themselves. Telegram pairing maps each person to a seat the same way. |
+| B5 | **done.** Two people are two seats: each speaks under their own name and holds their own token. Signing off is narrower than speaking — the chair of a topic does that, and `/topic chair` is how it moves — so two people in a room are two voices and one decision. Telegram pairing maps each person to a seat the same way. |
 
 ### What not to build
 

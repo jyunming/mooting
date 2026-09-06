@@ -21,7 +21,7 @@ from mooting.supervisor import Caps, Supervisor
 @pytest.fixture()
 def team(tmp_path):
     s = connect(tmp_path / "board.db", init=True)
-    s.add_agent("human", "human", display="the arbiter")
+    s.add_agent("human", "human", display="the chair")
     s.add_agent("boss", "claude", driver="spawn", driver_cfg={"cwd": str(tmp_path)})
     s.add_agent("hand", "codex", driver="spawn",
                 driver_cfg={"cwd": str(tmp_path), "capability": "execute"})

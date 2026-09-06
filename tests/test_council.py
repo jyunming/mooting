@@ -21,7 +21,7 @@ from mooting.supervisor import Caps, Supervisor
 @pytest.fixture()
 def board(tmp_path):
     s = connect(tmp_path / "board.db", init=True)
-    s.add_agent("human", "human", display="the arbiter")
+    s.add_agent("human", "human", display="the chair")
     for name in ("claude", "codex", "gemini"):
         s.add_agent(name, name, driver="spawn")
     yield s
