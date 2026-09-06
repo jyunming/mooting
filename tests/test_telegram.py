@@ -1787,3 +1787,54 @@ def test_toggling_a_name_off_and_on_again_puts_it_back(board):
     on.remove("santa") if "santa" in on else on.append("santa")
     board.set_room_team(room, on, "jeremy")
     assert board.room_team(room) == ["santa"]
+
+
+# ------------------------------ a reason you can tap
+
+
+def test_every_preset_reason_survives_the_round_trip():
+    """A button whose callback the parser refuses does nothing at all, with no
+    error -- which is how this surface fails. Both directions, every index."""
+    from mooting.telegram import WHY_PRESETS, parse_why, why_callback
+
+    for approve, presets in WHY_PRESETS.items():
+        for i, text in enumerate(presets):
+            data = why_callback(approve, 7, i)
+            assert len(data.encode("utf-8")) <= 64
+            assert parse_why(data) == (approve, 7, text)
+
+
+def test_write_my_own_falls_back_to_typing():
+    """Presets are for what recurs. Anything else still has to be sayable, so
+    the escape hatch is a reason of None rather than a refused button."""
+    from mooting.telegram import WHY_OWN, parse_why, why_callback
+
+    assert parse_why(why_callback(False, 7, WHY_OWN)) == (False, 7, None)
+
+
+def test_a_preset_reason_is_a_sentence_not_a_label():
+    """The reason is part of the record. "ok" in a decision column tells a
+    later reader nothing, which is the whole argument for keeping it."""
+    from mooting.telegram import WHY_PRESETS
+
+    for presets in WHY_PRESETS.values():
+        for text in presets:
+            assert len(text.split()) >= 4, f"{text!r} is a label"
+            assert text.endswith("."), f"{text!r} is not a sentence"
+
+
+def test_an_approve_reason_cannot_be_used_to_reject():
+    """The direction is in the callback, so a stale keyboard cannot turn a
+    rejection into a sign-off by index alone."""
+    from mooting.telegram import parse_why
+
+    assert parse_why("why:ok:7:0")[0] is True
+    assert parse_why("why:no:7:0")[0] is False
+    assert parse_why("why:ok:7:0")[2] != parse_why("why:no:7:0")[2]
+
+
+def test_a_nonsense_callback_is_refused():
+    from mooting.telegram import parse_why
+
+    for bad in ("why:ok:7:44", "why:maybe:7:0", "why:ok:x:0", "set:team:Santa", ""):
+        assert parse_why(bad) is None, bad

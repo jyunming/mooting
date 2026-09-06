@@ -617,3 +617,55 @@ def test_the_registered_seats_are_listed_in_the_refusal(console):
         console.store.open_topic("x", "T", "b", "me", seats=("nobody",))
 
     assert "claude" in str(exc.value) and "codex" in str(exc.value)
+
+
+# ------------------ who is in the room, not only who is on the topic
+
+
+def test_somebody_paired_here_but_not_seated_still_shows(tmp_path):
+    """`/seats` lists the seats on this topic and a person reads it as "who is
+    in this room". Somebody paired in but not seated was invisible, which is how
+    "I added my wife and cannot see her" happened."""
+    db = tmp_path / "board.db"
+    s = connect(db, init=True)
+    s.add_agent("me", "human")
+    s.add_agent("amber", "human")
+    s.add_agent("claude", "claude", driver="spawn")
+    s.open_topic("t", "T", "b", "me", seats=("claude", "me"))
+    s.pair_approve(s.pair_request("-100", "42", "Amber"), "amber", "me")
+    s.close()
+
+    con = Console(db, "t", "me", room=("telegram", "-100"))
+    out = []
+    con.emit = out.append
+    try:
+        con._seats("")
+    finally:
+        con.store.close()
+
+    said = " ".join(out)
+    assert "amber" in said, "somebody in the room was not shown at all"
+    assert "not seated" in said, "she was shown as though she were on the topic"
+    assert "/seats add amber" in said, "no way out of it was offered"
+
+
+def test_a_terminal_session_has_no_room_to_report(tmp_path):
+    """At a desk there is no chat to be paired into, and inventing one would
+    put every approved pairing on the board into an unrelated listing."""
+    db = tmp_path / "board.db"
+    s = connect(db, init=True)
+    s.add_agent("me", "human")
+    s.add_agent("claude", "claude", driver="spawn")
+    s.open_topic("t", "T", "b", "me", seats=("claude", "me"))
+    s.pair_approve(s.pair_request("-100", "42", "Amber"), "me", "me")
+    s.close()
+
+    con = Console(db, "t", "me")
+    out = []
+    con.emit = out.append
+    try:
+        con._seats("")
+    finally:
+        con.store.close()
+
+    assert "not seated" not in " ".join(out)

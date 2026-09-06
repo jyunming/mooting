@@ -574,11 +574,28 @@ class Console:
             self.emit(f"{DIM}/seats add <agent>         one already registered{RESET}")
             self.emit(f"{DIM}/seats rm <agent>          remove one{RESET}")
             return
+        seated = set()
         for s in self.store.seats(self.topic_id):
+            seated.add(s["agent"])
             owed = len(self.store.open_mentions(self.topic_id, s["agent"]))
             flag = f"  {YELLOW}{owed} open ask(s){RESET}" if owed else ""
             self.emit(f"  {s['agent']:<12} {s['kind']:<9} {s['state']:<8} "
                   f"{s['turns_used']}/{s['max_turns']} turns{flag}")
+        # Somebody paired into the room but not seated on the meeting in front
+        # of you was invisible here, and this reads as "who is in this room" --
+        # which is how "I added my wife and cannot see her" happened.
+        for name in self._in_room_but_not_seated(seated):
+            self.emit(f"  {name:<12} {DIM}{'human':<9} here, not seated on this "
+                      f"topic — /seats add {name}{RESET}")
+
+    def _in_room_but_not_seated(self, seated: set[str]) -> list[str]:
+        """People this room knows who hold no seat on the current topic."""
+        if tuple(self.room) == Store.LOCAL_ROOM:
+            return []
+        here = {r["seat"] for r in self.store.pairings("approved",
+                                                       chat_id=self.room[1])
+                if r["seat"]}
+        return sorted(here - seated)
 
     #: The verdicts a person may pass on a finished task, and the state each
     #: writes. `again` rather than `assigned`: the state name describes the

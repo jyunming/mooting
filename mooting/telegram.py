@@ -295,7 +295,8 @@ HELP = (
     "  <code>/topic new should we cap retries?</code>\n"
     "  <code>/topic agenda cap; jitter; who owns the runbook</code>\n"
     "  <code>/run</code> · <code>/stop</code> · <code>/seats</code> "
-    "· <code>/proposals</code>\n\n"
+    "· <code>/proposals</code>\n"
+    "  <code>/proposals 3</code> — re-read one that has scrolled away\n\n"
     "<b>who may speak</b>\n"
     "  <code>/pair</code> — ask to join; an existing member approves\n"
     "  <code>/pair list</code> · <code>/pair approve &lt;id&gt; &lt;seat&gt;</code>\n"
@@ -528,6 +529,58 @@ def parse_join(data: str) -> tuple[str, int] | None:
 
 #: A value a person picks rather than types. `low`, `3`, a seat's name -- short
 #: enough that the 64-byte callback is never in question.
+#: Reasons that actually recur, offered as buttons because typing one is the
+#: slowest step in the single gesture this whole project exists for. Each is a
+#: sentence rather than a label: the reason is part of the record, and "ok" in
+#: a decision column tells a later reader nothing about why.
+WHY_PRESETS = {
+    True: ("Agreed - the objections were answered.",
+           "Agreed - smallest change that works.",
+           "Going with it; the remaining risk is acceptable."),
+    False: ("The objection stands and was not answered.",
+            "Not now - the cost outweighs it.",
+            "Needs a smaller first step."),
+}
+
+WHY_PREFIX = "why"
+
+
+def why_callback(approve: bool, pid: int, idx: int) -> str:
+    data = f"{WHY_PREFIX}:{'ok' if approve else 'no'}:{int(pid)}:{int(idx)}"
+    if len(data.encode("utf-8")) > 64:
+        raise ValueError("callback_data over Telegram's 64-byte limit")
+    return data
+
+
+#: The index that means "none of these -- I will type it".
+WHY_OWN = 99
+
+
+def parse_why(data: str) -> tuple[bool, int, str | None] | None:
+    """`(approve, proposal_id, reason)` behind a preset button, or None.
+
+    A reason of `None` is the write-my-own button, which falls back to the
+    typed reply rather than deciding anything.
+
+    The text is looked up here rather than carried in the callback: 64 bytes
+    does not hold a sentence, and a reason that arrived truncated would be
+    worse than one that had to be typed.
+    """
+    parts = (data or "").split(":")
+    if len(parts) != 4 or parts[0] != WHY_PREFIX or parts[1] not in {"ok", "no"}:
+        return None
+    if not parts[2].isdigit() or not parts[3].isdigit():
+        return None
+    approve = parts[1] == "ok"
+    idx = int(parts[3])
+    if idx == WHY_OWN:
+        return approve, int(parts[2]), None
+    presets = WHY_PRESETS[approve]
+    if idx >= len(presets):
+        return None
+    return approve, int(parts[2]), presets[idx]
+
+
 SET_PREFIX = "set"
 
 
@@ -1506,6 +1559,37 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
                              f"{row['display'] or row['user_id']} now speaks as "
                              f"**{row['seat']}**, let in by {presser}.")
 
+        why_pick = parse_why(call.data or "")
+        if why_pick is not None:
+            approve, pid, reason = why_pick
+            if not await allowed(chat_id):
+                return await call.answer("not this chat", show_alert=True)
+            seat = store.seat_for_chat(chat_id, call.from_user.id)
+            if not seat:
+                return await call.answer("You are not paired here.", show_alert=True)
+            if reason is None:
+                await call.answer()
+                prompt = await bot.send_message(
+                    chat_id,
+                    f"{'Approving' if approve else 'Rejecting'} #{pid}. "
+                    f"Reply to this with why.",
+                    reply_markup=ForceReply(force_reply=True, selective=True))
+                # The reason is part of the record, so it waits for one rather
+                # than landing bare and being explained afterwards.
+                pending[(str(chat_id), prompt.message_id)] = (pid, approve, seat)
+                return
+            try:
+                store.decide(pid, seat, approve=approve, rationale=reason,
+                             via="telegram")
+            except (StoreError, NotAuthorised) as exc:
+                return await call.answer(str(exc)[:180], show_alert=True)
+            store.audit(seat, "decide", {"proposal_id": pid, "approve": approve,
+                                         "via": "telegram"},
+                        topic_id=int(store.proposal(pid)["topic_id"]))
+            # The pump announces every decision wherever it was taken, so
+            # saying it here as well would deliver it twice.
+            return await call.answer("signed off" if approve else "rejected")
+
         chosen = parse_set(call.data or "")
         if chosen is not None:
             what, value = chosen
@@ -1586,14 +1670,21 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             return await call.answer(f"already {pr['status']}", show_alert=True)
 
         await call.answer("noted — say why")
-        prompt = await bot.send_message(
+        # Buttons first, typing still there. ForceReply and an inline keyboard
+        # cannot both hang off one message, and on a phone the typing is the
+        # slowest step in the one gesture this whole project exists for.
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+        approve = what == "ok"
+        rows = [[InlineKeyboardButton(text=text,
+                                      callback_data=why_callback(approve, pid, i))]
+                for i, text in enumerate(WHY_PRESETS[approve])]
+        rows.append([InlineKeyboardButton(
+            text="✎ Write my own", callback_data=why_callback(approve, pid, WHY_OWN))])
+        await bot.send_message(
             chat_id,
-            f"{'Approving' if what == 'ok' else 'Rejecting'} #{pid}. "
-            f"Reply to this with why.",
-            reply_markup=ForceReply(force_reply=True, selective=True))
-        # The reason is part of the record, so the ruling waits for it rather
-        # than landing bare and being explained afterwards.
-        pending[(str(chat_id), prompt.message_id)] = (pid, what == "ok", seat)
+            f"{'Approving' if approve else 'Rejecting'} #{pid} — why?",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
     async def finish_ruling(msg: Message) -> bool:
         """Complete a ruling whose reason has just arrived. True if it was one."""

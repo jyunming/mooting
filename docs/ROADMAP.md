@@ -124,7 +124,7 @@ agent can see — has no functional test, only a count of its decorators.
 | G4 | **Publish one measurement.** No number says four rival seats catch more than one good agent and an attentive person. The project is its own instrument: run councils and single agents over seeded defects, publish the disagreements, and state the conditions the way `docs/WHY.md` states "31.8 s a turn". Until that exists the claim is legible disagreement, not better outcomes. |
 | G5 | **Record whether the council changed the chair's mind.** The cheapest honest measurement available, and it needs no experiment: capture the chair's opening position when a topic is opened, compare it against the rationale they sign off with, and count the times they differ. A tool that can show how often it moved the person holding the decision has evidence rather than a claim. |
 
-## K — What a phone makes obvious
+## K — What a phone makes obvious ✅ done
 
 **Every item here came from somebody using it on a mobile, not from reading the
 code.** That is the same source as the five Telegram bugs in `CLAUDE.md`, and it
@@ -140,9 +140,12 @@ is slow, so offer buttons wherever there is a fixed set of answers.*
 | ~~K1~~ | **An approved pairing cannot be revoked.** `pair_deny` refuses a request that is still pending; there is nothing that removes somebody already let in. A guest who was welcome in a room last month has a seat on that board for good, and the only way out is editing SQLite. `/pair revoke <who>` belongs next to `/pair approve`, and it is the host's alone. |
 | K2 ✅ | **Done.** Bare `/team` offers one button per agent seat, ticked when it is on. Toggles rather than a set -- a team is edited one seat at a time far more often than written from nothing -- and the command is computed from what the room holds, so tapping twice puts a name back. Superseded text below. |
 | ~~K2~~ | **`/team` still has to be typed.** `wants_choices` offers buttons for effort, rounds, nudge and chair; setting the team means typing every name. It is the one command where the answers are a known list — the seats registered on this board — so it is the one that most wants toggles. |
-| K3 | **A sign-off asks for its reason as free text.** Approving is the single gesture this whole project exists for, and on a phone it is the slowest thing in the chat: tap Approve, then type. Offer the three or four reasons that actually recur as buttons, with typing still available. The reason is part of the record, so a preset must be a real sentence rather than a label. |
-| K4 | **`/seats` lists the seats on this topic, and a person reads it as "who is in this room".** Somebody paired into a room but not yet seated on the meeting in front of you is invisible, which was reported as "I added my wife and cannot see her". Show them, marked as here but not seated. |
-| K5 | **`/proposals <id>` is not in the help.** The event pump starts at `store.head()` and never replays, so re-reading a proposal that has scrolled away is only possible through a form nothing advertises — the trap `CLAUDE.md` names, left half-closed. |
+| K3 ✅ | **Done.** Approve or Reject now offers three reasons as buttons and a Write-my-own that falls back to typing. Each preset is a sentence, because the reason is part of the record and "ok" in a decision column tells a later reader nothing. Superseded text below. |
+| ~~K3~~ | **A sign-off asks for its reason as free text.** Approving is the single gesture this whole project exists for, and on a phone it is the slowest thing in the chat: tap Approve, then type. Offer the three or four reasons that actually recur as buttons, with typing still available. The reason is part of the record, so a preset must be a real sentence rather than a label. |
+| K4 ✅ | **Done.** Somebody paired into the room but not seated on the meeting in front of you is listed, marked as here but not seated, with the command that seats them. A terminal session reports nobody, because there is no chat to be paired into. Superseded text below. |
+| ~~K4~~ | **`/seats` lists the seats on this topic, and a person reads it as "who is in this room".** Somebody paired into a room but not yet seated on the meeting in front of you is invisible, which was reported as "I added my wife and cannot see her". Show them, marked as here but not seated. |
+| K5 ✅ | **Done.** One line in `/help`. Superseded text below. |
+| ~~K5~~ | **`/proposals <id>` is not in the help.** The event pump starts at `store.head()` and never replays, so re-reading a proposal that has scrolled away is only possible through a form nothing advertises — the trap `CLAUDE.md` names, left half-closed. |
 
 ## Not building
 
