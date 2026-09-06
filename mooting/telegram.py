@@ -298,7 +298,8 @@ HELP = (
     "· <code>/proposals</code>\n\n"
     "<b>who may speak</b>\n"
     "  <code>/pair</code> — ask to join; an existing member approves\n"
-    "  <code>/pair list</code> · <code>/pair approve &lt;id&gt; &lt;seat&gt;</code>\n\n"
+    "  <code>/pair list</code> · <code>/pair approve &lt;id&gt; &lt;seat&gt;</code>\n"
+    "  <code>/pair revoke &lt;who&gt;</code> — the host takes a seat back\n\n"
     "<b>sign it off</b>\n"
     "  a proposal arrives with Approve / Reject buttons; the reason\n"
     "  is the reply it asks you for"
@@ -542,7 +543,7 @@ def parse_set(data: str) -> tuple[str, str] | None:
     parts = (data or "").split(":", 2)
     if len(parts) != 3 or parts[0] != SET_PREFIX:
         return None
-    if parts[1] not in {"effort", "rounds", "chair", "wake"} or not parts[2]:
+    if parts[1] not in {"effort", "rounds", "chair", "wake", "team"} or not parts[2]:
         return None
     return parts[1], parts[2]
 
@@ -553,7 +554,7 @@ def wants_choices(text: str) -> str | None:
     """Which chooser a bare command is asking for, if any."""
     import re as _re
 
-    m = _re.fullmatch(r"/(effort|rounds|nudge|chair)(?:@\S+)?", (text or "").strip(),
+    m = _re.fullmatch(r"/(effort|rounds|nudge|chair|team)(?:@\S+)?", (text or "").strip(),
                       _re.I)
     return m.group(1).lower() if m else None
 
@@ -896,7 +897,7 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         args = (msg.text or "").split()[1:]
         # Checked before the allowlist on purpose: a code read off the terminal
         # is how a room nobody has been approved in becomes a room at all.
-        if len(args) == 1 and args[0] not in {"list", "approve", "deny"}:
+        if len(args) == 1 and args[0] not in {"list", "approve", "deny", "revoke"}:
             got = store.redeem_claim(args[0])
             if got:
                 pid = store.pair_request(msg.chat.id, msg.from_user.id,
@@ -954,6 +955,32 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             return await say(msg.chat.id,
                              f"{row['display'] or row['user_id']} now speaks as "
                              f"**{row['seat']}**.\n\nThis chat is `{msg.chat.id}`.")
+
+        if args[:1] == ["revoke"]:
+            if not seat:
+                return await say(msg.chat.id, "Only a paired member can do that.")
+            if len(args) < 2:
+                rows = [r for r in store.pairings("approved", chat_id=msg.chat.id)
+                        if r["seat"] != seat]
+                if not rows:
+                    return await say(msg.chat.id, "Nobody else is in this room.")
+                return await say(msg.chat.id, "Usage: `/pair revoke <who>`\n\n"
+                                 + "\n".join(f"- **{r['seat']}** "
+                                             f"({r['display'] or r['user_id']})"
+                                             for r in rows))
+            who = args[1].lstrip("@")
+            want = next((r for r in store.pairings("approved", chat_id=msg.chat.id)
+                         if r["seat"] == who or (r["display"] or "") == who
+                         or str(r["user_id"]) == who), None)
+            if want is None:
+                return await say(msg.chat.id, f"`{who}` holds no seat in this chat.")
+            try:
+                row = store.pair_revoke(int(want["id"]), seat)
+            except (StoreError, NotAuthorised) as exc:
+                return await say(msg.chat.id, str(exc))
+            return await say(msg.chat.id,
+                             f"**{row['seat']}** no longer speaks in this chat. "
+                             f"What they already said stays on the board.")
 
         if args[:1] == ["deny"]:
             if not seat:
@@ -1362,6 +1389,24 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             rows = [[InlineKeyboardButton(text=f"+{n}",
                                           callback_data=set_callback("rounds", str(n)))
                      for n in (1, 3, 5)]]
+        elif which == "team":
+            # The one command whose answers are a list this board already holds,
+            # and the one that still had to be typed out name by name. Toggles
+            # rather than a set: a team is edited one seat at a time far more
+            # often than it is written from nothing.
+            room = store.ensure_room("telegram", str(chat_id))
+            on = set(store.room_team(room))
+            names = [a["name"] for a in store.agents()
+                     if a["kind"] not in HUMAN_KINDS and a["enabled"]]
+            if not names:
+                return await say(chat_id, "No agent seats registered yet.")
+            head = ("Who is on the team here? Tap to add or drop.\n"
+                    + (f"Now: <b>{', '.join(store.room_team(room))}</b>" if on
+                       else "<i>Not set — a new meeting seats whoever is on the "
+                            "one you are standing on.</i>"))
+            rows = [[InlineKeyboardButton(
+                text=("✓ " if n in on else "") + n,
+                callback_data=set_callback("team", n))] for n in names]
         elif which in {"nudge", "chair"}:
             if not slug:
                 return await say(chat_id, "No topic here yet.")
@@ -1470,6 +1515,25 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             if not seat:
                 return await call.answer("You are not paired here.", show_alert=True)
             slug = topic_here(chat_id)
+            if what == "team":
+                # A toggle, so the command is computed from what the room holds
+                # rather than from the button. Tapping the same name twice puts
+                # it back, which is what a checkbox has to mean.
+                room = store.ensure_room("telegram", str(chat_id))
+                on = list(store.room_team(room))
+                on.remove(value) if value in on else on.append(value)
+                try:
+                    store.set_room_team(room, on, seat)
+                except (StoreError, NotAuthorised) as exc:
+                    return await call.answer(str(exc)[:180], show_alert=True)
+                await call.answer(("dropped " if value not in on else "added ") + value)
+                # Redraw in place: a new message per tap would bury the chat,
+                # which is the cost the buttons were meant to avoid.
+                try:
+                    await call.message.delete()
+                except Exception:                # an old message may not be editable
+                    pass
+                return await send_choices(chat_id, "team", slug)
             line = command_for(what, value)
             board = ChatBoard(db, slug, seat, room=("telegram", str(chat_id)))
             try:

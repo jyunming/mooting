@@ -1681,3 +1681,109 @@ def test_a_task_starting_is_not_worth_a_message(board):
 
     said = [event_text(board, e) for e in board.events_since(0, tid)]
     assert not any(s and "task #" in s for s in said), "started-work noise reached the chat"
+
+
+# ------------------------------------ taking a seat back
+
+
+def test_the_host_can_remove_somebody_already_let_in(board):
+    """`pair_deny` refuses a request that is still pending. Nothing removed
+    somebody already approved, so a guest who was welcome in a room last month
+    held a seat on that board for good and the only way out was editing
+    SQLite."""
+    room = board.ensure_room("telegram", "-100")
+    board.claim_room(room, "jeremy")
+    board.add_agent("amber", "human")
+    pid = board.pair_approve(board.pair_request("-100", "42", "Amber"),
+                             "amber", "jeremy")["id"]
+    assert board.seat_for_chat("-100", "42") == "amber"
+
+    board.pair_revoke(int(pid), "jeremy")
+
+    assert board.seat_for_chat("-100", "42") is None, "she still speaks here"
+
+
+def test_a_guest_cannot_remove_the_host(board):
+    """The reason this is the host's alone: otherwise the first thing a guest
+    can do is throw out the person whose board it is."""
+    room = board.ensure_room("telegram", "-100")
+    board.claim_room(room, "jeremy")
+    board.add_agent("amber", "human")
+    mine = board.pair_approve(board.pair_request("-100", "1", "Jeremy"),
+                              "jeremy", "jeremy")["id"]
+    board.pair_approve(board.pair_request("-100", "42", "Amber"), "amber", "jeremy")
+
+    with pytest.raises(NotAuthorised):
+        board.pair_revoke(int(mine), "amber")
+    assert board.seat_for_chat("-100", "1") == "jeremy"
+
+
+def test_revoking_is_scoped_to_the_room(board):
+    """Pairing is per room -- being trusted in one council is not being trusted
+    in another -- so removal has to be too."""
+    for chat in ("-100", "-200"):
+        board.claim_room(board.ensure_room("telegram", chat), "jeremy")
+    board.add_agent("amber", "human")
+    here = board.pair_approve(board.pair_request("-100", "42", "Amber"),
+                              "amber", "jeremy")["id"]
+    board.pair_approve(board.pair_request("-200", "42", "Amber"), "amber", "jeremy")
+
+    board.pair_revoke(int(here), "jeremy")
+
+    assert board.seat_for_chat("-100", "42") is None
+    assert board.seat_for_chat("-200", "42") == "amber", "the other room lost her too"
+
+
+def test_a_bound_identity_survives_being_revoked(board):
+    """A claim code proves somebody reached the machine the board lives on.
+    Taking that back is not a chat gesture, and quietly dropping it here would
+    make `/pair revoke` mean something much larger than it says."""
+    board.claim_room(board.ensure_room("telegram", "-100"), "jeremy")
+    board.bind_identity("jeremy", "1")
+    pid = board.pair_approve(board.pair_request("-100", "1", "Jeremy"),
+                             "jeremy", "jeremy")["id"]
+
+    board.pair_revoke(int(pid), "jeremy")
+
+    assert board.seat_for_identity("1") == "jeremy"
+
+
+# ---------------------------------------- the team, as buttons
+
+
+def test_a_bare_team_command_offers_the_seats():
+    """The one command whose answers are a list the board already holds, and the
+    one that still had to be typed name by name."""
+    from mooting.telegram import wants_choices
+
+    assert wants_choices("/team") == "team"
+    assert wants_choices("/team@mybot") == "team"
+    assert wants_choices("/team Santa Sam") is None, "an explicit list is not a question"
+
+
+def test_a_team_button_survives_the_round_trip():
+    """`parse_set` has an allowlist. A button whose value it refuses is a button
+    that does nothing at all, silently -- which is how this surface fails."""
+    from mooting.telegram import parse_set, set_callback
+
+    data = set_callback("team", "Santa")
+
+    assert parse_set(data) == ("team", "Santa")
+    assert len(data.encode("utf-8")) <= 64
+
+
+def test_toggling_a_name_off_and_on_again_puts_it_back(board):
+    """A checkbox has to mean that. The handler computes the command from what
+    the room holds rather than from the button, which is what makes it true."""
+    room = board.ensure_room("telegram", "-100")
+    board.set_room_team(room, ["santa"], "jeremy")
+
+    on = list(board.room_team(room))
+    on.remove("santa") if "santa" in on else on.append("santa")
+    board.set_room_team(room, on, "jeremy")
+    assert board.room_team(room) == []
+
+    on = list(board.room_team(room))
+    on.remove("santa") if "santa" in on else on.append("santa")
+    board.set_room_team(room, on, "jeremy")
+    assert board.room_team(room) == ["santa"]

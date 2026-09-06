@@ -1296,6 +1296,33 @@ class Store:
             self._emit(c, None, "pairing", by,
                        {"pairing_id": pairing_id, "action": "denied"})
 
+    def pair_revoke(self, pairing_id: int, by: str) -> sqlite3.Row:
+        """Take back a seat somebody already holds in a room. The host's alone.
+
+        `pair_deny` refuses a request that is still pending. Nothing removed
+        somebody already let in, so a guest who was welcome in a room last month
+        held a seat on that board for good and the only way out was editing
+        SQLite.
+
+        Room-scoped, because pairing is: this ends their speaking here and says
+        nothing about anywhere else. An identity bound by a redeemed claim code
+        is a separate thing and survives -- that person proved they reached the
+        machine, and taking it back is not a chat gesture.
+        """
+        row = self.q1("SELECT * FROM pairings WHERE id = ?", (pairing_id,))
+        if row is None:
+            raise StoreError(f"no pairing {pairing_id}")
+        host = self.room_host(self.ensure_room(row["channel"], row["chat_id"]))
+        if host and by != host:
+            raise NotAuthorised(f"only {host} can remove somebody from this room")
+        with self.tx() as c:
+            c.execute("UPDATE pairings SET status = 'revoked' WHERE id = ?",
+                      (pairing_id,))
+            self._emit(c, None, "pairing", by,
+                       {"pairing_id": pairing_id, "action": "revoked",
+                        "seat": row["seat"]})
+        return self.q1("SELECT * FROM pairings WHERE id = ?", (pairing_id,))
+
     def pairings(self, status: str | None = None, chat_id: str | None = None,
                  channel: str = "telegram") -> list[sqlite3.Row]:
         """Pairings, optionally for one room.
