@@ -168,11 +168,24 @@ class ClaudeDriver(SpawnDriver):
         import uuid
         return str(uuid.uuid4())
 
+    #: What an execute seat may run in a shell. `acceptEdits` auto-approves file
+    #: edits and nothing else, so `git commit` came back "requires approval" in a
+    #: non-interactive run and the turn ended with the work sitting staged and
+    #: uncommitted -- which the loop can only read as no work at all. Two live
+    #: runs ended that way before the seat itself said why.
+    #:
+    #: Naming the verbs rather than widening the mode is what keeps the rest
+    #: true: the prompt tells a worker not to merge, not to push and not to touch
+    #: another branch, and this is what makes that a fact instead of a request.
+    COMMIT_TOOLS = ("Bash(git add:*)", "Bash(git commit:*)", "Bash(git status:*)",
+                    "Bash(git diff:*)", "Bash(git log:*)")
+
     def tool_profile(self, seat: Seat) -> list[str]:
         if seat.executing:
             # Editing is the job; the mooting tools stay available so the worker can
             # report back. `--strict-mcp-config` still keeps other servers out.
-            return ["--permission-mode", "acceptEdits"]
+            return ["--permission-mode", "acceptEdits",
+                    "--allowedTools", "mcp__mooting", *self.COMMIT_TOOLS]
         return ["--allowedTools", "mcp__mooting", "--permission-mode", "manual"]
 
     def argv(self, seat: Seat, prompt: str, session: str | None) -> list[str]:

@@ -803,17 +803,34 @@ class Supervisor:
         ]
         if task["branch"]:
             lines.append(f"This is an isolated git worktree on branch `{task['branch']}`. "
-                         f"Commit there. Do not merge, do not push, and do not touch "
-                         f"any other branch -- a human reviews and merges.")
+                         f"Do not merge, do not push, and do not touch any other "
+                         f"branch -- a human reviews and merges.")
+        # Committing used to be two words inside that sentence, surrounded by
+        # three prohibitions, while "Reporting back" was the section that read
+        # as how to finish. A real seat then did the work correctly and left it
+        # uncommitted, which the loop can only see as nothing. It is a numbered
+        # step now, and first, because it is the step the other one describes.
+        lines += ["", "## Finishing", ""]
+        if task["branch"]:
+            lines += [
+                "**1. Commit your work in that worktree.** `git add -A` and "
+                "`git commit`. A change you leave uncommitted is invisible: the "
+                "branch is what a human reviews, and it is the only evidence "
+                "that the work happened. Say what you did in the commit message.",
+                "",
+                f"**2. Report.** `mooting_task_update({tid}, \"done\", "
+                f"\"<what you changed and where>\")`.",
+            ]
+        else:
+            lines.append(f"`mooting_task_update({tid}, \"done\", \"<what you "
+                         f"changed and where>\")` when finished.")
         lines += [
             "",
-            "## Reporting back",
+            f"If you cannot proceed: `mooting_task_update({tid}, \"blocked\", "
+            f"\"<what stopped you>\")`. To ask the manager or a human first: "
+            f"`mooting_ask(topic, agent, question)`.",
             "",
             "Use the `mooting` MCP tools; nothing else you write is read by anyone.",
-            "",
-            f"- `mooting_task_update({tid}, \"done\", \"<what you changed and where>\")` when finished.",
-            f"- `mooting_task_update({tid}, \"blocked\", \"<what stopped you>\")` if you cannot proceed.",
-            "- `mooting_ask(topic, agent, question)` to ask the manager or a human first.",
             "",
             "Do only this task. If you notice other work that needs doing, say so in "
             "your report rather than doing it.",

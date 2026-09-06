@@ -364,3 +364,85 @@ def test_a_worktree_that_is_not_there_is_zero_not_a_crash(tmp_path, real_repo):
         assert Supervisor(board, {})._uncommitted(board.task(tid)) == 0
     finally:
         board.close()
+
+
+def test_a_worker_is_told_to_commit_before_it_is_told_to_report(team):
+    """A live seat did the work correctly and left it uncommitted. Committing
+    was two words inside a sentence about what *not* to do, while "Reporting
+    back" was the section that read as how to finish. Order carries the
+    emphasis, so the order is what is pinned."""
+    topic = work_topic(team)
+    tid = team.draft_task(topic, "boss", "hand", "Add backoff")
+    team.decide(team.submit_plan(topic, "boss"), "human", approve=True)
+    team.set_task_workspace(tid, "mooting/task-1", "/tmp/wt", "HEAD")
+
+    prompt = Supervisor(team, {}).build_task_prompt(topic, team.task(tid))
+
+    assert "git commit" in prompt, "the worker was never told to commit"
+    assert prompt.index("git commit") < prompt.index("mooting_task_update"), \
+        "reporting came before committing, which is the order that lost work"
+    assert "uncommitted is invisible" in prompt, \
+        "the reason it matters was not given, only the instruction"
+
+
+def test_a_worker_with_no_worktree_is_not_told_to_commit(team):
+    """Work outside a repo falls back to the working directory, and there is
+    no branch to commit to. Telling it to commit anyway would be an error the
+    seat cannot act on."""
+    topic = work_topic(team)
+    tid = team.draft_task(topic, "boss", "hand", "Add backoff")
+    team.decide(team.submit_plan(topic, "boss"), "human", approve=True)
+
+    prompt = Supervisor(team, {}).build_task_prompt(topic, team.task(tid))
+
+    assert "git commit" not in prompt
+    assert "mooting_task_update" in prompt, "it still has to report"
+
+
+# ------------------------- an execute seat has to be able to commit
+
+def _claude_seat(executing: bool):
+    from mooting.drivers.base import Seat
+
+    return Seat(topic_id=1, topic_slug="t", agent="hand", kind="claude",
+                cli_session=None, executing=executing)
+
+
+def test_an_executing_claude_seat_may_commit(tmp_path):
+    """`acceptEdits` auto-approves file edits and nothing else, so `git commit`
+    came back "requires approval" in a non-interactive run. Two live runs ended
+    with the work staged and uncommitted, which the loop can only read as no
+    work at all. The seat itself finally said why."""
+    from mooting.drivers.spawn import ClaudeDriver
+
+    flags = ClaudeDriver(tmp_path / "b.db").tool_profile(_claude_seat(True))
+
+    assert "acceptEdits" in flags
+    assert any("git commit" in f for f in flags), "it still cannot commit"
+    assert any("git add" in f for f in flags), "it cannot stage what it wrote"
+    assert "mcp__mooting" in flags, "it can no longer report back"
+
+
+def test_an_executing_seat_still_may_not_push_or_merge(tmp_path):
+    """The prompt tells a worker not to merge, not to push and not to touch
+    another branch. Naming the verbs is what makes that a fact rather than a
+    request; widening the permission mode would have left it as something the
+    seat is merely asked to respect."""
+    from mooting.drivers.spawn import ClaudeDriver
+
+    flags = " ".join(ClaudeDriver(tmp_path / "b.db").tool_profile(_claude_seat(True)))
+
+    for forbidden in ("git push", "git merge", "git checkout", "git reset",
+                      "git rebase", "git branch"):
+        assert forbidden not in flags, f"{forbidden} was granted"
+
+
+def test_a_deliberating_seat_gets_no_shell_at_all(tmp_path):
+    """The half that must not drift: a seat that is only arguing has no reason
+    to touch a repository."""
+    from mooting.drivers.spawn import ClaudeDriver
+
+    flags = ClaudeDriver(tmp_path / "b.db").tool_profile(_claude_seat(False))
+
+    assert "Bash" not in " ".join(flags)
+    assert "manual" in flags
