@@ -396,3 +396,110 @@ def test_raising_the_total_outright_still_works(console):
 
     assert console.store.topic(console.topic_id)["max_rounds"] == 9
     assert "nothing changed" not in " ".join(out)
+
+
+# --------------------------------- the chair's own verdict on finished work
+
+
+def work_topic(store, manager="me"):
+    """A work topic with an approved plan and one task assigned to an agent.
+
+    The lifecycle in full, because the gap being tested is at the end of it: a
+    manager drafts, the drafts hang off a proposal, a person signs that off,
+    and only then is there work anybody could accept.
+    """
+    tid = store.open_topic("w", "Work", "brief", "me", seats=("claude", "me"),
+                           mode="work", manager=manager)
+    task = store.draft_task(tid, manager, "claude", "Add the retry cap",
+                            "capped at six")
+    pid = store.propose(tid, manager, "The plan", "one task")
+    # Signing the proposal off is what releases the drafts, so they have to
+    # hang off it first -- that link is what `mooting_assign` writes.
+    with store.tx() as c:
+        c.execute("UPDATE tasks SET proposal_id = ? WHERE id = ?", (pid, task))
+    store.decide(pid, "me", approve=True, rationale="go")
+    store.update_task(task, "claude", "done", "pushed to a branch")
+    return tid, task
+
+
+def test_a_person_can_accept_finished_work(console):
+    """Work completes only when every task is accepted, and accepting existed
+    only as an MCP tool -- so a work topic a person managed could never finish.
+    `Store.update_task` always allowed the chair; nothing exposed it."""
+    tid, task = work_topic(console.store)
+    console.topic_id = tid
+    out = []
+    console.emit = out.append
+
+    console._tasks(f"accept {task} looks right")
+
+    assert console.store.task(task)["status"] == "accepted"
+    said = " ".join(out)
+    assert "accepted" in said
+    assert "next round" in said, "a settled plan did not say what closes it"
+
+
+def test_the_chair_can_send_work_back(console):
+    """`again` rather than `assigned`: the state name describes the queue, and
+    what the chair means is do it again. Rejecting would drop the task out of
+    every code path instead."""
+    tid, task = work_topic(console.store)
+    console.topic_id = tid
+    console.emit = lambda *a, **k: None
+
+    console._tasks(f"again {task} the cap is wrong")
+
+    assert console.store.task(task)["status"] == "assigned"
+
+
+def test_rejecting_abandons_it(console):
+    tid, task = work_topic(console.store)
+    console.topic_id = tid
+    console.emit = lambda *a, **k: None
+
+    console._tasks(f"reject {task} not worth doing")
+
+    assert console.store.task(task)["status"] == "rejected"
+
+
+def test_tasks_with_an_unknown_verb_does_not_quietly_list(console):
+    """`/tasks accept 3` used to print the plan, which reads as though the
+    verdict was recorded. Same rule as `/seats`: say what was expected."""
+    tid, _ = work_topic(console.store)
+    console.topic_id = tid
+    out = []
+    console.emit = out.append
+
+    console._tasks("finish 1")
+
+    said = " ".join(out)
+    assert "expected accept, reject or again" in said
+    assert "/tasks accept" in said
+
+
+def test_a_bystander_cannot_accept_work(console):
+    """The gate stays in the store. The surface must surface the refusal rather
+    than swallow it or raise through the session."""
+    tid, task = work_topic(console.store, manager="claude")
+    console.store.add_agent("nosy", "human")
+    console.store.set_chair(tid, "me", "me")
+    console.topic_id = tid
+    console.me = "nosy"
+    out = []
+    console.emit = out.append
+
+    console._tasks(f"accept {task} mine now")
+
+    assert console.store.task(task)["status"] == "done", "a bystander accepted work"
+    assert "only the manager or the chair" in " ".join(out)
+
+
+def test_a_verdict_needs_a_task_number(console):
+    tid, _ = work_topic(console.store)
+    console.topic_id = tid
+    out = []
+    console.emit = out.append
+
+    console._tasks("accept")
+
+    assert "which task?" in " ".join(out)

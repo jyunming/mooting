@@ -325,7 +325,7 @@ MENU = [
     ("rounds", "<n> sets the total · +<n> adds more"),
     ("proposals", "what is waiting on your sign-off"),
     ("asks", "questions the council has put to you"),
-    ("tasks", "the work plan and where each task has got to"),
+    ("tasks", "the plan · accept <id> · reject <id> · again <id>"),
     ("attach", "feed a document to the council"),
     ("show", "<id> — a message in full, however far back it scrolled"),
     ("minutes", "the meeting as a file; `minutes decisions` for the decisions"),
@@ -689,6 +689,23 @@ def event_text(store, ev) -> str | None:
         return (f"**proposal #{ev.payload['proposal_id']} "
                 f"{ev.payload.get('status', 'decided')}** by {ev.actor}"
                 + (f" — {why}" if why else ""))
+    if ev.kind == "task":
+        # A finished task arrives as a system message, which the filter above
+        # drops, so from a phone work was done and reported into silence. The
+        # chair then had nothing to accept and the topic could not complete.
+        # Only the two ends: `in_progress` every round is the noise that rule
+        # exists to keep out.
+        action = ev.payload.get("action")
+        if action not in {"done", "blocked", "accepted", "rejected"}:
+            return None
+        row = store.q1("SELECT * FROM tasks WHERE id = ?",
+                       (ev.payload.get("task_id"),))
+        if row is None:
+            return None
+        head = f"**task #{row['id']} {action}** {row['title']} — {ev.actor}"
+        if action == "done":
+            head += f"\n/tasks accept {row['id']} <why> · /tasks again {row['id']} <why>"
+        return head
     return None
 
 

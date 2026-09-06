@@ -100,7 +100,8 @@ about.
 
 | | |
 |---|---|
-| E1 | **A person managing a work topic cannot finish it.** Accepting or rejecting a finished task exists only as an MCP tool, so only an agent seat can do it. Work is reported complete only when every task is accepted, so a topic managed by a person never completes. Add `/accept` and `/reject`. |
+| E1 ✅ | **Done as `/tasks accept|reject|again <id> <why>`, not `/approve`.** `/reject` already closes a proposal, and a command that means one of two things depending on which table the number is in is the thing `/seats` refuses to be. `Store.update_task` had accepted the chair all along; nothing exposed it. A finished task also reaches the chat now -- it arrived as a system message, which the noise filter drops, so from a phone work was reported into silence and there was nothing to accept. Superseded text below. |
+| ~~E1~~ | **A person managing a work topic cannot finish it.** Accepting or rejecting a finished task exists only as an MCP tool, so only an agent seat can do it. Work is reported complete only when every task is accepted, so a topic managed by a person never completes. Add `/accept` and `/reject`. |
 | E2 | **The browser watches but cannot act.** The served page makes three read requests and carries no controls, while every write route already exists. |
 | E3 | **The documented HTTP surface is not the one that runs.** `POST /topics` and `GET /topics/{slug}/minutes` do not exist, `/api/events` is the polling form rather than the stream, and every documented path omits the `/api` prefix. Build the two routes or correct the table. |
 | E4 ✅ | **Done.** One entry in the console's dispatch table, so the console, the full-screen view and the chat bot all answer it. Superseded text below. |

@@ -580,8 +580,30 @@ class Console:
             self.emit(f"  {s['agent']:<12} {s['kind']:<9} {s['state']:<8} "
                   f"{s['turns_used']}/{s['max_turns']} turns{flag}")
 
-    def _tasks(self, _: str) -> None:
+    #: The verdicts a person may pass on a finished task, and the state each
+    #: writes. `again` rather than `assigned`: the state name describes the
+    #: queue, and what the chair means is do it again.
+    TASK_VERDICTS = {"accept": "accepted", "reject": "rejected", "again": "assigned"}
+
+    def _tasks(self, rest: str = "") -> None:
         if not self._require_topic():
+            return
+        words = rest.split()
+        if words and words[0] in self.TASK_VERDICTS:
+            return self._task_verdict(words[0], words[1] if len(words) > 1 else "",
+                                      " ".join(words[2:]))
+        if words:
+            # Same rule as `/seats`: a command that quietly reinterprets you is
+            # worse than one that says what it expected. `/tasks accept 3` used
+            # to print the list, which looks like it worked.
+            self.emit(f"{RED}/tasks {rest} — expected accept, reject or again{RESET}")
+            self.emit(f"{DIM}/tasks                     the plan and where it "
+                      f"has got to{RESET}")
+            self.emit(f"{DIM}/tasks accept <id> <why>   sign off on finished "
+                      f"work{RESET}")
+            self.emit(f"{DIM}/tasks reject <id> <why>   abandon it{RESET}")
+            self.emit(f"{DIM}/tasks again <id> <why>    send it back to be "
+                      f"done again{RESET}")
             return
         rows = self.store.tasks(self.topic_id)
         if not rows:
@@ -597,6 +619,40 @@ class Console:
                 self.emit(f"       {DIM}{t['branch']}{landed}{RESET}")
             if t["result"]:
                 self.emit(f"       {t['result'].strip()[:200]}")
+
+    def _task_verdict(self, verb: str, ref: str, why: str) -> None:
+        """The chair's own verdict on a finished task.
+
+        `Store.update_task` has always accepted the chair; nothing exposed it,
+        so accepting work existed only as an MCP tool and only an agent could
+        do it. Work completes when every task is accepted, which meant a work
+        topic a person managed could never finish.
+        """
+        if not ref.isdigit():
+            self.emit(f"{RED}/tasks {verb} <id> — which task?{RESET}")
+            return
+        try:
+            self.store.update_task(int(ref), self.me, self.TASK_VERDICTS[verb],
+                                   why.strip())
+        except (StoreError, NotAuthorised) as exc:
+            self.emit(f"{RED}{exc}{RESET}")
+            return
+
+        t = self.store.task(int(ref))
+        self.emit(f"  #{t['id']} [{BOLD}{t['status']}{RESET}] {t['title']} "
+                  f"— {t['assignee']}")
+        rows = self.store.tasks(self.topic_id)
+        left = [r for r in rows if r["status"] not in {"accepted", "rejected"}]
+        if left:
+            self.emit(f"  {DIM}{len(left)} task(s) still open: "
+                      + ", ".join(f"#{r['id']} {r['status']}" for r in left)
+                      + RESET)
+        else:
+            # The supervisor is what notices a finished plan, so with nothing
+            # driving there is no round in which to notice. Say that rather
+            # than leave a settled topic looking open.
+            self.emit(f"  {DIM}every task settled — the topic closes on the "
+                      f"next round ({BOLD}/run{RESET}{DIM}){RESET}")
 
     def _me(self, rest: str) -> None:
         """Rename yourself. The council addresses you by this."""
