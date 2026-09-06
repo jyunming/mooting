@@ -317,3 +317,50 @@ def test_the_work_log_counts_what_landed_not_what_was_claimed(tmp_path, real_rep
     assert "| 1 |" in log, f"the commit that landed is not in the log:\n{log}"
     assert "shipped it" in log, "the worker's own report was dropped"
     board.close()
+
+
+# --------------------------- work that happened and was never committed
+
+
+def _work_task(tmp_path, real_repo):
+    """A board with one assigned task whose worktree is a genuine repo."""
+    board = connect(tmp_path / "board.db", init=True)
+    board.add_agent("human", "human")
+    board.add_agent("boss", "claude", driver="spawn", driver_cfg={"cwd": str(real_repo)})
+    board.add_agent("hand", "codex", driver="spawn",
+                    driver_cfg={"cwd": str(real_repo), "capability": "execute"})
+    topic = board.open_topic("ship-it", "T", "B", "human",
+                             seats=("boss", "hand", "human"), mode="work",
+                             manager="boss")
+    tid = board.draft_task(topic, "boss", "hand", "Cap the retries")
+    board.set_task_workspace(tid, "mooting/task-1", str(real_repo), "HEAD")
+    return board, tid
+
+
+def test_work_left_uncommitted_is_not_reported_as_nothing(tmp_path, real_repo):
+    """Found by running a real seat against a real repo: it edited the file
+    correctly and never ran `git commit`. The loop looks only at commits, so it
+    said "nothing committed" -- which reads as "did nothing", and a manager
+    re-assigns work that is sitting right there in the worktree."""
+    board, tid = _work_task(tmp_path, real_repo)
+    sup = Supervisor(board, {})
+    try:
+        assert sup._uncommitted(board.task(tid)) == 0, "a clean tree looked dirty"
+
+        (real_repo / "gateway.py").write_text("RETRY_SECONDS = 30\nMAX = 6\n",
+                                              encoding="utf-8")
+
+        assert sup._uncommitted(board.task(tid)) == 1, \
+            "real changes in the worktree were invisible"
+    finally:
+        board.close()
+
+
+def test_a_worktree_that_is_not_there_is_zero_not_a_crash(tmp_path, real_repo):
+    """A probe inside the loop must never take the turn down with it."""
+    board, tid = _work_task(tmp_path, real_repo)
+    try:
+        board.set_task_workspace(tid, "mooting/task-1", "", "")
+        assert Supervisor(board, {})._uncommitted(board.task(tid)) == 0
+    finally:
+        board.close()

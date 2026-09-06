@@ -719,10 +719,44 @@ class Supervisor:
                         tid, agent, "done",
                         f"(no report from the worker; {n} commit(s) on {task['branch']})")
                 else:
-                    self.store.update_task(
-                        tid, agent, "blocked",
-                        "turn ended with no report and nothing committed")
+                    # The mirror of the case above, found by running a real
+                    # seat: it edited the file correctly and never ran `git
+                    # commit`. "nothing committed" is true and reads as "did
+                    # nothing", so a manager re-assigns work that is sitting
+                    # right there. Stay blocked -- an uncommitted tree is not a
+                    # diff anybody can review or merge -- but say what is in it.
+                    dirty = self._uncommitted(self.store.task(tid))
+                    if dirty:
+                        self.store.update_task(
+                            tid, agent, "blocked",
+                            f"turn ended with no report and nothing committed, "
+                            f"but {dirty} file(s) are changed in the worktree: "
+                            f"{task['worktree']}")
+                    else:
+                        self.store.update_task(
+                            tid, agent, "blocked",
+                            "turn ended with no report and nothing committed")
         return result
+
+    def _uncommitted(self, task) -> int:
+        """Files changed in the worktree that no commit has taken.
+
+        Work that exists and is invisible to `_commits_on`, which is the only
+        thing the loop otherwise looks at.
+        """
+        tree = task["worktree"]
+        if not tree:
+            return 0
+        try:
+            r = subprocess.run(["git", "-C", tree, "status", "--porcelain"],
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace")
+            if r.returncode != 0:
+                return 0
+            return len([ln for ln in r.stdout.splitlines() if ln.strip()])
+        except Exception as exc:
+            log.warning("could not read the worktree for task %s: %s", task["id"], exc)
+            return 0
 
     def _commits_on(self, task) -> int:
         """Commits this task's branch has that its base did not.
