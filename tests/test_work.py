@@ -532,3 +532,39 @@ def test_a_task_with_no_worktree_measures_nothing(tmp_path, real_repo):
         assert "measured:" not in board.task(tid)["result"]
     finally:
         board.close()
+
+
+# ------------- a seat that may execute and is narrowed by nothing
+
+
+def test_doctor_names_an_execute_seat_with_no_narrowing(tmp_path, capsys):
+    """`tool_profile` returns `[]` by default, so an adapter that never
+    overrode it ships a seat that can do anything its CLI can. The failure is
+    silent: a seat with too much reach works perfectly."""
+    from mooting.doctor import report_narrowing
+
+    board = connect(tmp_path / "b.db", init=True)
+    board.add_agent("pilot", "copilot", driver="spawn",
+                    driver_cfg={"capability": "execute"})
+    board.add_agent("santa", "claude", driver="spawn",
+                    driver_cfg={"capability": "execute"})
+    try:
+        assert report_narrowing(board, board.agents()) == 1
+        said = capsys.readouterr().out
+        assert "pilot" in said
+        assert "santa" not in said, "a narrowed adapter was reported as loose"
+    finally:
+        board.close()
+
+
+def test_a_deliberating_seat_is_not_the_question(tmp_path):
+    """This is about what an execute seat may reach. A seat that cannot execute
+    is narrowed by the two-key rule, whatever its flags say."""
+    from mooting.doctor import report_narrowing
+
+    board = connect(tmp_path / "b.db", init=True)
+    board.add_agent("pilot", "copilot", driver="spawn", driver_cfg={})
+    try:
+        assert report_narrowing(board, board.agents()) == 0
+    finally:
+        board.close()

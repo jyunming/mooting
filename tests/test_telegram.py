@@ -1838,3 +1838,67 @@ def test_a_nonsense_callback_is_refused():
 
     for bad in ("why:ok:7:44", "why:maybe:7:0", "why:ok:x:0", "set:team:Santa", ""):
         assert parse_why(bad) is None, bad
+
+
+# ---------------------- the objections travel with the proposal
+
+
+def _proposal_text(store, pid):
+    """The block `say_proposal` appends, from the function that builds it.
+
+    Not a copy of it: a test that reimplements the code under test passes when
+    the copy is right and the original is wrong.
+    """
+    from mooting.telegram import stance_lines
+
+    return stance_lines(store, pid)
+
+
+def test_an_objection_reaches_the_person_signing_it_off(board):
+    """One person deciding does not scale past a couple of seats if the
+    objections are somewhere else, and on a phone somewhere else means unread."""
+    board.add_agent("kevin", "agy", driver="spawn")
+    topic = board.open_topic("t", "T", "b", "jeremy",
+                             seats=("santa", "kevin", "jeremy"))
+    pid = board.propose(topic, "santa", "Cap at six", "body")
+    board.vote(pid, "kevin", "object", "six exceeds the consumer window")
+
+    text = _proposal_text(board, pid)
+
+    assert "kevin" in text and "object" in text
+    assert "six exceeds the consumer window" in text
+
+
+def test_objections_come_before_agreement(board):
+    """A sign-off does not turn on who agreed."""
+    board.add_agent("kevin", "agy", driver="spawn")
+    topic = board.open_topic("t", "T", "b", "jeremy",
+                             seats=("santa", "kevin", "jeremy"))
+    pid = board.propose(topic, "santa", "Cap at six", "body")
+    board.vote(pid, "santa", "support", "mine")
+    board.vote(pid, "kevin", "object", "no")
+
+    text = _proposal_text(board, pid)
+
+    assert text.index("kevin") < text.index("santa** support")
+
+
+def test_a_long_objection_is_cut_at_a_word(board):
+    """A chat is not a terminal: a paragraph that reads fine in a pane buries
+    the buttons under it."""
+    topic = board.open_topic("t", "T", "b", "jeremy", seats=("santa", "jeremy"))
+    pid = board.propose(topic, "santa", "Cap at six", "body")
+    board.vote(pid, "santa", "object", "word " * 100)
+
+    text = _proposal_text(board, pid)
+
+    assert "…" in text
+    assert len(text) < 260, "the objection buried the proposal"
+
+
+def test_a_proposal_nobody_voted_on_adds_nothing(board):
+    """An empty stance block would put a blank gap above the buttons."""
+    topic = board.open_topic("t", "T", "b", "jeremy", seats=("santa", "jeremy"))
+    pid = board.propose(topic, "santa", "Cap at six", "the body")
+
+    assert _proposal_text(board, pid) == ""

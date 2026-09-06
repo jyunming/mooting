@@ -581,6 +581,32 @@ def parse_why(data: str) -> tuple[bool, int, str | None] | None:
     return approve, int(parts[2]), presets[idx]
 
 
+#: How a stance is marked, matching the full-screen view so two surfaces do not
+#: teach different symbols for the same thing.
+STANCE_MARKS = {"object": "!", "support": "+", "abstain": "~"}
+
+
+def stance_lines(store, pid: int) -> str:
+    """Who objected and who agreed, to travel with the proposal itself.
+
+    One person deciding does not scale past a couple of seats if the objections
+    are somewhere else, and on a phone "somewhere else" means unread. Objections
+    come first: a sign-off does not turn on who agreed.
+    """
+    votes = sorted(store.votes(pid),
+                   key=lambda v: {"object": 0, "support": 1}.get(v["stance"], 2))
+    if not votes:
+        return ""
+    lines = []
+    for v in votes:
+        why = " ".join((v["rationale"] or "").split())
+        if len(why) > 140:                  # a chat is not a terminal
+            why = why[:140].rsplit(" ", 1)[0] + "…"
+        lines.append(f"{STANCE_MARKS.get(v['stance'], '?')} **{v['agent']}** "
+                     f"{v['stance']}" + (f" — {why}" if why else ""))
+    return "\n\n" + "\n".join(lines)
+
+
 SHIFT_PREFIX = "moved"
 
 
@@ -1399,6 +1425,7 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
         preview = body if len(body) < 600 else body[:600].rstrip() + "…"
         text = (f"**proposal #{pid}** {pr['title']}\n"
                 f"_by {pr['author']}_\n\n{preview}")
+        text += stance_lines(store, pid)
         # ids are short; Telegram caps callback_data at 64 bytes and these are
         # nowhere near it.
         keys = InlineKeyboardMarkup(inline_keyboard=[[
