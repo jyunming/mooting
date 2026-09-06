@@ -592,17 +592,26 @@ class Console:
         if words and words[0] in self.TASK_VERDICTS:
             return self._task_verdict(words[0], words[1] if len(words) > 1 else "",
                                       " ".join(words[2:]))
+        if words and words[0] == "add":
+            return self._task_add(rest[len("add"):].strip())
+        if words and words[0] == "plan":
+            return self._task_plan()
         if words:
             # Same rule as `/seats`: a command that quietly reinterprets you is
             # worse than one that says what it expected. `/tasks accept 3` used
             # to print the list, which looks like it worked.
-            self.emit(f"{RED}/tasks {rest} — expected accept, reject or again{RESET}")
-            self.emit(f"{DIM}/tasks                     the plan and where it "
+            self.emit(f"{RED}/tasks {rest} — expected add, plan, accept, reject "
+                      f"or again{RESET}")
+            self.emit(f"{DIM}/tasks                       the plan and where it "
                       f"has got to{RESET}")
-            self.emit(f"{DIM}/tasks accept <id> <why>   sign off on finished "
+            self.emit(f"{DIM}/tasks add <who> <what>      write a task; "
+                      f"`; <done when>` sets the acceptance{RESET}")
+            self.emit(f"{DIM}/tasks plan                  put the drafts up as "
+                      f"one plan to sign off{RESET}")
+            self.emit(f"{DIM}/tasks accept <id> <why>     sign off on finished "
                       f"work{RESET}")
-            self.emit(f"{DIM}/tasks reject <id> <why>   abandon it{RESET}")
-            self.emit(f"{DIM}/tasks again <id> <why>    send it back to be "
+            self.emit(f"{DIM}/tasks reject <id> <why>     abandon it{RESET}")
+            self.emit(f"{DIM}/tasks again <id> <why>      send it back to be "
                       f"done again{RESET}")
             return
         rows = self.store.tasks(self.topic_id)
@@ -619,6 +628,48 @@ class Console:
                 self.emit(f"       {DIM}{t['branch']}{landed}{RESET}")
             if t["result"]:
                 self.emit(f"       {t['result'].strip()[:200]}")
+
+    def _task_add(self, rest: str) -> None:
+        """Write one task, as the manager.
+
+        `draft_task` has always taken a manager of either kind, and only the
+        MCP tool ever called it -- so a work topic a person managed could not
+        be planned at all, which made accepting work on one moot.
+        """
+        head, _, acceptance = rest.partition(";")
+        who, _, title = head.strip().partition(" ")
+        if not who or not title.strip():
+            self.emit(f"{RED}/tasks add <who> <what> — who does what?{RESET}")
+            self.emit(f"{DIM}e.g. /tasks add Santa cap the retries; "
+                      f"six attempts, jittered{RESET}")
+            return
+        try:
+            tid = self.store.draft_task(self.topic_id, self.me, who.lstrip("@"),
+                                        title.strip(),
+                                        acceptance=acceptance.strip())
+        except (StoreError, NotAuthorised) as exc:
+            self.emit(f"{RED}{exc}{RESET}")
+            return
+        drafts = self.store.tasks(self.topic_id, status="draft")
+        self.emit(f"  #{tid} [draft] {title.strip()} — {who.lstrip('@')}")
+        self.emit(f"  {DIM}{len(drafts)} draft(s) — {BOLD}/tasks plan{RESET}"
+                  f"{DIM} puts them up to be signed off{RESET}")
+
+    def _task_plan(self) -> None:
+        """Put every draft up as one proposal, which a person then signs off.
+
+        One proposal for the whole plan, and it goes through the same gate as
+        any other: the manager writing it is not the act that starts work.
+        """
+        try:
+            pid = self.store.submit_plan(self.topic_id, self.me)
+        except (StoreError, NotAuthorised) as exc:
+            self.emit(f"{RED}{exc}{RESET}")
+            return
+        p = self.store.proposal(pid)
+        self.emit(f"  ◆ proposal #{pid} {p['title']}")
+        self.emit(f"  {DIM}nothing runs until it is signed off — "
+                  f"{BOLD}/approve {pid} <why>{RESET}{DIM}{RESET}")
 
     def _task_verdict(self, verb: str, ref: str, why: str) -> None:
         """The chair's own verdict on a finished task.

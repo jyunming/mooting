@@ -659,6 +659,17 @@ class Store:
         brief = clean_text(brief, "the brief")
         if mode not in TOPIC_MODES:
             raise StoreError(f"unknown mode {mode!r}; expected one of {sorted(TOPIC_MODES)}")
+        # `seats` is a foreign key onto `agents(name)`, so a name that is not
+        # registered came back as a bare sqlite IntegrityError traceback. The
+        # commonest way to produce one is passing `--seats "A B"` where the flag
+        # wants commas, and a stack trace is no way to be told that.
+        known = {a["name"] for a in self.agents()}
+        missing = [s for s in seats if s not in known]
+        if missing:
+            raise StoreError(
+                f"no such seat(s): {', '.join(repr(m) for m in missing)}. "
+                f"Registered: {', '.join(sorted(known)) or 'none'}. "
+                f"Names are comma-separated.")
         with self.tx() as c:
             cur = c.execute(
                 """INSERT INTO topics (slug, title, brief, opened_by, max_rounds,
@@ -1865,6 +1876,16 @@ class Store:
         *who does what*, and approving piecemeal would let work start on half a
         plan while the other half is still being argued about.
         """
+        # Whoever puts the plan up owns the proposal the drafts attach to, so a
+        # second seat calling this takes the manager's plan and puts its own
+        # name on it. Checked against the seat rather than by `is_manager`
+        # because a work topic can have no manager at all, and the loop then
+        # falls back to whoever opened it.
+        held = next((s["agent"] for s in self.seats(topic_id)
+                     if s["role"] == "manager"), None)
+        if held and manager != held:
+            raise NotAuthorised(f"{manager!r} is not the manager of this topic; "
+                                f"{held} puts the plan up")
         drafts = self.tasks(topic_id, status="draft")
         if not drafts:
             raise StoreError("no draft tasks to put to a human")

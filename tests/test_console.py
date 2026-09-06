@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from mooting.store import connect
+from mooting.store import StoreError, connect
 
 ptk = pytest.importorskip("prompt_toolkit")
 from prompt_toolkit.application import create_app_session          # noqa: E402
@@ -473,7 +473,7 @@ def test_tasks_with_an_unknown_verb_does_not_quietly_list(console):
     console._tasks("finish 1")
 
     said = " ".join(out)
-    assert "expected accept, reject or again" in said
+    assert "expected add, plan, accept, reject or again" in said
     assert "/tasks accept" in said
 
 
@@ -503,3 +503,117 @@ def test_a_verdict_needs_a_task_number(console):
     console._tasks("accept")
 
     assert "which task?" in " ".join(out)
+
+
+# ------------------------------ a person managing work can also write the plan
+
+
+def human_work_topic(store):
+    """A work topic whose manager is the person at the keyboard."""
+    return store.open_topic("w", "Work", "brief", "me", seats=("claude", "me"),
+                            mode="work", manager="me")
+
+
+def test_a_person_can_write_the_plan(console):
+    """Accepting finished work is moot if the plan can never exist. `draft_task`
+    has always taken a manager of either kind and only the MCP tool called it,
+    so a work topic a person managed could not be planned at all."""
+    console.topic_id = human_work_topic(console.store)
+    out = []
+    console.emit = out.append
+
+    console._tasks("add claude cap the retries; six attempts, jittered")
+
+    rows = console.store.tasks(console.topic_id, status="draft")
+    assert len(rows) == 1
+    assert rows[0]["title"] == "cap the retries"
+    assert rows[0]["assignee"] == "claude"
+    assert rows[0]["acceptance"] == "six attempts, jittered", "the done-when was lost"
+    assert "/tasks plan" in " ".join(out), "nothing said how to put it up"
+
+
+def test_the_done_when_is_optional(console):
+    console.topic_id = human_work_topic(console.store)
+    console.emit = lambda *a, **k: None
+
+    console._tasks("add claude cap the retries")
+
+    assert console.store.tasks(console.topic_id, status="draft")[0]["acceptance"] == ""
+
+
+def test_a_task_needs_somebody_to_do_it(console):
+    console.topic_id = human_work_topic(console.store)
+    out = []
+    console.emit = out.append
+
+    console._tasks("add claude")
+
+    assert "who does what?" in " ".join(out)
+    assert not console.store.tasks(console.topic_id)
+
+
+def test_the_plan_goes_up_as_one_proposal(console):
+    """One proposal for the whole plan: approving piecemeal would start work on
+    half a plan while the other half is still argued about."""
+    console.topic_id = human_work_topic(console.store)
+    console.emit = lambda *a, **k: None
+    console._tasks("add claude first thing")
+    console._tasks("add claude second thing")
+    out = []
+    console.emit = out.append
+
+    console._tasks("plan")
+
+    open_props = console.store.proposals(console.topic_id, status="open")
+    assert len(open_props) == 1, "a plan per task, or none at all"
+    assert "/approve" in " ".join(out), "nothing said the plan still needs signing"
+    # Still drafts: writing the plan is not the act that starts work.
+    assert len(console.store.tasks(console.topic_id, status="draft")) == 2
+
+
+def test_planning_with_nothing_drafted_says_so(console):
+    console.topic_id = human_work_topic(console.store)
+    out = []
+    console.emit = out.append
+
+    console._tasks("plan")
+
+    assert "no draft tasks" in " ".join(out)
+
+
+def test_a_second_seat_cannot_put_up_the_managers_plan(console):
+    """Whoever submits owns the proposal the drafts attach to, so this would
+    take the manager's plan and put another name on it."""
+    console.topic_id = human_work_topic(console.store)
+    console.emit = lambda *a, **k: None
+    console._tasks("add claude first thing")
+    console.store.add_agent("nosy", "human")
+    console.me = "nosy"
+    out = []
+    console.emit = out.append
+
+    console._tasks("plan")
+
+    assert "is not the manager" in " ".join(out)
+    assert not console.store.proposals(console.topic_id, status="open")
+
+
+# ------------------------------------------- an unregistered seat is a sentence
+
+
+def test_opening_a_topic_on_an_unknown_seat_is_not_a_traceback(console):
+    """`seats` is a foreign key onto `agents(name)`, so an unregistered name came
+    back as a bare sqlite IntegrityError. The commonest way to produce one is
+    `--seats "A B"` where the flag wants commas."""
+    with pytest.raises(StoreError) as exc:
+        console.store.open_topic("x", "T", "b", "me", seats=("claude me",))
+
+    assert "no such seat" in str(exc.value)
+    assert "comma-separated" in str(exc.value), "the actual mistake was not named"
+
+
+def test_the_registered_seats_are_listed_in_the_refusal(console):
+    with pytest.raises(StoreError) as exc:
+        console.store.open_topic("x", "T", "b", "me", seats=("nobody",))
+
+    assert "claude" in str(exc.value) and "codex" in str(exc.value)
