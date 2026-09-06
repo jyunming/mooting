@@ -345,7 +345,8 @@ class Store:
                                    ("wakes", "tokens_out", "INTEGER"),
                                    ("wakes", "cost_usd", "REAL"),
                                    ("tasks", "base_sha", "TEXT"),
-                                   ("tasks", "depends_on", "INTEGER")):
+                                   ("tasks", "depends_on", "INTEGER"),
+                                   ("topics", "position", "TEXT")):
             cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
@@ -824,6 +825,58 @@ class Store:
             closed = "datetime('now')" if status in {"resolved", "aborted"} else "NULL"
             c.execute(f"UPDATE topics SET status = ?, closed_at = {closed} WHERE id = ?", (status, topic_id))
             self._emit(c, topic_id, "topic", actor, {"action": status, "note": note})
+
+    def set_position(self, topic_id: int, text: str, actor: str) -> None:
+        """What the chair thought before the council started.
+
+        Optional, and asked for rather than demanded: most topics are opened by
+        somebody who has no prior position, and a forced prompt would collect
+        noise and make the record worse. When it is there, it is the only honest
+        way to answer whether the council changed anybody's mind -- comparing a
+        sign-off against a position written afterwards proves nothing.
+        """
+        if not self.is_human(actor):
+            raise NotAuthorised(f"{actor!r} is not a person; a position is a "
+                                f"person's")
+        with self.tx() as c:
+            c.execute("UPDATE topics SET position = ? WHERE id = ?",
+                      (clean_text(text, "the position"), topic_id))
+
+    def position(self, topic_id: int) -> str:
+        row = self.q1("SELECT position FROM topics WHERE id = ?", (topic_id,))
+        return (row["position"] or "") if row else ""
+
+    def record_shift(self, topic_id: int, moved: bool, actor: str) -> None:
+        """Whether the council changed the chair's mind on this topic.
+
+        One tap, and it has to be a tap: comparing an opening position against a
+        sign-off rationale by text would be a guess dressed as a measurement.
+        The person who held both is the only one who can answer it.
+        """
+        if not self.is_human(actor):
+            raise NotAuthorised(f"{actor!r} cannot answer for the chair")
+        with self.tx() as c:
+            self._emit(c, topic_id, "shift", actor, {"moved": bool(moved)})
+
+    def shifts(self) -> dict[str, int]:
+        """How often a council moved the person holding the decision.
+
+        The cheapest honest measurement this project can make about itself, and
+        the only one it can make without an experiment. `asked` is the
+        denominator that matters: a rate over topics nobody was asked about
+        would flatter it.
+        """
+        out = {"asked": 0, "moved": 0, "with_position": 0}
+        for row in self.q("SELECT COUNT(*) n FROM topics "
+                          "WHERE position IS NOT NULL AND position != ''"):
+            out["with_position"] = int(row["n"])
+        seen: dict[int, bool] = {}
+        for ev in self.events_since(0, None):
+            if ev.kind == "shift" and ev.topic_id is not None:
+                seen[int(ev.topic_id)] = bool(ev.payload.get("moved"))
+        out["asked"] = len(seen)
+        out["moved"] = sum(1 for v in seen.values() if v)
+        return out
 
     def chair(self, topic_id: int) -> str | None:
         """Who signs off here. Whoever opened the meeting, unless it named someone.
@@ -1962,6 +2015,24 @@ class Store:
                       (t["topic_id"], agent, note))
             self._emit(c, int(t["topic_id"]), "task", agent,
                        {"task_id": task_id, "action": status})
+
+    def note_measurement(self, task_id: int, measured: str) -> None:
+        """Append what was measured to a task's report, below what was claimed.
+
+        Kept in `result` rather than a column of its own: it is the same field a
+        reviewer already reads, and splitting them would mean a surface that
+        showed one and not the other. Prefixed so the two are never mistaken for
+        each other -- which is the whole point of recording it.
+        """
+        if not measured:
+            return
+        row = self.task(task_id)
+        said = (row["result"] or "").strip()
+        if measured in said:                    # a re-run must not stack them up
+            return
+        with self.tx() as c:
+            c.execute("UPDATE tasks SET result = ? WHERE id = ?",
+                      (f"{said}\n\n{measured}".strip(), task_id))
 
     def set_task_workspace(self, task_id: int, branch: str, worktree: str,
                            base_sha: str = "") -> None:

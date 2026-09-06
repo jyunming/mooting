@@ -581,6 +581,26 @@ def parse_why(data: str) -> tuple[bool, int, str | None] | None:
     return approve, int(parts[2]), presets[idx]
 
 
+SHIFT_PREFIX = "moved"
+
+
+def shift_callback(moved: bool, topic_id: int) -> str:
+    data = f"{SHIFT_PREFIX}:{'y' if moved else 'n'}:{int(topic_id)}"
+    if len(data.encode("utf-8")) > 64:
+        raise ValueError("callback_data over Telegram's 64-byte limit")
+    return data
+
+
+def parse_shift(data: str) -> tuple[bool, int] | None:
+    """`(moved, topic_id)` behind the after-sign-off question, or None."""
+    parts = (data or "").split(":")
+    if len(parts) != 3 or parts[0] != SHIFT_PREFIX or parts[1] not in {"y", "n"}:
+        return None
+    if not parts[2].isdigit():
+        return None
+    return parts[1] == "y", int(parts[2])
+
+
 SET_PREFIX = "set"
 
 
@@ -1559,6 +1579,24 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
                              f"{row['display'] or row['user_id']} now speaks as "
                              f"**{row['seat']}**, let in by {presser}.")
 
+        moved = parse_shift(call.data or "")
+        if moved is not None:
+            did, topic_id = moved
+            if not await allowed(chat_id):
+                return await call.answer("not this chat", show_alert=True)
+            seat = store.seat_for_chat(chat_id, call.from_user.id)
+            if not seat:
+                return await call.answer("You are not paired here.", show_alert=True)
+            try:
+                store.record_shift(topic_id, did, seat)
+            except (StoreError, NotAuthorised) as exc:
+                return await call.answer(str(exc)[:180], show_alert=True)
+            try:
+                await call.message.delete()
+            except Exception:
+                pass
+            return await call.answer("noted" if did else "noted")
+
         why_pick = parse_why(call.data or "")
         if why_pick is not None:
             approve, pid, reason = why_pick
@@ -1586,9 +1624,10 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             store.audit(seat, "decide", {"proposal_id": pid, "approve": approve,
                                          "via": "telegram"},
                         topic_id=int(store.proposal(pid)["topic_id"]))
+            await call.answer("signed off" if approve else "rejected")
             # The pump announces every decision wherever it was taken, so
             # saying it here as well would deliver it twice.
-            return await call.answer("signed off" if approve else "rejected")
+            return await ask_if_moved(chat_id, int(store.proposal(pid)["topic_id"]))
 
         chosen = parse_set(call.data or "")
         if chosen is not None:
@@ -1686,6 +1725,33 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             f"{'Approving' if approve else 'Rejecting'} #{pid} — why?",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
+    async def ask_if_moved(chat_id, topic_id: int) -> None:
+        """One tap, only when there is a position to compare against.
+
+        The cheapest honest measurement this project can make about itself. It
+        has to be a tap: reading an opening position against a sign-off
+        rationale by text would be a guess dressed up as a number. Silent when
+        nobody wrote a position, because a question nobody can answer is noise.
+        """
+        if not store.position(topic_id):
+            return
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+        rows = [[InlineKeyboardButton(text="It changed my mind",
+                                      callback_data=shift_callback(True, topic_id)),
+                 InlineKeyboardButton(text="I already thought so",
+                                      callback_data=shift_callback(False, topic_id))]]
+        try:
+            await bot.send_message(
+                chat_id,
+                "You wrote a position before this started:\n"
+                f"<i>{html.escape(store.position(topic_id))}</i>\n\n"
+                "Did the council move you?",
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        except Exception as exc:
+            log.warning("could not ask whether the council moved you: %s", exc)
+
     async def finish_ruling(msg: Message) -> bool:
         """Complete a ruling whose reason has just arrived. True if it was one."""
         ref = msg.reply_to_message
@@ -1709,7 +1775,8 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
                                      "via": "telegram"},
                     topic_id=int(store.proposal(pid)["topic_id"]))
         # The pump announces every decision, wherever it was taken, so saying
-        # it here as well would deliver a chat ruling twice.
+        # it here as well would deliver a chat sign-off twice.
+        await ask_if_moved(msg.chat.id, int(store.proposal(pid)["topic_id"]))
         return True
 
     @dp.message()

@@ -1161,7 +1161,7 @@ class Console:
     #: one place so the session has one obvious noun to ask about rather than six
     #: unrelated verbs at the top level.
     TOPIC_VERBS = ("new", "switch", "rename", "agenda", "chair", "mode", "manager",
-                   "rm", "list")
+                   "position", "rm", "list")
 
     def _topic(self, rest: str) -> None:
         """`/topic` is the noun; the verbs live under it.
@@ -1179,6 +1179,7 @@ class Console:
             return {"new": self._new, "switch": self._switch, "rename": self._rename,
                     "agenda": self._agenda, "mode": self._mode,
                     "chair": self._chair, "manager": self._manager,
+                    "position": self._position,
                     "rm": self._rm}[verb](tail.strip())
         # Not guessing that an unknown word is a slug. `/topic mode` would have
         # been ambiguous forever, and a wrong guess here silently switches you
@@ -1186,6 +1187,35 @@ class Console:
         self.emit(f"{RED}no such topic command: {verb}{RESET}")
         self.emit(f"  {DIM}/topic switch {verb}   to move to that topic{RESET}")
         self.emit(f"  {DIM}/topic {' | '.join(self.TOPIC_VERBS)}{RESET}")
+
+    def _position(self, rest: str) -> None:
+        """What you thought before the council started.
+
+        Optional on purpose. Most topics are opened by somebody with no prior
+        position, and demanding one would collect noise. When it is there, it is
+        the only honest way to ask later whether the council changed your mind:
+        a position written after the argument proves nothing.
+        """
+        if not self._require_topic():
+            return
+        text = rest.strip()
+        if not text:
+            held = self.store.position(self.topic_id)
+            if held:
+                self.emit(f"  {DIM}you said, before this started:{RESET}")
+                self.emit(f"  {held}")
+            else:
+                self.emit(f"  {DIM}no opening position on this topic{RESET}")
+                self.emit(f"  {DIM}/topic position <what you think now> — so the "
+                          f"board can ask later whether this changed it{RESET}")
+            return
+        try:
+            self.store.set_position(self.topic_id, text, self.me)
+        except (StoreError, NotAuthorised) as exc:
+            self.emit(f"{RED}{exc}{RESET}")
+            return
+        self.emit(f"{DIM}noted. You will be asked at sign-off whether the "
+                  f"council moved you.{RESET}")
 
     def _topic_overview(self) -> None:
         """Where you are, what it is to settle, and what else is open."""
@@ -1627,6 +1657,20 @@ class Console:
             used = self.store.wakes_in_last_hour(r["agent"])
             if used:
                 self.emit(f"  {DIM}{r['agent']}: {used}/30 wakes this hour{RESET}")
+
+        # What all of that bought. Cost is easy to measure and on its own it is
+        # only half a sentence -- this is the other half, and the only number
+        # this project can produce about itself without running an experiment.
+        moved = self.store.shifts()
+        if moved["asked"]:
+            self.emit("")
+            self.emit(f"  {DIM}councils that changed your mind: "
+                      f"{BOLD}{moved['moved']}/{moved['asked']}{RESET}"
+                      f"{DIM} answered{RESET}")
+        elif moved["with_position"]:
+            self.emit("")
+            self.emit(f"  {DIM}{moved['with_position']} topic(s) hold an opening "
+                      f"position and none has been answered yet{RESET}")
 
     def _rooms(self, _: str = "") -> None:
         """Where councils meet, and what each room is set up with.

@@ -110,6 +110,20 @@ def render(store: Store, topic_id: int, transcript: bool = True) -> str:
                 out += [f"| {v['agent']} | {v['stance']} | {why} |"]
             out += [""]
 
+    held = store.position(topic_id)
+    if held:
+        # The position and what was signed off, next to each other. This is the
+        # only place the two can be read together, and reading them together is
+        # the whole reason the position was asked for.
+        moved = next((e.payload.get("moved")
+                      for e in reversed(store.events_since(0, topic_id))
+                      if e.kind == "shift"), None)
+        verdict = {True: "The council changed it.",
+                   False: "The council did not change it.",
+                   None: "_Not answered._"}[moved]
+        out += ["### The chair's position, before and after", "",
+                f"**Before:** {held}", "", verdict, ""]
+
     still_open = [p for p in proposals if p["status"] == "open"]
     if still_open:
         out += ["### Still awaiting sign-off", ""]
