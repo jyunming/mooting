@@ -113,13 +113,19 @@ A work seat has to reach the git worktree it is given and commit to it. Both
 are things a vendor decides, and neither is visible from the flag names, so
 this table says what was probed rather than what the documentation implies.
 
-| seat | reaches the worktree | can commit | probed |
+All five were probed on 2026-09-06, each against a real repository with a
+staged change, using the flags this project actually passes.
+
+| seat | reaches the worktree | can commit | what it took |
 |---|---|---|---|
-| `claude` | yes | yes, once `Bash(git commit:*)` is named in `--allowedTools` | 2026-09-06, real repo, end to end |
-| `agy` | only with `--add-dir` | yes | 2026-09-06, real repo |
-| `gemini` | unknown | unknown | could not run at all: `IneligibleTierError -- this client is no longer supported for Gemini Code Assist for individuals`, which points at Antigravity |
-| `codex` | not probed | not probed | |
-| `copilot` | not probed | not probed | its `tool_profile` narrows nothing at all when executing, which is a separate question |
+| `claude` | yes | yes | `Bash(git commit:*)` named in `--allowedTools`; `acceptEdits` alone is not enough |
+| `codex` | yes | yes | nothing — `--approve-for-me` already covers it |
+| `copilot` | yes | yes | nothing, because nothing narrows it. That is G1's concern rather than this one |
+| `agy` | only with `--add-dir` | yes | the directory has to be handed to it; the mode was never the problem |
+| `gemini` | — | — | could not run: `IneligibleTierError -- this client is no longer supported for Gemini Code Assist for individuals`, which points at Antigravity |
+
+Two adapters needed changing, two were already right, and no two failed the
+same way. Nothing in the flag names carried any of it.
 
 Two things that cost real turns to learn, both invisible from outside:
 
