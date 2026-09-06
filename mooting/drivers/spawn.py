@@ -457,7 +457,16 @@ class AgyDriver(SpawnDriver):
         return super().failure_detail(code, out, err)
 
     def tool_profile(self, seat: Seat) -> list[str]:
-        return ["--mode", "accept-edits" if seat.executing else "plan"]
+        if seat.executing:
+            # agy runs shell commands in its own scratch directory and ignores
+            # the process working directory entirely -- asked where it was, it
+            # answered `~\.gemini\antigravity-cli\brain\<uuid>\scratch` and
+            # "fatal: not a git repository". So a worker could not see, let
+            # alone commit to, the worktree it had been given. `--add-dir` is
+            # what puts that directory in scope; with it the same seat commits.
+            # `seat.cwd` is the worktree here: the loop rewrites it per task.
+            return ["--mode", "accept-edits", "--add-dir", seat.cwd]
+        return ["--mode", "plan"]
 
     def argv(self, seat: Seat, prompt: str, session: str | None) -> list[str]:
         # --mode plan is Antigravity's read-only mode: it cannot edit files, which

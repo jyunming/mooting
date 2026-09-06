@@ -106,3 +106,28 @@ nothing is unmeasured, not free.
 
 `mooting doctor` answers it for your machine rather than from this table: it
 already spends real turns on each seat, and now says what they reported.
+
+## Which seats can actually do work
+
+A work seat has to reach the git worktree it is given and commit to it. Both
+are things a vendor decides, and neither is visible from the flag names, so
+this table says what was probed rather than what the documentation implies.
+
+| seat | reaches the worktree | can commit | probed |
+|---|---|---|---|
+| `claude` | yes | yes, once `Bash(git commit:*)` is named in `--allowedTools` | 2026-09-06, real repo, end to end |
+| `agy` | only with `--add-dir` | yes | 2026-09-06, real repo |
+| `gemini` | unknown | unknown | could not run at all: `IneligibleTierError -- this client is no longer supported for Gemini Code Assist for individuals`, which points at Antigravity |
+| `codex` | not probed | not probed | |
+| `copilot` | not probed | not probed | its `tool_profile` narrows nothing at all when executing, which is a separate question |
+
+Two things that cost real turns to learn, both invisible from outside:
+
+**`--permission-mode acceptEdits` approves file edits and only file edits.**
+`git commit` is an ordinary shell call, so it needs an approval a
+non-interactive run cannot give. A seat then does the work correctly and leaves
+it uncommitted, which the loop can only read as no work at all.
+
+**agy ignores the process working directory for shell commands.** Asked where
+it was, it answered `~\.geminintigravity-clirain\<uuid>\scratch` and
+`fatal: not a git repository`. `--add-dir` is what puts the worktree in scope.
