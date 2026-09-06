@@ -446,3 +446,37 @@ def test_a_deliberating_seat_gets_no_shell_at_all(tmp_path):
 
     assert "Bash" not in " ".join(flags)
     assert "manual" in flags
+
+
+def test_an_executing_agy_seat_is_given_its_worktree(tmp_path):
+    """agy runs shell commands in its own scratch directory and ignores the
+    process working directory. Asked where it was, it answered
+    `~\.gemini\antigravity-cli\brain\<uuid>\scratch` and "fatal: not a git
+    repository" -- so a worker could not reach the worktree it was given at
+    all, let alone commit to it."""
+    from mooting.drivers.base import Seat
+    from mooting.drivers.spawn import AgyDriver
+
+    tree = str(tmp_path / "work" / "task-1")
+    seat = Seat(topic_id=1, topic_slug="t", agent="hand", kind="agy",
+                cli_session=None, executing=True, cfg={"cwd": tree})
+
+    flags = AgyDriver(tmp_path / "b.db").tool_profile(seat)
+
+    assert "accept-edits" in flags
+    assert "--add-dir" in flags and tree in flags, \
+        "the worktree was never put in agy's scope"
+
+
+def test_a_deliberating_agy_seat_gets_no_directory(tmp_path):
+    """Deliberation runs in a scratch directory that says nothing, and adding
+    one to the workspace is how a project's notes join a council uninvited."""
+    from mooting.drivers.base import Seat
+    from mooting.drivers.spawn import AgyDriver
+
+    seat = Seat(topic_id=1, topic_slug="t", agent="hand", kind="agy",
+                cli_session=None, cfg={"cwd": str(tmp_path)})
+
+    flags = AgyDriver(tmp_path / "b.db").tool_profile(seat)
+
+    assert flags == ["--mode", "plan"]
