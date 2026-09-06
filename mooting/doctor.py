@@ -271,6 +271,50 @@ def report_context(board: Store, seats) -> int:
     return hits
 
 
+def report_narrowing(board: Store, seats) -> int:
+    """Execute-capable seats whose adapter narrows nothing at all.
+
+    `tool_profile` returns `[]` by default, so an adapter that never overrode it
+    ships a seat that can do anything its CLI can -- and the failure is silent,
+    because a seat with too much reach works perfectly. Static: it reads the
+    flags an executing seat would be given and spends no turn to do it.
+
+    This is not the sandbox: containing a subprocess at the operating system is
+    the real answer and needs `bwrap` or `seatbelt`. It is the part of that
+    which can be checked from here, and the part that says whether it matters.
+    """
+    import json
+
+    from .drivers.base import Seat
+    from .drivers.registry import DRIVER_CLASSES
+
+    loose = []
+    for a in seats:
+        cfg = json.loads(a["driver_cfg"])
+        if cfg.get("capability") != "execute":
+            continue
+        cls = DRIVER_CLASSES.get(a["kind"])
+        if cls is None:
+            continue
+        try:
+            flags = cls(board.path).tool_profile(
+                Seat(topic_id=0, topic_slug="-", agent=a["name"], kind=a["kind"],
+                     cli_session=None, executing=True, cfg=cfg))
+        except Exception as exc:                 # a report is not a place to fail
+            log.warning("could not read the tool profile for %s: %s", a["name"], exc)
+            continue
+        if not flags:
+            loose.append(a["name"])
+    if loose:
+        print("  These seats may execute and their adapter narrows nothing:")
+        for name in loose:
+            print(f"      {name}")
+        print("\n  A seat with too much reach works perfectly, which is why this")
+        print("  is worth saying out loud. Drop `--capability execute` unless the")
+        print("  seat is meant to do work.")
+    return len(loose)
+
+
 async def run_doctor(board: Store, only: str | None = None, timeout: float = 180.0) -> int:
     wanted = {s.strip() for s in only.split(",")} if only else None
     seats = [a for a in board.agents()
@@ -284,6 +328,9 @@ async def run_doctor(board: Store, only: str | None = None, timeout: float = 180
     # Before spending a turn: a seat that reads somebody's notes is wrong in a
     # way no probe would show, because the wake succeeds and the answer is good.
     if report_context(board, seats):
+        print()
+    # Static, so it costs nothing and runs before anything is spent.
+    if report_narrowing(board, seats):
         print()
     faults = report_record(board)
     print()
