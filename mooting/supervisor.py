@@ -701,7 +701,14 @@ class Supervisor:
         self.store.set_seat_state(topic_id, agent, "idle" if result.ok else "failed")
 
         tid = int(task["id"])
-        if self.store.task(tid)["status"] == "in_progress":
+        if self.store.task(tid)["status"] != "in_progress":
+            # It reported. Record what is measurable next to what it claimed,
+            # because a confident report is not evidence of anything: the seat
+            # that said "pushed to a branch" and the seat that pushed nothing
+            # write the same sentence. The chair reviewing this should see both
+            # and not have to go and count commits by hand.
+            self.store.note_measurement(tid, self._measure(self.store.task(tid)))
+        else:
             # The turn ended without the worker calling mooting_task_update. Observed
             # live: a seat committed real work to its branch and simply never
             # reported. Leaving the task in_progress strands it -- the manager is
@@ -730,13 +737,44 @@ class Supervisor:
                         self.store.update_task(
                             tid, agent, "blocked",
                             f"turn ended with no report and nothing committed, "
-                            f"but {dirty} file(s) are changed in the worktree: "
+                            f"but {dirty} file(s) are changed or new in the worktree: "
                             f"{task['worktree']}")
                     else:
                         self.store.update_task(
                             tid, agent, "blocked",
                             "turn ended with no report and nothing committed")
         return result
+
+    def _measure(self, task) -> str:
+        """What the branch says, independent of what the worker said.
+
+        Loki Mode's distinction, and the reason for it: a deterministic fact and
+        an agent's own verdict read identically in a log, so a confident report
+        gets taken for evidence. Kept apart here, and short enough to sit under
+        the report rather than bury it.
+        """
+        if not task["worktree"]:
+            return ""
+        bits = [f"{self._commits_on(task)} commit(s) on {task['branch']}"]
+        dirty = self._uncommitted(task)
+        if dirty:
+            bits.append(f"{dirty} file(s) changed or new, uncommitted")
+        tip = self._tip(task)
+        if tip:
+            bits.append(tip)
+        return "measured: " + ", ".join(bits)
+
+    def _tip(self, task) -> str:
+        """The branch's head, so a review can be pinned to the thing reviewed."""
+        try:
+            r = subprocess.run(["git", "-C", task["worktree"], "rev-parse",
+                                "--short", "HEAD"],
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace")
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except Exception as exc:
+            log.warning("could not read the tip for task %s: %s", task["id"], exc)
+            return ""
 
     def _uncommitted(self, task) -> int:
         """Files changed in the worktree that no commit has taken.

@@ -333,6 +333,9 @@ def _work_task(tmp_path, real_repo):
                              seats=("boss", "hand", "human"), mode="work",
                              manager="boss")
     tid = board.draft_task(topic, "boss", "hand", "Cap the retries")
+    # Signed off, because the docstring says assigned and `update_task` refuses
+    # a draft -- the plan gate applies to the worker's own report as well.
+    board.decide(board.submit_plan(topic, "boss"), "human", approve=True)
     board.set_task_workspace(tid, "mooting/task-1", str(real_repo), "HEAD")
     return board, tid
 
@@ -480,3 +483,52 @@ def test_a_deliberating_agy_seat_gets_no_directory(tmp_path):
     flags = AgyDriver(tmp_path / "b.db").tool_profile(seat)
 
     assert flags == ["--mode", "plan"]
+
+
+# ------------------- what was measured, beside what was claimed
+
+
+def test_a_report_carries_the_measurement_next_to_it(tmp_path, real_repo):
+    """Loki Mode's distinction and the reason for it: a deterministic fact and
+    an agent's own verdict read identically in a log, so a confident report gets
+    taken for evidence. The seat that says "pushed to a branch" and the seat
+    that pushed nothing write the same sentence."""
+    board, tid = _work_task(tmp_path, real_repo)
+    board.update_task(tid, "hand", "done", "pushed to a branch")
+    try:
+        board.note_measurement(tid, Supervisor(board, {})._measure(board.task(tid)))
+
+        said = board.task(tid)["result"]
+        assert "pushed to a branch" in said, "the claim was replaced, not joined"
+        assert "measured:" in said, "nothing was measured"
+        assert "0 commit(s)" in said, "the claim went unchallenged"
+    finally:
+        board.close()
+
+
+def test_measuring_twice_does_not_stack_up(tmp_path, real_repo):
+    """A task sent back and done again runs this every turn."""
+    board, tid = _work_task(tmp_path, real_repo)
+    board.update_task(tid, "hand", "done", "pushed")
+    try:
+        sup = Supervisor(board, {})
+        for _ in range(3):
+            board.note_measurement(tid, sup._measure(board.task(tid)))
+
+        assert board.task(tid)["result"].count("measured:") == 1
+    finally:
+        board.close()
+
+
+def test_a_task_with_no_worktree_measures_nothing(tmp_path, real_repo):
+    """Work outside a repo has no branch to count, and inventing a zero would
+    read as a measurement that had been taken."""
+    board, tid = _work_task(tmp_path, real_repo)
+    board.set_task_workspace(tid, "", "", "")
+    board.update_task(tid, "hand", "done", "did it in place")
+    try:
+        board.note_measurement(tid, Supervisor(board, {})._measure(board.task(tid)))
+
+        assert "measured:" not in board.task(tid)["result"]
+    finally:
+        board.close()

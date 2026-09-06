@@ -2095,3 +2095,77 @@ def test_sequential_covers_work_too(board):
 
     assert len(parallel) == 2
     assert len(one_at_a_time) == 1
+
+
+# ------------- whether the council changed the chair's mind
+
+
+def test_an_opening_position_is_a_persons_to_write(board):
+    """`/topic position` before the argument, so the question afterwards has
+    something to compare against. A position written after proves nothing."""
+    topic = board.open_topic("t", "T", "b", "human", seats=("claude", "human"))
+
+    board.set_position(topic, "I think we should just retry for ever.", "human")
+    assert board.position(topic) == "I think we should just retry for ever."
+
+    with pytest.raises(NotAuthorised):
+        board.set_position(topic, "actually, cap it", "claude")
+
+
+def test_only_a_person_can_say_whether_they_were_moved(board):
+    """It is a fact about the chair, so the chair is the only source. An agent
+    answering it would be the tool grading its own homework."""
+    topic = board.open_topic("t", "T", "b", "human", seats=("claude", "human"))
+
+    with pytest.raises(NotAuthorised):
+        board.record_shift(topic, True, "claude")
+
+
+def test_the_count_is_over_topics_that_were_answered(board):
+    """A rate over topics nobody was asked about would flatter it."""
+    a = board.open_topic("a", "A", "b", "human", seats=("claude", "human"))
+    b = board.open_topic("b", "B", "b", "human", seats=("claude", "human"))
+    board.open_topic("c", "C", "b", "human", seats=("claude", "human"))
+    for t in (a, b):
+        board.set_position(t, "a position", "human")
+
+    board.record_shift(a, True, "human")
+    board.record_shift(b, False, "human")
+
+    assert board.shifts() == {"asked": 2, "moved": 1, "with_position": 2}
+
+
+def test_answering_twice_counts_once(board):
+    """The buttons stay on screen; a second tap is a correction, not a topic."""
+    t = board.open_topic("t", "T", "b", "human", seats=("claude", "human"))
+    board.set_position(t, "a position", "human")
+
+    board.record_shift(t, True, "human")
+    board.record_shift(t, False, "human")
+
+    got = board.shifts()
+    assert got["asked"] == 1
+    assert got["moved"] == 0, "the correction was not taken"
+
+
+def test_the_minutes_carry_the_position_and_the_verdict(board, tmp_path):
+    """The only place the two can be read together, which is why it was asked."""
+    from mooting.minutes import render
+
+    t = board.open_topic("t", "T", "b", "human", seats=("claude", "human"))
+    board.set_position(t, "just retry for ever", "human")
+    board.record_shift(t, True, "human")
+
+    text = render(board, t)
+
+    assert "just retry for ever" in text
+    assert "changed it" in text
+
+
+def test_a_topic_with_no_position_says_nothing_about_it(board):
+    """A question nobody was asked must not appear as one they declined."""
+    from mooting.minutes import render
+
+    t = board.open_topic("t", "T", "b", "human", seats=("claude", "human"))
+
+    assert "position, before and after" not in render(board, t)
