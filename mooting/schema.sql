@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS topics (
 CREATE TABLE IF NOT EXISTS seats (
     topic_id    INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
     agent       TEXT    NOT NULL REFERENCES agents(name),
-    role        TEXT    NOT NULL DEFAULT 'participant',  -- participant|arbiter
+    role        TEXT    NOT NULL DEFAULT 'participant',  -- participant|manager
     turns_used  INTEGER NOT NULL DEFAULT 0,
     max_turns   INTEGER NOT NULL DEFAULT 6,   -- per-seat cap, independent of rounds
     -- Position in the CLI's own session store, so a resume is deterministic.
@@ -193,11 +193,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     acceptance  TEXT NOT NULL DEFAULT '',   -- how the manager will know it is done
     assignee    TEXT NOT NULL REFERENCES agents(name),
     created_by  TEXT NOT NULL,              -- the manager seat
-    -- draft    : written, not yet put to a human
-    -- assigned : plan approved; the worker may be woken for it
-    -- done     : worker reports finished; awaiting the manager's review
-    -- blocked  : worker cannot proceed and said why
-    -- accepted / rejected : the manager's verdict
+    -- draft       : written, not yet put to a human
+    -- assigned    : plan approved; the worker may be woken for it
+    -- in_progress : a worker has been woken for it and has not reported yet
+    -- done        : worker reports finished; awaiting the manager's review
+    -- blocked     : worker cannot proceed and said why
+    -- accepted / rejected : the manager's verdict. `assigned` is also a verdict
+    --               -- it sends the task back to be done again.
     status      TEXT NOT NULL DEFAULT 'draft',
     -- The task this one must follow. A manager that works out two tasks touch
     -- the same files -- exactly the reasoning you want from it -- could only

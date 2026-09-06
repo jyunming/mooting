@@ -157,16 +157,18 @@ a real team, and four of its open issues are requests for more vendor CLIs. It
 has presence and messaging between agents and no turn-taking or decision layer.
 If it grows one, this comparison is worth running again.
 
-## H — Documentation that is no longer true
+## H — Documentation that is no longer true ✅ done
 
-Fold each into whichever commit touches the file.
+All six, plus two the sweep turned up: `schema.sql` did not list `assigned` as
+a manager's verdict, and `WHY.md` still said "the ruling" and "a human arbiter"
+in prose. Each is folded into the file it corrects.
 
-- [WHY.md](WHY.md) lists three invariants and omits the human-only decision, which the same document names as the project's one distinguishing property. It is four.
-- The LoopTroop entry states a human approves before execution. Its README says that step is to become optional. The correction strengthens the comparison.
-- Two docstrings in `server.py` say sign-off has no route. It was added in B3, and one of them describes the endpoint nine lines further down.
-- Milestone rows B2 and B3 read as current state rather than as what that milestone did.
-- B5 says two people "each speak under their own name, hold their own token, and rule as themselves". Speaking is still each person's; signing off is now the chair's, and that row needs to say so.
-- `schema.sql` names the seat role `arbiter`, which no code reads or writes and which is the wrong register, and omits `in_progress` from the task states it lists.
+- ~~[WHY.md](WHY.md) lists three invariants and omits the human-only decision.~~ It is four now, and that one is first.
+- ~~The LoopTroop entry states a human approves before execution.~~ Its README calls that step optional in future releases, which is the difference between a setting and an absent tool -- so the row says that rather than dropping the claim.
+- ~~Two docstrings in `server.py` say sign-off has no route.~~ One of them was nine lines above the response that names the endpoint.
+- ~~Milestone rows B2 and B3 read as current state.~~
+- ~~B5 says two people "rule as themselves".~~ Two voices, one decision: the chair signs off and `/topic chair` is how that moves.
+- ~~`schema.sql` names the seat role `arbiter` and omits `in_progress`.~~
 
 ## Order
 

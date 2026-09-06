@@ -228,9 +228,9 @@ def build_app(db: Path | str | None, token: str, *, human: str,
     async def say(request):
         """Post as the token's human seat.
 
-        Not a ruling: `Store.post` records a message, and the human-only fence on
-        decisions is untouched. B3 is where a ruling gets a remote path, once
-        this one has been exercised.
+        Not a sign-off: `Store.post` records a message and nothing else. Signing
+        off has its own route now, and it ends where every other path does --
+        at `Store.decide`, which refuses a token that is not a person's.
         """
         s = request.app[STORE]
         try:
@@ -348,8 +348,10 @@ def build_app(db: Path | str | None, token: str, *, human: str,
     async def proposals(request):
         """A proposal in full -- body, votes, objections.
 
-        Readable here because reading is what B1 established. Ruling on one is
-        still not a route; see B3.
+        Readable here because reading is what B1 established. Signing one off is
+        `POST /api/proposals/{pid}/decide`, which this response names below --
+        and which still ends at `Store.decide`, so the token has to belong to a
+        human seat.
         """
         s = request.app[STORE]
         try:
