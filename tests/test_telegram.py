@@ -1645,3 +1645,39 @@ def test_the_other_choosers_are_not_additive():
     assert command_for("effort", "high") == "/effort high"
     assert command_for("chair", "Amber") == "/topic chair Amber"
     assert command_for("wake", "Santa") == "/nudge Santa"
+
+
+# ------------------------------------- finished work has to reach the chat
+
+
+def test_a_finished_task_reaches_the_chat(board):
+    """It arrives as a system message, which the noise filter drops -- so from a
+    phone work was done and reported into silence, and the chair had nothing to
+    accept. The topic could then never complete."""
+    tid = board.open_topic("w", "Work", "b", "jeremy", seats=("santa", "jeremy"),
+                           mode="work", manager="santa")
+    task = board.draft_task(tid, "santa", "santa", "Add the cap", "capped")
+    with board.tx() as c:
+        c.execute("UPDATE tasks SET status = 'assigned' WHERE id = ?", (task,))
+    board.update_task(task, "santa", "done", "pushed")
+
+    said = [event_text(board, e) for e in board.events_since(0, tid)]
+    kept = [s for s in said if s]
+
+    assert any("task #" in s and "done" in s for s in kept), \
+        "a finished task never reached the chat"
+    assert any("/tasks accept" in s for s in kept), \
+        "the chair was not told how to sign it off"
+
+
+def test_a_task_starting_is_not_worth_a_message(board):
+    """`in_progress` every round is exactly the noise the filter exists for."""
+    tid = board.open_topic("w", "Work", "b", "jeremy", seats=("santa", "jeremy"),
+                           mode="work", manager="santa")
+    task = board.draft_task(tid, "santa", "santa", "Add the cap", "capped")
+    with board.tx() as c:
+        c.execute("UPDATE tasks SET status = 'assigned' WHERE id = ?", (task,))
+    board.update_task(task, "santa", "in_progress")
+
+    said = [event_text(board, e) for e in board.events_since(0, tid)]
+    assert not any(s and "task #" in s for s in said), "started-work noise reached the chat"
