@@ -183,7 +183,6 @@ do. It costs metered quota, so do not add a third turn without a reason as good.
 - The repo's git *history* still contains a committed working board with real
   councils in it. Removing it means rewriting and force-pushing public history —
   a decision for the owner, not something to do unprompted.
-- Pairing requests never expire. openclaw's expire after an hour.
 - `mentions.asking` separates "named" from "asked" going forward, and migration
   backfills older rows by whether the body opens with `@target`. That heuristic
   is right for everything on the boards seen so far but it is a heuristic.

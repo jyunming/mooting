@@ -1291,6 +1291,26 @@ class Store:
         row = self.pairing(chat_id, user_id, channel)
         return int(row["id"])
 
+    #: How long a request to join is worth answering. A request that sat for a
+    #: week is not a person waiting, it is a stranger who wandered past -- and
+    #: approving one months later, from a list nobody reads to the bottom of,
+    #: lets somebody into a council they have long since forgotten asking about.
+    #: An hour, matching openclaw. Asking again costs one message.
+    PAIR_TTL_S = 3600.0
+
+    def pair_expired(self, row) -> bool:
+        """Whether this request is too old to answer. Pending rows only."""
+        if row is None or row["status"] != "pending":
+            return False
+        import datetime
+
+        try:
+            made = datetime.datetime.strptime(row["created_at"], "%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError):
+            return False                    # unparseable is not expired
+        age = (datetime.datetime.utcnow() - made).total_seconds()
+        return age > self.PAIR_TTL_S
+
     def pair_approve(self, pairing_id: int, seat: str, by: str) -> sqlite3.Row:
         """Bind a chat identity to a seat.
 
@@ -1301,6 +1321,12 @@ class Store:
         row = self.q1("SELECT * FROM pairings WHERE id = ?", (pairing_id,))
         if row is None:
             raise StoreError(f"no pairing request {pairing_id}")
+        if self.pair_expired(row):
+            raise StoreError(
+                f"that request is over an hour old and has expired. Ask them to "
+                f"send `/pair` again -- it costs one message, and approving a "
+                f"stale one lets somebody into a council they have forgotten "
+                f"asking about.")
         if not self.is_human(seat):
             raise NotAuthorised(
                 f"`{seat}` is not a human seat; pairing a person onto an agent "

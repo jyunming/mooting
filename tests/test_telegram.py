@@ -1902,3 +1902,59 @@ def test_a_proposal_nobody_voted_on_adds_nothing(board):
     pid = board.propose(topic, "santa", "Cap at six", "the body")
 
     assert _proposal_text(board, pid) == ""
+
+
+# ------------------------- a request to join does not wait for ever
+
+
+def test_a_stale_request_cannot_be_approved(board):
+    """A request that sat for a week is not a person waiting, it is a stranger
+    who wandered past. Approving one months later, from a list nobody reads to
+    the bottom of, lets somebody into a council they have forgotten asking
+    about."""
+    pid = board.pair_request("-100", "42", "Someone")
+    with board.tx() as c:
+        c.execute("UPDATE pairings SET created_at = datetime('now','-2 hours') "
+                  "WHERE id = ?", (pid,))
+
+    with pytest.raises(StoreError) as exc:
+        board.pair_approve(pid, "jeremy", "jeremy")
+
+    assert "expired" in str(exc.value)
+    assert "send `/pair` again" in str(exc.value), "no way forward was given"
+    assert board.seat_for_chat("-100", "42") is None
+
+
+def test_a_fresh_request_is_unaffected(board):
+    """An hour is long enough to walk to a phone. The common case must not pay
+    for the rule."""
+    pid = board.pair_request("-100", "42", "Someone")
+
+    board.pair_approve(pid, "jeremy", "jeremy")
+
+    assert board.seat_for_chat("-100", "42") == "jeremy"
+
+
+def test_expiry_is_only_about_pending_requests(board):
+    """An approved seat does not lapse an hour later, and a denial stays a
+    denial. This is a ceiling on how long a question waits to be answered."""
+    pid = board.pair_request("-100", "42", "Someone")
+    board.pair_approve(pid, "jeremy", "jeremy")
+    with board.tx() as c:
+        c.execute("UPDATE pairings SET created_at = datetime('now','-9 days') "
+                  "WHERE id = ?", (pid,))
+
+    row = board.q1("SELECT * FROM pairings WHERE id = ?", (pid,))
+    assert not board.pair_expired(row)
+    assert board.seat_for_chat("-100", "42") == "jeremy"
+
+
+def test_an_unreadable_timestamp_is_not_treated_as_expired(board):
+    """Refusing on a value that could not be parsed would lock somebody out for
+    a reason nobody could see."""
+    pid = board.pair_request("-100", "42", "Someone")
+    with board.tx() as c:
+        c.execute("UPDATE pairings SET created_at = 'not a date' WHERE id = ?", (pid,))
+
+    assert not board.pair_expired(board.q1("SELECT * FROM pairings WHERE id = ?",
+                                           (pid,)))
