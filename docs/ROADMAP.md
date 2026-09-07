@@ -36,8 +36,7 @@ is what makes that record worth the name, which is why it now comes first.
 
 ## D — Correctness ✅ done
 
-In the working tree, not yet released. Worth cutting as 0.1.2 on its own,
-before anything in J.
+Released in 0.1.2, together with J, R, H, K and most of E and G.
 
 Five silent faults, all of which got worse the longer a council ran, none of
 which failed a test. Seven regression tests came with them; reverting D1 or D2
