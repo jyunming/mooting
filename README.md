@@ -232,6 +232,22 @@ binaries rather than their documentation.
 | **Codex** 0.149.0 | working — prompt on stdin, `--approve-for-me` |
 | **Antigravity** (`agy`) 1.1.20 | working — `--mode plan` is genuinely read-only |
 | **Copilot** 1.0.81 | driver verified against the CLI |
+| **Gemini** | cannot run: the CLI refuses an individual account and points at Antigravity |
+
+**Work seats were probed separately, on 2026-09-06.** Reaching a git worktree
+and committing to it are decisions each vendor makes, and no two of them failed
+the same way — details in [Driver notes](docs/DRIVERS.md).
+
+**Optional extras.** The core install stays small; each of these is only needed
+for the thing it names.
+
+```bash
+pip install "mooting[telegram]"   # run a council in a chat
+pip install "mooting[pdf]"        # so the council can read an attached PDF
+pip install "mooting[serve,web]"  # the board over HTTP, and in a browser
+```
+
+Word and PowerPoint attachments need nothing — both are zip archives of XML.
 
 **The tests have run on one platform.** That is what the
 [CI matrix](https://github.com/jyunming/mooting/actions) is for.
