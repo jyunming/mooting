@@ -708,3 +708,52 @@ def test_the_server_serves_no_deciding_tool_over_the_protocol(board):
         f"the server offers {offending} over the protocol. That is the tool list "
         f"a CLI is handed, so this is the surface that decides the claim."
     )
+
+
+# ------------------- a backfilled guess is marked as one
+
+
+def test_a_backfilled_asking_value_is_marked_as_inferred(tmp_path):
+    """`asking` is backfilled by whether a body opens with `@target`, which is a
+    guess. The row it writes is otherwise indistinguishable from one the code
+    recorded at the time, so anybody later finding a topic behaving oddly cannot
+    tell inference from record."""
+    import sqlite3
+
+    from mooting.store import connect
+
+    db = tmp_path / "board.db"
+    s = connect(db, init=True)
+    s.add_agent("me", "human")
+    s.add_agent("claude", "claude", driver="spawn")
+    topic = s.open_topic("t", "T", "b", "me", seats=("claude", "me"))
+    s.ask(topic, "claude", "me", "@me what does the gateway do?")
+    s.close()
+
+    # An older board: the columns are gone and the rows predate them.
+    raw = sqlite3.connect(db)
+    raw.execute("ALTER TABLE mentions DROP COLUMN asking")
+    raw.execute("ALTER TABLE mentions DROP COLUMN asking_inferred")
+    raw.commit()
+    raw.close()
+
+    s = connect(db)                     # reopening runs the migration
+    try:
+        assert s.inferred_mentions() == 1, "the guess was recorded as though known"
+    finally:
+        s.close()
+
+
+def test_nothing_new_is_ever_inferred(tmp_path):
+    """The count only falls: a mention written today records its own value."""
+    from mooting.store import connect
+
+    s = connect(tmp_path / "board.db", init=True)
+    s.add_agent("me", "human")
+    s.add_agent("claude", "claude", driver="spawn")
+    topic = s.open_topic("t", "T", "b", "me", seats=("claude", "me"))
+    try:
+        s.ask(topic, "claude", "me", "@me what does the gateway do?")
+        assert s.inferred_mentions() == 0
+    finally:
+        s.close()
