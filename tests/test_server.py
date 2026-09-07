@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import pathlib
 
 import pytest
 import pytest_asyncio
@@ -379,3 +380,49 @@ async def test_two_people_are_two_seats_not_one_shared_voice(client, board):
     remote = [e for e in board.events_since(0, tid) if e.kind == "remote"]
     assert any(e.actor == "alice" and e.payload.get("action") == "decide"
                for e in remote), "the ruling was not attributed to alice"
+
+
+# ------------------- the documented surface and the real one
+
+
+def test_every_route_remote_md_documents_actually_answers(tmp_path, board):
+    """`REMOTE.md` described `POST /topics` and `GET /topics/{slug}/minutes`,
+    which do not exist, and omitted the `/api` prefix from every path -- so
+    following it produced 404s all the way down. Same class as the H sweep, and
+    the reason it drifted is that nothing compared the two."""
+    import re
+
+    from mooting.server import build_app
+
+    doc = (pathlib.Path(__file__).resolve().parents[1]
+           / "docs" / "REMOTE.md").read_text(encoding="utf-8")
+    table = doc.split("Every route is under `/api`.", 1)[1].split("**Not here:**", 1)[0]
+    documented = set(re.findall(r"`(?:GET|POST|PATCH) (/api/[^`?]+)`", table))
+    assert documented, "the table moved; this test is reading the wrong thing"
+
+    app = build_app(tmp_path / "board.db", TOKEN, human="jeremy")
+    real = {r.get_info().get("path") or r.get_info().get("formatter")
+            for r in app.router.routes()}
+
+    # Placeholder names are not part of the contract -- the doc says `{id}` and
+    # the router says `{pid}`, and a caller putting a number in neither notices
+    # nor cares. The path shape is what has to match.
+    shape = lambda path: re.sub(r"\{[^}]+\}", "{}", path.rstrip("/"))
+    served = {shape(r) for r in real if r}
+    missing = {p for p in documented if shape(p) not in served}
+    assert not missing, f"documented but not served: {sorted(missing)}"
+
+
+def test_the_paths_the_doc_says_are_absent_really_are(tmp_path, board):
+    """The other half. Saying "not here" is only worth anything if it is true."""
+    from mooting.server import build_app
+
+    app = build_app(tmp_path / "board.db", TOKEN, human="jeremy")
+    real = {r.get_info().get("path") or r.get_info().get("formatter")
+            for r in app.router.routes()}
+
+    assert "/api/topics/{slug}/minutes" not in real
+    assert not any(r == "/api/topics" and "POST" in str(rt.method)
+                   for rt in app.router.routes()
+                   for r in [rt.get_info().get("path")
+                             or rt.get_info().get("formatter")])

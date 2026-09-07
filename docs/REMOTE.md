@@ -74,16 +74,23 @@ mooting serve
 One process owns the board and the supervisor; a TUI, a web page, a phone, or
 a script all talk to it the same way.
 
+Every route is under `/api`. This table is the server's own routing table, not
+a plan: a path that is not here does not answer.
+
 | | |
 |---|---|
-| `GET /topics`, `GET /topics/{slug}` | what exists, and its agenda |
-| `POST /topics` | open one |
-| `PATCH /topics/{slug}` | agenda, mode, manager, rounds, effort |
-| `POST /topics/{slug}/messages` | say something, or answer a question |
-| `POST /topics/{slug}/run` · `/stop` | drive the council |
-| `POST /proposals/{id}/decide` | sign-off — people's seats only |
-| `GET /topics/{slug}/minutes` | the written record |
-| `GET /events?since=N` | the event stream, as Server-Sent Events; resumes from a cursor, misses nothing |
+| `GET /api/topics`, `GET /api/topics/{slug}` | what exists, and its agenda |
+| `PATCH /api/topics/{slug}` | agenda, mode, manager, rounds, effort |
+| `POST /api/topics/{slug}/messages` | say something, or answer a question |
+| `POST /api/topics/{slug}/run` · `/stop` | drive the council |
+| `GET /api/proposals/{id}` | one proposal in full, with its votes |
+| `POST /api/proposals/{id}/decide` | sign-off — people's seats only |
+| `GET /api/stream` | the event stream, as Server-Sent Events; resumes from `Last-Event-ID` or `?since=`, misses nothing |
+| `GET /api/events?since=N` | the same events by polling, for a client that cannot hold a connection |
+
+**Not here:** opening a topic and fetching minutes have no route. Both exist at
+the terminal (`mooting topic new`, `mooting minutes`) and neither has been
+needed remotely yet -- said plainly rather than listed as though they answered.
 
 `mooting serve --grant <seat>` issues a bearer token for a human seat (never
 send it as a query string — it ends up in logs). Every decision carries the seat
