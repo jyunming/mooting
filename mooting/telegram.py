@@ -1021,11 +1021,19 @@ def run(db, *, bot_token: str, chats, human: str, topic=None,
             if not seat:
                 return await say(msg.chat.id, "You are not paired here.")
             rows = store.pairings("pending", chat_id=msg.chat.id)
+            live = [r for r in rows if not store.pair_expired(r)]
             if not rows:
                 return await say(msg.chat.id, "No pending requests here.")
-            return await say(msg.chat.id, "\n".join(
-                f"- `{r['ref'] or r['id']}` {r['display'] or r['user_id']}"
-                for r in rows))
+            out = [f"- `{r['ref'] or r['id']}` {r['display'] or r['user_id']}"
+                   for r in live]
+            # Shown, not hidden: a request that vanished silently reads as one
+            # that was never sent, and the person waiting is told nothing.
+            stale = len(rows) - len(live)
+            if stale:
+                out.append(f"\n_{stale} older request(s) expired. Ask them to "
+                           f"send `/pair` again._")
+            return await say(msg.chat.id, "\n".join(out) or
+                             "Every request here has expired.")
 
         if args[:1] == ["approve"]:
             answers = (store.room_host(store.ensure_room("telegram", str(msg.chat.id)))
