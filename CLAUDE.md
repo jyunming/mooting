@@ -183,6 +183,8 @@ do. It costs metered quota, so do not add a third turn without a reason as good.
 - The repo's git *history* still contains a committed working board with real
   councils in it. Removing it means rewriting and force-pushing public history —
   a decision for the owner, not something to do unprompted.
-- `mentions.asking` separates "named" from "asked" going forward, and migration
-  backfills older rows by whether the body opens with `@target`. That heuristic
-  is right for everything on the boards seen so far but it is a heuristic.
+- `mentions.asking` is backfilled on older boards by whether the body opens with
+  `@target`, which is a guess. It stays a guess -- the information was never
+  recorded -- but every row it touches is now marked `asking_inferred`, and
+  `mooting doctor` says how many there are. The count only falls: a mention
+  written today records its own value.

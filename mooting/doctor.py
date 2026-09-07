@@ -332,6 +332,13 @@ async def run_doctor(board: Store, only: str | None = None, timeout: float = 180
     # Static, so it costs nothing and runs before anything is spent.
     if report_narrowing(board, seats):
         print()
+    guessed = board.inferred_mentions()
+    if guessed:
+        print(f"  {guessed} mention(s) carry a guessed `asking` value, backfilled")
+        print("  when the column was added. The guess is right on every board seen")
+        print("  so far; it is marked so it is not mistaken for a record.")
+        print()
+
     faults = report_record(board)
     print()
     print(f"probing {len(seats)} seat(s); each spends one real turn on that CLI.\n")

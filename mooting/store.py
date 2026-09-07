@@ -339,6 +339,8 @@ class Store:
                                    ("topics", "room_id", "INTEGER"),
                                    ("pairings", "ref", "TEXT"),
                                    ("agents", "tg_user_id", "TEXT"),
+                                   ("mentions", "asking_inferred",
+                                    "INTEGER NOT NULL DEFAULT 0"),
                                    ("mentions", "asking", "INTEGER NOT NULL DEFAULT 1"),
                                    ("events", "hash", "TEXT"),
                                    ("wakes", "tokens_in", "INTEGER"),
@@ -369,12 +371,27 @@ class Store:
         reading prose sits anywhere else in the paragraph. Taking the column's
         default instead would leave every historical topic paused on somebody's
         summary -- which is the behaviour the column was added to end.
+
+        It is a guess, and the row it writes is otherwise indistinguishable from
+        one the code recorded at the time. So every row it touches is marked:
+        the value stays usable, and anybody who later finds a topic behaving
+        oddly can tell inference from record instead of assuming both are the
+        same kind of fact. Nothing new is ever inferred -- the count only falls.
         """
+        self._conn.execute("UPDATE mentions SET asking_inferred = 1")
         self._conn.execute(
             "UPDATE mentions SET asking = 0 "
             "WHERE question NOT LIKE '@' || target || ' %' "
             "  AND question NOT LIKE '@' || target || ',%'"
         )
+
+    def inferred_mentions(self) -> int:
+        """How many mentions carry a guessed `asking` value rather than a recorded one."""
+        try:
+            row = self.q1("SELECT COUNT(*) n FROM mentions WHERE asking_inferred = 1")
+        except sqlite3.OperationalError:        # a board older than the column
+            return 0
+        return int(row["n"]) if row else 0
 
     # ------------------------------------------------------------------- events
 
