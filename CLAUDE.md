@@ -45,6 +45,7 @@ not in prompts, on purpose.
 | `mooting/tui.py` | full-screen view. Subclasses the console; changes where output lands, not what commands mean |
 | `mooting/chat.py` | a council in any chat. `ChatHost` holds pairing, sign-off and the pump; a `Transport` is the only per-channel part |
 | `mooting/telegram.py` | the Telegram transport. `ChatBoard` wraps the same `Console.handle` |
+| `mooting/discord_bot.py` | the Discord transport; named so it cannot shadow the `discord` package |
 | `mooting/server.py` | the board over HTTP + SSE |
 | `mooting/mcp_server.py` | the surface an agent sees. One process per seat, identity bound from argv |
 | `mooting/drivers/` | one adapter per CLI, all the same shape; `fake.py` is what tests drive |
@@ -152,7 +153,7 @@ Rules, in order of how much they matter:
 
 ```bash
 pip install -e ".[dev]"
-python -X utf8 -m pytest -q        # 481 tests, ~50s on Linux
+python -X utf8 -m pytest -q        # 494 tests, ~50s on Linux
 python -X utf8 tools/build_site.py # landing page + docs, fails on dead links
 ```
 

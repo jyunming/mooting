@@ -1,8 +1,8 @@
 # Driving a council from somewhere else
 
-Four ways to reach a council you are not sitting in front of. All four work
-today: SSH needs nothing extra; a browser tab, an HTTP API, and a Telegram
-chat all run on top of one board server. In every one of them the hard part is
+Five ways to reach a council you are not sitting in front of. SSH needs
+nothing extra; a browser tab, an HTTP API, a Telegram chat and a Discord
+server all run on top of one board. In every one of them the hard part is
 never the transport — it is that sign-off is enforced by identity, and
 a remote caller has none until you give them one.
 
@@ -17,6 +17,7 @@ a remote caller has none until you give them one.
 | Two people in one council, or a client that is not a terminal | HTTP + events (`mooting serve`) |
 | A council that keeps running while nobody watches | HTTP + events or Telegram — both own a supervisor |
 | To run a council from your phone, in a group, with other people | Telegram — `mooting telegram` |
+| The same, where your group already talks on Discord | Discord — `mooting discord` |
 
 ---
 
@@ -225,6 +226,56 @@ speak as one, and put a non-human name against something only a human may do.
 Approval is **per chat** — being trusted in one council is not being trusted in
 another — and `mooting pair --approve <id> --seat <s>` still works from the
 shell, which is how you recover if you lose access to the chat.
+
+### Discord — `mooting discord`
+
+The same council as the Telegram chat: the same commands, the same pairing,
+proposals with Approve and Reject buttons. Both run on `chat.ChatHost`, so a
+flow that works in one works in the other.
+
+#### Setting it up
+
+**1. Make a bot.** At <https://discord.com/developers/applications>:
+**New Application** → **Bot** → **Reset Token**, and copy the token. On the
+same page turn on **Message Content Intent**; without it the bot cannot read
+what anybody types in a server.
+
+**2. Install, and start it.** The token is needed this once.
+
+```bash
+pip install 'mooting[discord]'
+mooting discord --token <token>
+```
+
+When the bot is in no server yet, it prints an invite link. Open it, pick your
+server, and the commands appear in Discord's own `/` menu there.
+
+```
+  signed  in as mooting#1234
+  menu    22 commands registered in 0 server(s)
+  invite  https://discord.com/oauth2/authorize?client_id=...
+  pair    send  /pair 9f2c1a  to the bot to claim the first seat
+```
+
+**3. Claim the first seat.** Send `/pair 9f2c1a` in the channel you want the
+council in. Chosen from the `/` menu, the command's echo is shown only to you,
+so the code is not left in the channel. To keep the bot to that channel only,
+restart it with `--channel <id>`; the id is in the reply.
+
+#### How it differs from Telegram
+
+| | Telegram | Discord |
+|---|---|---|
+| message length | 4096 | 2000, so a long reply arrives in more pieces |
+| buttons | one per row for lists | packed five across, 25 at most |
+| giving a reason in your own words | a forced reply box | reply to the bot's message (long-press → Reply on a phone) |
+| someone added to the room | the person who added them decides | not seen: they send `/pair` and the host approves |
+| a refusal, e.g. "only the host can answer that" | a pop-up | a message only the presser sees |
+
+A direct message to the bot is a private room, open to an account that
+redeemed a code from `mooting claim`, as on Telegram. A Discord account and a
+Telegram account are separate identities: redeeming a code on one does not
+bind the other.
 
 ---
 

@@ -1697,8 +1697,9 @@ class Console:
             self.emit(f"     on      {r['topic'] or '—'}")
             self.emit(f"     host    {self.store.room_host(int(r['id'])) or '—'}")
             self.emit(f"     people  {people} paired")
-            if r["channel"] == "telegram":
-                self.emit(f"     {DIM}--chat {r['chat_id']}   to keep the bot to "
+            pin = {"telegram": "--chat", "discord": "--channel"}.get(r["channel"])
+            if pin:
+                self.emit(f"     {DIM}{pin} {r['chat_id']}   to keep the bot to "
                           f"this room{RESET}")
 
     def _chair(self, rest: str) -> None:
