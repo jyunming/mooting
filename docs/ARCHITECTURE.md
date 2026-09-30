@@ -123,6 +123,8 @@ evidence beats the claim. No commits and no report reads as blocked, not done.
 | `mooting/tui.py` | the full-screen session |
 | `mooting/console.py` | the REPL, and the command dispatch both surfaces share |
 | `mooting/cli.py` | the shell surface |
+| `mooting/chat.py` | a council in any chat: pairing, sign-off buttons, the event pump -- written against a small `Transport` |
+| `mooting/telegram.py` | the Telegram transport, and the rendering a chat needs |
 | `mooting/minutes.py` | meeting minutes and work log |
 | `mooting/doctor.py` | per-CLI smoke test that asserts on the board, not on exit codes |
 

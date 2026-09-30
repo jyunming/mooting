@@ -43,7 +43,8 @@ not in prompts, on purpose.
 | `mooting/supervisor.py` | the round loop: who speaks next, why it stopped, task execution |
 | `mooting/console.py` | the session and its command dispatch — **one** `handle()` for every surface |
 | `mooting/tui.py` | full-screen view. Subclasses the console; changes where output lands, not what commands mean |
-| `mooting/telegram.py` | a council in a chat. `ChatBoard` wraps the same `Console.handle` |
+| `mooting/chat.py` | a council in any chat. `ChatHost` holds pairing, sign-off and the pump; a `Transport` is the only per-channel part |
+| `mooting/telegram.py` | the Telegram transport. `ChatBoard` wraps the same `Console.handle` |
 | `mooting/server.py` | the board over HTTP + SSE |
 | `mooting/mcp_server.py` | the surface an agent sees. One process per seat, identity bound from argv |
 | `mooting/drivers/` | one adapter per CLI, all the same shape; `fake.py` is what tests drive |
@@ -151,7 +152,7 @@ Rules, in order of how much they matter:
 
 ```bash
 pip install -e ".[dev]"
-python -X utf8 -m pytest -q        # 460 tests, ~50s on Linux
+python -X utf8 -m pytest -q        # 481 tests, ~50s on Linux
 python -X utf8 tools/build_site.py # landing page + docs, fails on dead links
 ```
 
@@ -167,7 +168,8 @@ anything uploads.
 
 ## What the suite does not cover
 
-The Telegram surface has real tests and none of them send a Telegram message.
+The chat surface is driven end to end in `tests/test_chat.py` through a transport
+that only records, and none of those tests send a Telegram message.
 Five bugs in it were found by a person using it on a phone for twenty minutes,
 all living in the gap between "the terminal tolerates this" and "a chat does
 not". If you change that surface, drive it against a real chat before believing

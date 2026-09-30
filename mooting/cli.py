@@ -639,8 +639,8 @@ def cmd_pair(args) -> int:
         # Approving from a terminal is how a room is bootstrapped, and it left
         # the room with no host at all -- so the first person to approve
         # somebody in the chat afterwards became one by accident.
-        if row["channel"] == "telegram":
-            board.claim_room(board.ensure_room("telegram", row["chat_id"]),
+        if row["channel"] != "local":
+            board.claim_room(board.ensure_room(row["channel"], row["chat_id"]),
                              row["seat"])
         print(f"{row['display'] or row['user_id']} speaks as {row['seat']}")
     elif args.deny:

@@ -1580,7 +1580,7 @@ class Console:
         a running seat cannot be told from one that seat typed, and a message
         from a chat account can.
         """
-        return "local" if tuple(self.room) == Store.LOCAL_ROOM else "telegram"
+        return "local" if tuple(self.room) == Store.LOCAL_ROOM else str(self.room[0])
 
     def room_id(self) -> int:
         """This room's id, created the first time something needs it."""
