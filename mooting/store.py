@@ -1761,8 +1761,25 @@ class Store:
 
     # ---------------------------------------------------------------- proposals
 
+    def _require_seat(self, topic_id: int, who: str, doing: str) -> None:
+        """An agent acts only on a topic it is seated at; a person needs no seat.
+
+        `post` refused an unseated agent and `propose` and `vote` did not, so an
+        agent seated anywhere on the board could put a proposal on a meeting in
+        another room -- one that room's chair would then be asked to sign off.
+        """
+        if who == "mooting" or self.is_human(who):
+            return
+        if self.seat(topic_id, who) is None:
+            slug = self.topic(topic_id)["slug"]
+            raise StoreError(f"{who!r} holds no seat on `{slug}`, so it cannot {doing} there")
+
     def propose(self, topic_id: int, author: str, title: str, body: str) -> int:
         title, body = clean_text(title, "the title"), clean_text(body, "the body")
+        topic = self.topic(topic_id)
+        if topic["status"] not in {"open", "paused"}:
+            raise StoreError(f"topic {topic['slug']} is {topic['status']}; not accepting proposals")
+        self._require_seat(topic_id, author, "propose")
         with self.tx() as c:
             cur = c.execute(
                 "INSERT INTO messages (topic_id, author, kind, body) VALUES (?,?,'propose',?)",
@@ -1802,6 +1819,7 @@ class Store:
         p = self.proposal(pid)
         if p["status"] != "open":
             raise StoreError(f"proposal {pid} is {p['status']}; voting closed")
+        self._require_seat(p["topic_id"], agent, "vote")
         with self.tx() as c:
             c.execute(
                 """INSERT INTO votes (proposal_id, agent, stance, rationale) VALUES (?,?,?,?)
