@@ -243,6 +243,7 @@ for the thing it names.
 
 ```bash
 pip install "mooting[telegram]"   # run a council in a chat
+pip install "mooting[discord]"    # or in a Discord server
 pip install "mooting[pdf]"        # so the council can read an attached PDF
 pip install "mooting[serve,web]"  # the board over HTTP, and in a browser
 ```
@@ -268,7 +269,7 @@ Its cursor is unchanged -- it will catch up when next woken.
 
 - **[Using it](docs/USING.md)** — the session, mentions, minutes, work mode
 - **[Commands](docs/COMMANDS.md)** — every command, in both surfaces
-- **[Remote](docs/REMOTE.md)** — SSH, HTTP, a browser, or a Telegram chat
+- **[Remote](docs/REMOTE.md)** — SSH, HTTP, a browser, a Telegram chat or a Discord server
 - **[Why it works this way](docs/WHY.md)** — invariants, measurements, design record
 - **[Architecture](docs/ARCHITECTURE.md)** — the board, the fences, the driver contract
 - **[Driver notes](docs/DRIVERS.md)** — what each CLI actually does, and the traps

@@ -189,7 +189,7 @@ def clean_text(value: str, what: str) -> str:
 #: Routes that cannot be reached from the machine the board lives on. A seat
 #: holding a shell can type in a terminal and can call an HTTP port; it cannot
 #: be a paired person in a chat.
-ON_ANOTHER_MACHINE = frozenset({"telegram"})
+ON_ANOTHER_MACHINE = frozenset({"telegram", "discord"})
 
 #: Bytes behind a handle somebody types. Four rather than three: a pairing
 #: handle is the thing that stands between a stranger and a seat, and 24 bits is
