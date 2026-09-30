@@ -151,7 +151,7 @@ Rules, in order of how much they matter:
 
 ```bash
 pip install -e ".[dev]"
-python -X utf8 -m pytest -q        # 225 tests, ~35s
+python -X utf8 -m pytest -q        # 460 tests, ~50s on Linux
 python -X utf8 tools/build_site.py # landing page + docs, fails on dead links
 ```
 

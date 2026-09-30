@@ -30,20 +30,22 @@ from .store import Store, StoreError, connect
 LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
 
 def serve_web(db, *, host: str, port: int, human: str, topic: str | None,
-              allow_remote: bool = False) -> int:  # pragma: no cover - a server
-    try:
-        from textual_serve.server import Server
-    except ImportError:
-        print("mooting: the browser session needs textual-serve — "
-              "pip install 'mooting[web]'", file=sys.stderr)
-        return 1
-
+              allow_remote: bool = False) -> int:
+    # Refused before anything is imported, so the check holds, and is tested,
+    # whether or not the web extra is installed.
     if host not in LOOPBACK and not allow_remote:
         raise StoreError(
             f"refusing to bind {host}: this serves a live session, and whoever "
             f"reaches it can rule as `{human}`.\n"
             f"  Reach it over an SSH tunnel, or pass --allow-remote once it is "
             f"behind something that authenticates.")
+
+    try:
+        from textual_serve.server import Server
+    except ImportError:
+        print("mooting: the browser session needs textual-serve — "
+              "pip install 'mooting[web]'", file=sys.stderr)
+        return 1
 
     store = connect(db)
     board_path = store.path
@@ -54,7 +56,7 @@ def serve_web(db, *, host: str, port: int, human: str, topic: str | None,
             str(board_path), "--as", human, "tui"]
     if topic:
         argv.append(topic)
-    command = " ".join(_quote(a) for a in argv)
+    command = shell_command(argv)
 
     print(f"  board   {board_path}")
     print(f"  you     {human}")
@@ -65,9 +67,19 @@ def serve_web(db, *, host: str, port: int, human: str, topic: str | None,
     else:
         print("  loopback only — tunnel with: ssh -L "
               f"{port}:127.0.0.1:{port} <this machine>")
-    Server(command, host=host, port=port, title="mooting").serve()
+    Server(command, host=host, port=port, title="mooting").serve()  # pragma: no cover
     return 0
 
 
-def _quote(arg: str) -> str:
-    return f'"{arg}"' if " " in arg else arg
+def shell_command(argv: list[str]) -> str:
+    """One string for textual-serve, which hands it to a shell.
+
+    Quoting only arguments with a space in them let a board path or a topic
+    holding `&`, `;` or a quote be read by that shell as syntax. Each platform
+    quotes by its own rules because the shell on the other end differs.
+    """
+    if os.name == "nt":
+        import subprocess
+        return subprocess.list2cmdline(argv)
+    import shlex
+    return shlex.join(argv)
