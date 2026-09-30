@@ -50,7 +50,16 @@ def board() -> Store:
 
 
 def _topic_id(ref: str | int) -> int:
-    return int(board().topic(int(ref) if str(ref).isdigit() else str(ref))["id"])
+    """The topic this seat named, refused unless it is seated there.
+
+    A seat on one meeting could read any other on the board by slug, including
+    a meeting in another room, because nothing here asked. The chat surfaces
+    were scoped by room; this was the half of that leak an agent could reach.
+    """
+    t = board().topic(int(ref) if str(ref).isdigit() else str(ref))
+    if board().seat(t["id"], AGENT) is None:
+        raise StoreError(f"{AGENT!r} holds no seat on `{t['slug']}`")
+    return int(t["id"])
 
 
 def _fmt_transcript(rows: list[Any], limit: int = 60) -> str:
@@ -101,7 +110,10 @@ def mooting_inbox() -> str:
 @mcp.tool()
 def mooting_read(topic: str, after: int = 0) -> str:
     """Full transcript of a topic. `topic` is its slug or id; `after` a message id."""
-    tid = _topic_id(topic)
+    try:
+        tid = _topic_id(topic)
+    except StoreError as exc:
+        return f"refused: {exc}"
     t = board().topic(tid)
     rows = board().transcript(tid, after=after)
     return (
@@ -116,7 +128,7 @@ def mooting_status() -> str:
     b = board()
     lines = []
     for t in b.topics():
-        if t["status"] in {"resolved", "aborted"}:
+        if t["status"] in {"resolved", "aborted"} or b.seat(t["id"], AGENT) is None:
             continue
         lines.append(f"`{t['slug']}` — {t['title']} [{t['status']}]")
         for s in b.seats(t["id"]):
@@ -143,8 +155,8 @@ def mooting_say(topic: str, body: str) -> str:
     them, leaves everyone free to carry on. Use `mooting_ask` when you genuinely
     cannot continue without their answer.
     """
-    tid = _topic_id(topic)
     try:
+        tid = _topic_id(topic)
         mid = board().post(tid, AGENT, body)
     except StoreError as exc:
         return f"refused: {exc}"
@@ -160,8 +172,8 @@ def mooting_propose(topic: str, title: str, body: str) -> str:
     the discussion has converged enough that a human could sign it off -- state the
     decision, the reasoning, and what changes if it is approved.
     """
-    tid = _topic_id(topic)
     try:
+        tid = _topic_id(topic)
         pid = board().propose(tid, AGENT, title, body)
     except StoreError as exc:
         return f"refused: {exc}"
@@ -201,8 +213,8 @@ def mooting_ask(topic: str, agent: str, question: str) -> str:
     that read the sources, or owns the subsystem. It buys them priority, not extra
     budget, so a capped seat still will not be woken.
     """
-    tid = _topic_id(topic)
     try:
+        tid = _topic_id(topic)
         mid = board().ask(tid, AGENT, agent, question)
     except StoreError as exc:
         return f"refused: {exc}"
@@ -216,8 +228,11 @@ def mooting_pass(topic: str, why: str = "nothing to add") -> str:
     Use it when you agree, when the point is outside what you can judge, or when
     repeating yourself would just spend another metered turn.
     """
-    tid = _topic_id(topic)
-    board().post(tid, AGENT, why, kind="system", count_turn=True)
+    try:
+        tid = _topic_id(topic)
+        board().post(tid, AGENT, why, kind="system", count_turn=True)
+    except StoreError as exc:
+        return f"refused: {exc}"
     return f"{AGENT} passed on `{topic}`."
 
 
@@ -243,8 +258,8 @@ def mooting_assign(topic: str, agent: str, title: str, body: str = "",
     that task is accepted. Ordering written into the plan text instead is not
     read by anything and will run in parallel.
     """
-    tid = _topic_id(topic)
     try:
+        tid = _topic_id(topic)
         task_id = board().draft_task(tid, AGENT, agent, title, body, acceptance,
                                      depends_on)
     except StoreError as exc:
@@ -256,7 +271,10 @@ def mooting_assign(topic: str, agent: str, title: str, body: str = "",
 @mcp.tool()
 def mooting_tasks(topic: str) -> str:
     """The plan and where every task has got to."""
-    tid = _topic_id(topic)
+    try:
+        tid = _topic_id(topic)
+    except StoreError as exc:
+        return f"refused: {exc}"
     rows = board().tasks(tid)
     if not rows:
         return "No tasks planned yet."
