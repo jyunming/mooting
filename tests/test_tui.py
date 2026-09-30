@@ -1273,3 +1273,47 @@ async def test_a_repaint_before_the_panes_exist_does_nothing(tmp_path, board):
         del app.query
         app.refresh_board()
         assert app.query_one("#seats", DataTable).row_count == 3
+
+
+def _transcript_text(app) -> str:
+    log = app.query_one("#transcript", RichLog)
+    return "\n".join(strip.text for strip in log.lines)
+
+
+@pytest.mark.asyncio
+async def test_a_proposal_is_wrapped_not_cropped_in_a_narrow_window(tmp_path, board):
+    """RichLog wrapped every line at 78 columns whatever the pane had, so at 80
+    columns a proposal's body lost its right half. The words a chair signs off
+    on all have to reach the screen."""
+    body = ("Retry with base 1s and cap 5m. Stop after 6 attempts and "
+            "dead-letter, then page whoever owns the consumer.")
+    app = app_for(tmp_path, board)
+    board.propose(board.topic("t")["id"], "claude", "Backoff", body)
+    async with app.run_test(size=(80, 24)) as pilot:
+        for _ in range(3):
+            await pilot.pause()
+        log = app.query_one("#transcript", RichLog)
+        width = log.scrollable_content_region.width
+        assert width < 78, "the pane is narrower than RichLog's old floor"
+        assert max(strip.cell_length for strip in log.lines) <= width
+        words = " ".join(_transcript_text(app).split())
+        assert "Stop after 6 attempts and dead-letter" in words
+        assert app.screen.has_class("narrow")
+
+
+@pytest.mark.asyncio
+async def test_the_transcript_rewraps_when_the_window_grows(tmp_path, board):
+    app = app_for(tmp_path, board)
+    board.post(board.topic("t")["id"], "claude", "word " * 60)
+    async with app.run_test(size=(80, 24)) as pilot:
+        for _ in range(3):
+            await pilot.pause()
+        log = app.query_one("#transcript", RichLog)
+        narrow = max(strip.cell_length for strip in log.lines)
+        await pilot.resize_terminal(160, 24)
+        for _ in range(3):
+            await pilot.pause()
+        wide = max(strip.cell_length for strip in log.lines)
+        assert wide > narrow + 20, "lines kept the width they were first wrapped at"
+        assert wide <= log.scrollable_content_region.width
+        assert not app.screen.has_class("narrow")
