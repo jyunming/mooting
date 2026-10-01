@@ -189,7 +189,7 @@ def clean_text(value: str, what: str) -> str:
 #: Routes that cannot be reached from the machine the board lives on. A seat
 #: holding a shell can type in a terminal and can call an HTTP port; it cannot
 #: be a paired person in a chat.
-ON_ANOTHER_MACHINE = frozenset({"telegram"})
+ON_ANOTHER_MACHINE = frozenset({"telegram", "discord"})
 
 #: Bytes behind a handle somebody types. Four rather than three: a pairing
 #: handle is the thing that stands between a stranger and a seat, and 24 bits is
@@ -355,6 +355,13 @@ class Store:
                 if (table, column) == ("mentions", "asking"):
                     self._backfill_asking()
 
+
+        # Bindings made before `identities` existed lived in one column; carry
+        # them over so an account that redeemed a code keeps its private room.
+        self._conn.execute(
+            "INSERT OR IGNORE INTO identities (channel, user_id, seat) "
+            "SELECT 'telegram', tg_user_id, name FROM agents "
+            "WHERE tg_user_id IS NOT NULL AND tg_user_id != ''")
 
         # Every open, not only when the column is added: a request with no handle
         # cannot be answered, and one can arrive that way from an older board or
@@ -1240,20 +1247,31 @@ class Store:
         for key in ("claim.code", "claim.seat", "claim.expires"):
             self.set_setting(key, None)
 
-    def bind_identity(self, seat: str, user_id: str) -> None:
-        """Bind a chat account to a seat, so identity is not a name in a message."""
+    def bind_identity(self, seat: str, user_id: str, channel: str = "telegram") -> None:
+        """Bind a chat account to a seat, so identity is not a name in a message.
+
+        One account holds one seat, and a seat holds one account per channel:
+        binding again on the same channel moves it, and a binding on another
+        channel is left alone.
+        """
         if not self.is_human(seat):
             raise NotAuthorised(f"{seat!r} is not a human seat")
         with self.tx() as c:
-            c.execute("UPDATE agents SET tg_user_id = NULL WHERE tg_user_id = ?",
-                      (str(user_id),))
-            c.execute("UPDATE agents SET tg_user_id = ? WHERE name = ?",
-                      (str(user_id), seat))
+            c.execute("DELETE FROM identities WHERE channel = ? AND (user_id = ? OR seat = ?)",
+                      (channel, str(user_id), seat))
+            c.execute("INSERT INTO identities (channel, user_id, seat) VALUES (?,?,?)",
+                      (channel, str(user_id), seat))
+            if channel == "telegram":
+                c.execute("UPDATE agents SET tg_user_id = NULL WHERE tg_user_id = ?",
+                          (str(user_id),))
+                c.execute("UPDATE agents SET tg_user_id = ? WHERE name = ?",
+                          (str(user_id), seat))
 
-    def seat_for_identity(self, user_id: str) -> str | None:
+    def seat_for_identity(self, user_id: str, channel: str = "telegram") -> str | None:
         """The seat this account has proved it holds, in any room or none."""
-        row = self.q1("SELECT name FROM agents WHERE tg_user_id = ?", (str(user_id),))
-        return row["name"] if row else None
+        row = self.q1("SELECT seat FROM identities WHERE channel = ? AND user_id = ?",
+                      (channel, str(user_id)))
+        return row["seat"] if row else None
 
     def private_room(self, user_id: str, channel: str = "telegram") -> str | None:
         """Open this account's own room, if it is entitled to one. Its seat, or None.
@@ -1268,7 +1286,7 @@ class Store:
 
         Idempotent: the second message from the same account finds the room.
         """
-        seat = self.seat_for_identity(user_id)
+        seat = self.seat_for_identity(user_id, channel)
         if not seat:
             return None
         room = self.ensure_room(channel, str(user_id))
@@ -1288,7 +1306,7 @@ class Store:
         person rather than the room, and it exists so the operator does not have
         to bootstrap themselves from a terminal every time they open a group.
         """
-        bound = self.seat_for_identity(user_id)
+        bound = self.seat_for_identity(user_id, channel)
         if bound:
             return bound
         row = self.q1(
@@ -1761,8 +1779,25 @@ class Store:
 
     # ---------------------------------------------------------------- proposals
 
+    def _require_seat(self, topic_id: int, who: str, doing: str) -> None:
+        """An agent acts only on a topic it is seated at; a person needs no seat.
+
+        `post` refused an unseated agent and `propose` and `vote` did not, so an
+        agent seated anywhere on the board could put a proposal on a meeting in
+        another room -- one that room's chair would then be asked to sign off.
+        """
+        if who == "mooting" or self.is_human(who):
+            return
+        if self.seat(topic_id, who) is None:
+            slug = self.topic(topic_id)["slug"]
+            raise StoreError(f"{who!r} holds no seat on `{slug}`, so it cannot {doing} there")
+
     def propose(self, topic_id: int, author: str, title: str, body: str) -> int:
         title, body = clean_text(title, "the title"), clean_text(body, "the body")
+        topic = self.topic(topic_id)
+        if topic["status"] not in {"open", "paused"}:
+            raise StoreError(f"topic {topic['slug']} is {topic['status']}; not accepting proposals")
+        self._require_seat(topic_id, author, "propose")
         with self.tx() as c:
             cur = c.execute(
                 "INSERT INTO messages (topic_id, author, kind, body) VALUES (?,?,'propose',?)",
@@ -1802,6 +1837,7 @@ class Store:
         p = self.proposal(pid)
         if p["status"] != "open":
             raise StoreError(f"proposal {pid} is {p['status']}; voting closed")
+        self._require_seat(p["topic_id"], agent, "vote")
         with self.tx() as c:
             c.execute(
                 """INSERT INTO votes (proposal_id, agent, stance, rationale) VALUES (?,?,?,?)

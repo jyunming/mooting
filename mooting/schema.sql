@@ -257,6 +257,18 @@ CREATE TABLE IF NOT EXISTS pairings (
 );
 CREATE INDEX IF NOT EXISTS idx_pairings_status ON pairings(status);
 
+-- Which chat account has proved it holds which seat, per channel. One person
+-- is usually on more than one: a Telegram id and a Discord id are unrelated
+-- numbers, and a single column meant binding one unbound the other.
+-- `agents.tg_user_id` is the older form, kept in step for Telegram.
+CREATE TABLE IF NOT EXISTS identities (
+    channel     TEXT NOT NULL,
+    user_id     TEXT NOT NULL,
+    seat        TEXT NOT NULL REFERENCES agents(name) ON DELETE CASCADE,
+    bound_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (channel, user_id)
+);
+
 -- Where a council meets: a chat, or the board itself when the work is happening
 -- at a terminal. A room owns a roster, so a meeting opened there starts with the
 -- right seats instead of being seated by hand every time -- and two groups on

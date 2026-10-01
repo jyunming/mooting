@@ -54,6 +54,14 @@ try:
 except ImportError:                                  # aiohttp is optional
     STORE = TOKEN = HUMAN = RUNNING = SUPERVISOR = None  # type: ignore[assignment]
 
+#: The seat a request acts as. `RequestKey` arrived in aiohttp 3.10 and the
+#: floor is 3.9, where a plain string key is what works.
+try:
+    from aiohttp.web import RequestKey
+    SEAT: object = RequestKey("seat", object)
+except ImportError:
+    SEAT = "seat"
+
 #: Anything outside this is a remote-control surface, and B1 does not have the
 #: fences for one. Kept as data so the check cannot drift from the message.
 LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -151,12 +159,12 @@ def build_app(db: Path | str | None, token: str, *, human: str,
         shared = request.app[TOKEN]
         if seat is None and not (shared and secrets.compare_digest(token, shared)):
             return web.json_response({"error": "bad or missing token"}, status=401)
-        request["seat"] = seat
+        request[SEAT] = seat
         return await handler(request)
 
     def acting(request):
         """The seat this request acts as, or None for the shared read token."""
-        return request.get("seat")
+        return request.get(SEAT)
 
     async def decide(request):
         """Sign off on a proposal, over HTTP.

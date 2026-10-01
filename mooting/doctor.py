@@ -203,7 +203,7 @@ def context_leaks(cwd: str) -> list[str]:
     # `C:\dev` is stored as `C--dev`: every separator becomes a dash, the colon
     # included. Matched exactly, because `C--dev` and `C--dev-Something` are
     # different projects and warning about the wrong one is noise.
-    slug = "".join("-" if ch in ':\/' else ch for ch in str(here))
+    slug = "".join("-" if ch in ':\\/' else ch for ch in str(here))
     for base in MEMORY_DIRS:
         candidate = Path.home() / base / slug
         if candidate.is_dir() and any(candidate.rglob("*.md")):

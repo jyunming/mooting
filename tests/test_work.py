@@ -452,7 +452,7 @@ def test_a_deliberating_seat_gets_no_shell_at_all(tmp_path):
 
 
 def test_an_executing_agy_seat_is_given_its_worktree(tmp_path):
-    """agy runs shell commands in its own scratch directory and ignores the
+    r"""agy runs shell commands in its own scratch directory and ignores the
     process working directory. Asked where it was, it answered
     `~\.gemini\antigravity-cli\brain\<uuid>\scratch` and "fatal: not a git
     repository" -- so a worker could not reach the worktree it was given at
