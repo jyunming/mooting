@@ -550,6 +550,52 @@ def cmd_prompt(args) -> int:
     return 0
 
 
+def cmd_discord(args) -> int:
+    """Run a council in a Discord server or DM. The token is asked for once,
+    as with Telegram, and remembered once Discord has accepted it."""
+    board = _session_board(args)
+    if args.forget_token:
+        board.set_setting("discord.token", None)
+        print("forgotten. `mooting discord --token ...` to set it again.")
+        board.close()
+        return 0
+
+    stored = board.setting("discord.token")
+    token = (args.token or os.environ.get("MOOTING_DISCORD_TOKEN")
+             or os.environ.get("DISCORD_BOT_TOKEN") or stored)
+    if not token:
+        board.close()
+        print("mooting: need a bot token, once.\n"
+              "  mooting discord --token <token>\n"
+              "  Make one at https://discord.com/developers/applications:\n"
+              "  New Application → Bot → Reset Token, and turn on Message "
+              "Content Intent on the same page.\n"
+              "  It is remembered afterwards, so you only pass it this time.",
+              file=sys.stderr)
+        return 1
+
+    remember = token != stored and not args.no_save
+    if stored and not args.token:
+        print("  token   remembered from a previous run")
+
+    who = _human(board, args.as_)
+    channels = args.channel or [c for c in (board.setting("discord.channels") or "")
+                                .split(",") if c]
+    if args.channel:
+        board.set_setting("discord.channels", ",".join(args.channel))
+    board.close()
+
+    try:
+        import discord  # noqa: F401
+    except ImportError:
+        print("mooting: the Discord bot needs discord.py — "
+              "pip install 'mooting[discord]'", file=sys.stderr)
+        return 1
+    from .discord_bot import run as run_bot
+    return run_bot(args.db, bot_token=token, chats=channels, human=who,
+                   topic=args.topic, remember=remember)
+
+
 def cmd_telegram(args) -> int:
     """Run a council in a Telegram chat.
 
@@ -639,8 +685,8 @@ def cmd_pair(args) -> int:
         # Approving from a terminal is how a room is bootstrapped, and it left
         # the room with no host at all -- so the first person to approve
         # somebody in the chat afterwards became one by accident.
-        if row["channel"] == "telegram":
-            board.claim_room(board.ensure_room("telegram", row["chat_id"]),
+        if row["channel"] != "local":
+            board.claim_room(board.ensure_room(row["channel"], row["chat_id"]),
                              row["seat"])
         print(f"{row['display'] or row['user_id']} speaks as {row['seat']}")
     elif args.deny:
@@ -934,6 +980,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--forget-token", action="store_true",
                    help="remove the saved token and exit")
     p.set_defaults(fn=cmd_telegram)
+
+    p = sub.add_parser("discord", help="run a council in a Discord server or DM")
+    p.add_argument("--token", help="bot token from the Discord developer portal; "
+                                   "needed once, then remembered")
+    p.add_argument("--channel", action="append",
+                   help="allowlisted channel id; repeatable. Without one the bot "
+                        "answers anywhere it is added")
+    p.add_argument("--topic", help="topic slug the channel drives")
+    p.add_argument("--no-save", action="store_true",
+                   help="use the token once without remembering it")
+    p.add_argument("--forget-token", action="store_true",
+                   help="remove the saved token and exit")
+    p.set_defaults(fn=cmd_discord)
 
     p = sub.add_parser("claim", help="a one-time code that hands somebody a seat "
                                      "and hosts them in the room they use it in")

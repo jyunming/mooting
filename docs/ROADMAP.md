@@ -109,10 +109,13 @@ about.
 
 ## F — Tests where the invariants live
 
-**Cover the surfaces that hold the promises before adding to them.** `web.py`
-has no test at all, including the loopback check that is the only thing between
-an unauthenticated live session and the network. `mcp_server.py` — everything an
-agent can see — has no functional test, only a count of its decorators.
+**Cover the surfaces that hold the promises before adding to them.**
+
+| | |
+|---|---|
+| F1 ✅ | **Done, and it found a leak.** `tests/test_mcp_server.py` calls every tool the way a CLI does. An agent seated on one meeting could read any other by slug, list every meeting on the board, and open a proposal or vote on one in another room -- `post` checked for a seat and `propose` and `vote` did not. Every topic an agent names must now be one it sits at, `Store.propose` and `Store.vote` refuse an unseated agent as a second line, and a closed meeting takes no new proposal. |
+| F2 ✅ | **Done.** The loopback refusal in `web.py` runs before the web extra is imported and has a test. The command handed to textual-serve's shell is quoted by the platform's own rules, not only when an argument holds a space. |
+| F3 | `cli.py` (43%), `doctor.py` (39%) and `install.py` (28%) are the rest. `doctor`'s static checks need no real turn and can run against `FakeDriver`. |
 
 ## G — Worth taking from elsewhere
 

@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import textwrap
 import uuid
 import logging
 from pathlib import Path
@@ -56,6 +57,56 @@ from .console import Console
 from .store import StoreError, connect
 
 log = logging.getLogger("mooting.tui")
+
+#: Below this many columns the side panel narrows, so the transcript -- the
+#: thing being read -- keeps the width.
+NARROW = 110
+
+
+def clip(text: str, width: int = 24) -> str:
+    """A title cut to fit the work panel, marked as cut rather than silently short."""
+    text = " ".join(str(text).split())
+    return text if len(text) <= width else text[:width - 1] + "…"
+
+
+class Transcript(RichLog):
+    """A RichLog that wraps to the width it actually has, and again on resize.
+
+    RichLog renders each line once, at write time, at no less than `min_width`
+    (78 by default) and never again. A pane narrower than that cropped the right
+    edge off every line: a proposal read "Stop ... attempts" with "after 6"
+    missing, and a chair signs off on what the proposal says.
+    """
+
+    #: Enough to re-render what is on screen and a good way back; older lines
+    #: stay as they were wrapped.
+    KEEP = 2000
+
+    def __init__(self, **kw) -> None:
+        super().__init__(min_width=20, **kw)
+        from collections import deque
+        self._kept: deque = deque(maxlen=self.KEEP)
+        self._wrapped_at = 0
+
+    def write(self, content, *a, **kw):
+        self._kept.append(content.copy() if isinstance(content, Text) else content)
+        return super().write(content, *a, **kw)
+
+    def clear(self):
+        self._kept.clear()
+        return super().clear()
+
+    def on_resize(self, event) -> None:
+        super().on_resize(event)
+        width = self.scrollable_content_region.width
+        if self._wrapped_at and width != self._wrapped_at and self._kept:
+            kept = list(self._kept)
+            super().clear()
+            for item in kept:
+                super().write(item.copy() if isinstance(item, Text) else item,
+                              scroll_end=False)
+            self.scroll_end(animate=False)
+        self._wrapped_at = width
 
 
 #: One colour per seat, picked from its name so it is the same in every session
@@ -226,8 +277,12 @@ class MootApp(App):
     #body { height: 1fr; }
     /* Both panes need an explicit width. Without one the transcript sizes to its
        content, overruns the sidebar, and the two paint over each other. */
-    #transcript { width: 1fr; border: round $primary; padding: 0 1; }
+    /* The gutter is reserved from the start: a scrollbar appearing after the
+       first screenful made every earlier line one column too wide. */
+    #transcript { width: 1fr; border: round $primary; padding: 0 1;
+                  scrollbar-gutter: stable; }
     #side { width: 42; }
+    Screen.narrow #side { width: 30; }
     #seats { height: 45%; }
     #work { height: 1fr; }
     #seats, #work { border: round $secondary; }
@@ -240,7 +295,10 @@ class MootApp(App):
         scrollbar-color: $panel;
         scrollbar-color-hover: $secondary;
     }
-    #status { height: 1; background: $boost; color: $text; padding: 0 1; }
+    /* Two lines when it needs them: one line cut the sign-off count off the
+       end at 80 columns, which is the number the bar exists to show. */
+    #status { height: auto; max-height: 2; background: $boost; color: $text;
+              padding: 0 1; }
     /* Grows only while you are typing a command, so it never costs space when
        you are reading. */
     #hint { height: auto; max-height: 10; background: $panel; border: none;
@@ -285,7 +343,7 @@ class MootApp(App):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Horizontal(id="body"):
-            yield RichLog(id="transcript", wrap=True, markup=True, highlight=False)
+            yield Transcript(id="transcript", wrap=True, markup=True, highlight=False)
             with Vertical(id="side"):
                 # Rows are clickable: a seat opens its model picker, a proposal
                 # or task opens itself in the transcript.
@@ -297,7 +355,11 @@ class MootApp(App):
                     id="say")
         yield Footer()
 
+    def on_resize(self, event) -> None:
+        self.screen.set_class(event.size.width < NARROW, "narrow")
+
     def on_mount(self) -> None:
+        self.screen.set_class(self.size.width < NARROW, "narrow")
         seats = self.query_one("#seats", DataTable)
         seats.add_columns("seat", "state", "turns")
         work = self.query_one("#work", DataTable)
@@ -593,15 +655,27 @@ class MootApp(App):
         store, tid = self.board.store, self.board.topic_id
         if store.topic(tid)["mode"] == "work":
             for t in store.tasks(tid):
-                table.add_row(str(t["id"]), t["title"][:30], t["status"])
+                table.add_row(str(t["id"]), clip(t["title"], self._title_width()), t["status"])
                 if t["status"] == "blocked" and t["result"]:
                     # Truncated here on purpose: the full reason is already a system
                     # message in the transcript. This row exists so a blocked task
-                    # is not silently just a status word.
-                    table.add_row("", f"↳ {t['result'][:30]}", "")
+                    # is not silently just a status word. Two rows rather than one
+                    # wider one, because a wider cell pushes the state column out
+                    # of the narrow panel.
+                    width = self._title_width() - 2
+                    lines = textwrap.wrap(" ".join(t["result"].split()), width)
+                    if len(lines) > 2:
+                        lines = [lines[0], clip(" ".join(lines[1:]), width)]
+                    for i, part in enumerate(lines):
+                        table.add_row("", f"{'↳' if i == 0 else ' '} {part}", "")
         else:
             for p in store.proposals(tid):
-                table.add_row(str(p["id"]), p["title"][:30], p["status"])
+                table.add_row(str(p["id"]), clip(p["title"], self._title_width()), p["status"])
+
+    def _title_width(self) -> int:
+        # The narrow panel is 30 columns; a 24-character title pushed the state
+        # column off it, and the state is what the row is for.
+        return 14 if self.screen.has_class("narrow") else 24
 
     def _paint_status(self) -> None:
         b = self.board
@@ -638,7 +712,8 @@ class MootApp(App):
         # window cut off the two counts that are the reason to look at the bar.
         bits = []
         if asks:
-            bits.append(f"[magenta]{asks} question(s) for you[/magenta]")
+            bits.append(f"[magenta]{asks} question{'s' if asks > 1 else ''} "
+                        f"for you[/magenta]")
         if props:
             bits.append(f"[yellow]{props} awaiting sign-off[/yellow]")
         bits += [f"round {topic['round'] + 1}/{topic['max_rounds']}",
