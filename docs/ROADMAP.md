@@ -136,6 +136,7 @@ about.
 | ~~G5~~ | **Record whether the council changed the chair's mind.** The cheapest honest measurement available, and it needs no experiment: capture the chair's opening position when a topic is opened, compare it against the rationale they sign off with, and count the times they differ. A tool that can show how often it moved the person holding the decision has evidence rather than a claim. |
 
 | G6 ✅ | **Done, with a gap the owner accepted on 2026-11-15.** A cursor worker runs from `<board dir>/worker/<seat>/` with the worktree added by `--add-dir`; two live workers committed and reported, and were refused `git push` and unlisted commands. Its file writes are not held to the worktree: both also overwrote a file in another folder with no approval asked, because cursor's rules cannot say "everything but the worktree". Copilot workers are held by neither. `--sandbox enabled` failed to launch once and is untested. PR #11. See [Driver notes](DRIVERS.md#a-cursor-worker). |
+| G7 | **A cursor seat on a board inside a git repo may take that repo's cursor rules.** Minor: boards default to `~/.mooting/boards`, outside any repo. Read in cursor-agent 2026.11.11's source, not probed: it collects every `.cursor/cli.json` from the project root down to where it runs, so a board kept inside a repo would add the repo's own allow rules to a seat's. Probe with a repo whose `.cursor/cli.json` allows `Shell(echo)` and see whether a meeting seat may run it. |
 
 ## K — What a phone makes obvious ✅ done
 
