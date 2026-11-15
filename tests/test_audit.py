@@ -415,6 +415,28 @@ def test_a_cursor_worker_edits_its_worktree_with_our_config_kept_out_of_it(tmp_p
     assert not any(r.startswith("Shell(*") for r in rules["allow"]), rules
 
 
+def test_a_cursor_seat_on_a_board_inside_a_repo_runs_from_outside_it(tmp_path, monkeypatch):
+    """cursor-agent takes the git root as its project when it runs inside one,
+    and then ignores our `.cursor/mcp.json`. A live worker on a board in a
+    repo's `.mooting/` was told "MCP server does not exist: mooting" and could
+    not post a word."""
+    from mooting.drivers.base import Seat
+    from mooting.drivers.spawn import CursorDriver
+
+    repo = tmp_path / "project"
+    (repo / ".git").mkdir(parents=True)
+    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path / "home")
+    driver = CursorDriver(repo / ".mooting" / "board.db")
+
+    for executing in (False, True):
+        seat = Seat(topic_id=1, topic_slug="t", agent="Cora", kind="cursor", cli_session=None,
+                    executing=executing, cfg={"cwd": str(repo / ".mooting" / "work" / "task-1")})
+        ws = pathlib.Path(driver.working_dir(seat))
+        assert repo not in ws.parents, f"a cursor seat runs inside the repo: {ws}"
+        assert (tmp_path / "home" / ".mooting" / "cursor") in ws.parents, ws
+        assert (ws / ".cursor" / "mcp.json").exists()
+
+
 def test_a_cursor_seat_in_a_meeting_keeps_its_rules_while_it_works_a_task(tmp_path):
     """One seat can deliberate and work at once. Sharing a directory let the
     task's wake rewrite the meeting's `cli.json` with rules that allow edits,
