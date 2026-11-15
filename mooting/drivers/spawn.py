@@ -504,6 +504,10 @@ class CursorDriver(SpawnDriver):
     beside it. **Reading is not denied**: it read that file and posted the
     contents. So a cursor seat starts with no project in view and reads one
     only when it is given the path.
+
+    A worker runs from a directory of ours too, with its worktree added as a
+    second root, and may run git's bookkeeping commands and nothing else. Its
+    file writes are not contained: see `WORK_PERMISSIONS`.
     """
     binary = "cursor-agent"
     #: The `.CMD` shim goes through cmd.exe and then PowerShell's `$args`, so a
@@ -518,13 +522,38 @@ class CursorDriver(SpawnDriver):
     #: explicitly denied, which makes this list the only thing standing.
     PERMISSIONS = {"allow": ["Mcp(mooting:*)"], "deny": ["Write(**)", "Shell(*)"]}
 
+    #: A worker edits, so the write deny goes, and commits, so git's bookkeeping
+    #: verbs are named -- the same ones as `ClaudeDriver.COMMIT_TOOLS`. Every
+    #: other command is refused, and a command line is refused whole if any part
+    #: of it is unlisted: a live worker's `cd <tree> && git commit` came back
+    #: "Rejected", the same commit with no `cd` went through, and
+    #: `echo hi > shell.txt` and `git push` were both refused.
+    #:
+    #: **Writes are not contained.** Two live workers asked to overwrite a file
+    #: outside the workspace both did it, with no approval asked. The rules here
+    #: can only name paths to refuse, never "everything but the worktree", and a
+    #: refusal is checked before an allowance. A cursor worker is held to git by
+    #: the shell rules and to its worktree only by the prompt.
+    WORK_PERMISSIONS = {
+        "allow": ["Mcp(mooting:*)", "Shell(git add)", "Shell(git commit)",
+                  "Shell(git status)", "Shell(git diff)", "Shell(git log)"],
+        "deny": ["Shell(git push)"],
+    }
+
     def effort_argv(self, seat: Seat) -> list[str]:
         # No --effort; reasoning is a bracket parameter on the model name,
         # e.g. `--model 'name[effort=high]'`, which belongs to the seat's model.
         return []
 
     def working_dir(self, seat: Seat) -> str:
-        sandbox = Path(self.db).parent / "sandbox" / seat.agent
+        # A worker gets a directory of its own. One seat can sit in a meeting
+        # and work a task at once, and sharing a directory would let the task's
+        # wake rewrite `cli.json` under the meeting's, putting a deliberating
+        # seat under rules that let it edit. A sibling, not a child: cursor-agent
+        # collects every `.cursor/cli.json` from the project root down to where
+        # it runs, so a child would inherit its parent's.
+        home = "worker" if seat.executing else "sandbox"
+        sandbox = Path(self.db).parent / home / seat.agent
         conf = sandbox / ".cursor"
         conf.mkdir(parents=True, exist_ok=True)
         # Rewritten every wake: the board path is in it, and a stale file from a
@@ -532,28 +561,32 @@ class CursorDriver(SpawnDriver):
         (conf / "mcp.json").write_text(
             json.dumps(mooting_mcp_config(seat.agent, self.db), ensure_ascii=False),
             encoding="utf-8")
+        perms = self.WORK_PERMISSIONS if seat.executing else self.PERMISSIONS
         (conf / "cli.json").write_text(
-            json.dumps({"permissions": self.PERMISSIONS}), encoding="utf-8")
+            json.dumps({"permissions": perms}), encoding="utf-8")
+        # A worker runs here too, not in its worktree. Our config has to sit in
+        # a workspace root, and the worktree is the user's tree, where a
+        # `git add -A` would commit it.
         return str(sandbox)
-
-    async def wake(self, seat: Seat, prompt: str) -> WakeResult:
-        if seat.executing:
-            # The server only loads from the workspace's own `.cursor/mcp.json`;
-            # an `--add-dir` root's file is not read. Working a task would mean
-            # writing our config into the user's worktree, where a `git add .`
-            # commits it. Refusing is better than a worker that cannot report.
-            return WakeResult.failure(
-                "cursor seats cannot work tasks yet: cursor-agent only loads an "
-                "MCP server from the workspace it edits, so the board's config "
-                "would land in your worktree. Give the task to another seat.")
-        return await super().wake(seat, prompt)
 
     def argv(self, seat: Seat, prompt: str, session: str | None) -> list[str]:
         # --approve-mcps: `cursor-agent mcp list` reports a workspace server as
         # "not loaded (needs approval)" until something approves it. --trust:
         # a workspace trust prompt would wait for a person who is not there.
-        return [self.binary, "-p", "--approve-mcps", "--trust",
-                "--output-format", "json", *self.extra_argv]
+        # --disable-auto-update: a CLI that updates itself starts helper
+        # processes that inherit our pipes and outlive it. One did, 30 s into a
+        # live task, and the wake sat at the 600 s limit after the work was
+        # done. The flag is hidden from `--help` (found in 2026.11.13's source),
+        # so it may go away; `_run` no longer hangs on a held pipe either way.
+        argv = [self.binary, "-p", "--approve-mcps", "--trust", "--disable-auto-update",
+                "--output-format", "json"]
+        if seat.executing:
+            # The worktree joins as a second root, so it can be edited without
+            # our config moving into it. The run stays in our directory, the
+            # first root, whose `.cursor/mcp.json` is the one two live workers
+            # loaded the board from.
+            argv += ["--add-dir", seat.cwd]
+        return argv + self.extra_argv
 
 
 DRIVER_CLASSES = {
