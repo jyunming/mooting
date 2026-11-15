@@ -160,6 +160,7 @@ is slow, so offer buttons wherever there is a fixed set of answers.*
 | ~~K4~~ | **`/seats` lists the seats on this topic, and a person reads it as "who is in this room".** Somebody paired into a room but not yet seated on the meeting in front of you is invisible, which was reported as "I added my wife and cannot see her". Show them, marked as here but not seated. |
 | K5 ✅ | **Done.** One line in `/help`. Superseded text below. |
 | ~~K5~~ | **`/proposals <id>` is not in the help.** The event pump starts at `store.head()` and never replays, so re-reading a proposal that has scrolled away is only possible through a form nothing advertises — the trap `CLAUDE.md` names, left half-closed. |
+| K6 ✅ | **Done.** The wake buttons did nothing: bare `/nudge` built each seat's button as `set:nudge:<seat>`, `parse_set` knows only `wake`, so a tap decoded to `None` and no seat woke, with no reply. Found by a small-model trial review while preparing G4b, not by use. The chooser now sends `wake`. Test: `test_every_chooser_button_decodes_to_what_it_offers`, which drives every chooser and decodes every button (red before, green after). Not yet driven against a real chat. |
 
 ## Not building
 
