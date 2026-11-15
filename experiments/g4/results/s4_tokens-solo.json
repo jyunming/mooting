@@ -1,0 +1,37 @@
+{
+ "seed": "s4_tokens",
+ "arm": "solo",
+ "stopped": "rounds_exhausted",
+ "messages": [
+  {
+   "id": 46,
+   "author": "chair",
+   "kind": "system",
+   "body": "Review the Python code below for bugs. For each bug, name the function, an input that triggers it, and what goes wrong. If you find none, say so. Leave style alone.\n\n```python\nimport secrets\nfrom datetime import datetime, timedelta, timezone\n\nTOKEN_LIFETIME = timedelta(hours=1)\n\n\ndef issue(user_id: str) -> dict:\n    \"\"\"A session token that is valid for TOKEN_LIFETIME from now.\"\"\"\n    expires = datetime.now(timezone.utc) + TOKEN_LIFETIME\n    return {\"user\": user_id, \"secret\": secrets.token_hex(16),\n            \"expires\": expires.timestamp()}\n\n\ndef is_valid(token: dict) -> bool:\n    \"\"\"True until the token's expiry time has passed.\"\"\"\n    expires = datetime.utcfromtimestamp(token[\"expires\"])\n    return datetime.now() < expires\n```\n"
+  },
+  {
+   "id": 47,
+   "author": "g4solo",
+   "kind": "say",
+   "body": "One bug, in `is_valid`: it compares a naive UTC time (`utcfromtimestamp`) with naive *local* time (`datetime.now()`), so validity shifts by the host's UTC offset. On a UTC+8 host a freshly issued token is already expired (local now is 8h past the UTC expiry). On a UTC-5 host it stays valid for 6h instead of 1h. Fix: `datetime.now(timezone.utc).timestamp() < token[\"expires\"]`. I would withdraw this only if the host is guaranteed to run in UTC. `issue` is fine."
+  },
+  {
+   "id": 48,
+   "author": "mooting",
+   "kind": "system",
+   "body": "paused: rounds exhausted -- needs a human to extend or rule"
+  }
+ ],
+ "wakes": [
+  {
+   "agent": "g4solo",
+   "outcome": "ok",
+   "detail": "",
+   "tokens_in": 8,
+   "tokens_out": 795,
+   "cost_usd": 0.21777760000000002,
+   "started_at": "2026-11-15 15:15:03",
+   "ended_at": "2026-11-15 15:15:40"
+  }
+ ]
+}

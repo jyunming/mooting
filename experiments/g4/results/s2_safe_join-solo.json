@@ -1,0 +1,37 @@
+{
+ "seed": "s2_safe_join",
+ "arm": "solo",
+ "stopped": "rounds_exhausted",
+ "messages": [
+  {
+   "id": 22,
+   "author": "chair",
+   "kind": "system",
+   "body": "Review the Python code below for bugs. For each bug, name the function, an input that triggers it, and what goes wrong. If you find none, say so. Leave style alone.\n\n```python\nimport os\n\n\ndef safe_join(root: str, requested: str) -> str:\n    \"\"\"Resolve `requested` under `root`, refusing anything that escapes it.\n\n    The static-file handler calls this with `requested` taken straight from\n    the URL path, so it has to hold against `..` and absolute paths.\n    \"\"\"\n    root = os.path.realpath(root)\n    path = os.path.realpath(os.path.join(root, requested))\n    if not path.startswith(root):\n        raise PermissionError(f\"outside the served directory: {requested}\")\n    return path\n\n\ndef serve(root: str, requested: str) -> bytes:\n    with open(safe_join(root, requested), \"rb\") as f:\n        return f.read()\n```\n"
+  },
+  {
+   "id": 23,
+   "author": "g4solo",
+   "kind": "say",
+   "body": "One real bug, in safe_join: the prefix check `path.startswith(root)` has no path-separator boundary. With root `/srv/www`, requested `../www-secret/key.pem` resolves to `/srv/www-secret/key.pem`, which starts with \"/srv/www\", so it passes and serve() returns a file outside root. Fix: `os.path.commonpath([root, path]) == root`. `..` and absolute paths are otherwise handled correctly, because realpath plus join resolves both before the check runs."
+  },
+  {
+   "id": 24,
+   "author": "mooting",
+   "kind": "system",
+   "body": "paused: rounds exhausted -- needs a human to extend or rule"
+  }
+ ],
+ "wakes": [
+  {
+   "agent": "g4solo",
+   "outcome": "ok",
+   "detail": "",
+   "tokens_in": 8,
+   "tokens_out": 548,
+   "cost_usd": 0.2163178,
+   "started_at": "2026-11-15 15:11:30",
+   "ended_at": "2026-11-15 15:11:53"
+  }
+ ]
+}
