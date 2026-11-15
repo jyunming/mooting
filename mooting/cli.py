@@ -722,7 +722,7 @@ def cmd_serve(args) -> int:
             board.close()
             return 1
         print(f"token for {args.grant}:\n  {token}")
-        print("  it may speak and sign off as that seat — treat it as a password")
+        print("  it may run meetings, speak and sign off as that seat — treat it as a password")
         print('  in the page from `mooting serve`, paste it under "speak as a seat"')
         board.close()
         return 0
@@ -1014,7 +1014,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="bind a non-loopback address; only behind something "
                         "that authenticates")
     p.add_argument("--grant", metavar="SEAT",
-                   help="issue a token that may speak and sign off as that seat")
+                   help="issue a token that may run meetings, speak and sign off as that seat")
     p.add_argument("--revoke", metavar="SEAT", help="withdraw that seat's token")
     p.add_argument("--web", action="store_true",
                    help="serve the full session in a browser (needs "

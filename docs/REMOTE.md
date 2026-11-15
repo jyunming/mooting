@@ -107,8 +107,13 @@ What it can do depends on the token:
 
 | token | read and follow | run, stop, settings | speak and sign off |
 |---|---|---|---|
-| the one `mooting serve` prints | yes | yes | no |
+| the one `mooting serve` prints | yes | no | no |
 | one from `--grant <you>`, pasted under *speak as a seat* | yes | yes | yes |
+
+The printed token is in the URL, and a URL travels: it sits in browser history
+and gets pasted into chats. Run spends every seat's quota, so a link alone
+cannot start a meeting. Run, Stop and Save are greyed out until a seat token is
+pasted, and each one that is used is recorded on the board under that seat.
 
 A pasted token stays in that browser tab, never in the address bar, and
 *Forget it* drops it. Everything a seat wrote is put on the page as plain text,

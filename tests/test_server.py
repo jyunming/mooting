@@ -62,6 +62,11 @@ def auth(token=TOKEN):
     return {"Authorization": f"Bearer {token}"}
 
 
+def seat(board, who="jeremy"):
+    """Headers for a token that names a seat, which acting now needs."""
+    return auth(board.grant_token(who))
+
+
 # ----------------------------------------------------------------- the fence
 
 @pytest.mark.asyncio
@@ -309,20 +314,20 @@ async def driven(tmp_path, board):
 async def test_the_agenda_can_be_set_over_http(driven, board):
     r = await driven.patch("/api/topics/reno",
                            json={"agenda": "cap the retries; who owns the runbook"},
-                           headers=auth())
+                           headers=seat(board))
     assert r.status == 200
     assert (await r.json())["agenda"] == ["cap the retries", "who owns the runbook"]
 
 
 @pytest.mark.asyncio
 async def test_rounds_go_through_the_same_rule_as_the_session(driven, board):
-    r = await driven.patch("/api/topics/reno", json={"rounds": 7}, headers=auth())
+    r = await driven.patch("/api/topics/reno", json={"rounds": 7}, headers=seat(board))
     assert (await r.json())["max_rounds"] == 7
     tid = int(board.topic("reno")["id"])
     assert {s["max_turns"] for s in board.seats(tid)} == {7}, \
         "turns must follow rounds here too, or a seat goes quiet mid-meeting"
 
-    bad = await driven.patch("/api/topics/reno", json={"rounds": 0}, headers=auth())
+    bad = await driven.patch("/api/topics/reno", json={"rounds": 0}, headers=seat(board))
     assert bad.status == 400
 
 
@@ -367,23 +372,24 @@ async def test_running_twice_is_refused_so_one_board_has_one_council(tmp_path, b
     app = build_app(tmp_path / "board.db", TOKEN, human="jeremy",
                     supervisor=lambda store, tid: Held())
     try:
+        me = seat(board)
         async with TestClient(TestServer(app)) as c:
-            first = await c.post("/api/topics/reno/run", headers=auth())
+            first = await c.post("/api/topics/reno/run", headers=me)
             assert first.status == 200
 
-            second = await c.post("/api/topics/reno/run", headers=auth())
+            second = await c.post("/api/topics/reno/run", headers=me)
             assert second.status == 409, "a second council was allowed to start"
 
-            stopped = await c.post("/api/topics/reno/stop", headers=auth())
+            stopped = await c.post("/api/topics/reno/stop", headers=me)
             assert stopped.status == 200
 
             # And once it has actually stopped, running again is allowed: the
             # rule is one at a time, not once ever.
             await asyncio.sleep(0)
-            again = await c.post("/api/topics/reno/run", headers=auth())
+            again = await c.post("/api/topics/reno/run", headers=me)
             assert again.status == 200, "the topic stayed locked after stopping"
             assert (await c.post("/api/topics/reno/stop",
-                                 headers=auth())).status == 200
+                                 headers=me)).status == 200
     finally:
         release.set()
         app[STORE].close()
@@ -393,13 +399,46 @@ async def test_running_twice_is_refused_so_one_board_has_one_council(tmp_path, b
 async def test_a_council_actually_runs_and_lands_on_the_board(driven, board):
     tid = int(board.topic("reno")["id"])
     before = len(board.transcript(tid))
-    assert (await driven.post("/api/topics/reno/run", headers=auth())).status == 200
+    assert (await driven.post("/api/topics/reno/run", headers=seat(board))).status == 200
 
     for _ in range(50):
         await asyncio.sleep(0.05)
         if len(board.transcript(tid)) > before:
             break
     assert len(board.transcript(tid)) > before, "the council said nothing"
+
+
+@pytest.mark.asyncio
+async def test_the_shared_token_cannot_run_stop_or_retune_a_meeting(driven, board):
+    """The shared token is the one in the URL `mooting serve` prints, and a URL
+    travels. Run spends every seat's quota, so a link alone must not be enough
+    to start a meeting on the owner's subscriptions, or to change one."""
+    tid = int(board.topic("reno")["id"])
+    before = (len(board.transcript(tid)), board.topic("reno")["max_rounds"])
+
+    assert (await driven.post("/api/topics/reno/run", headers=auth())).status == 403
+    assert (await driven.post("/api/topics/reno/stop", headers=auth())).status == 403
+    r = await driven.patch("/api/topics/reno", json={"rounds": 9}, headers=auth())
+    assert r.status == 403
+    assert "--grant" in (await r.json())["error"], "say how to get a token that can"
+
+    await asyncio.sleep(0.2)                  # a council, if one started, would post
+    assert (len(board.transcript(tid)), board.topic("reno")["max_rounds"]) == before
+
+
+@pytest.mark.asyncio
+async def test_running_a_meeting_over_http_is_recorded_under_the_seat(driven, board):
+    """Run and Save act for somebody now, and afterwards the board is the only
+    thing that can say who."""
+    tid = int(board.topic("reno")["id"])
+    me = seat(board)
+    assert (await driven.patch("/api/topics/reno", json={"effort": "high"},
+                               headers=me)).status == 200
+    assert (await driven.post("/api/topics/reno/run", headers=me)).status == 200
+
+    remote = [(e.actor, e.payload.get("action"))
+              for e in board.events_since(0, tid) if e.kind == "remote"]
+    assert ("jeremy", "patch") in remote and ("jeremy", "run") in remote, remote
 
 
 # ------------------------------------------------------------ several humans
