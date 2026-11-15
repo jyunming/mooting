@@ -161,6 +161,17 @@ is slow, so offer buttons wherever there is a fixed set of answers.*
 | K5 ✅ | **Done.** One line in `/help`. Superseded text below. |
 | ~~K5~~ | **`/proposals <id>` is not in the help.** The event pump starts at `store.head()` and never replays, so re-reading a proposal that has scrolled away is only possible through a form nothing advertises — the trap `CLAUDE.md` names, left half-closed. |
 
+## L — What a long unattended run shows
+
+Found on the G4b run of 2026-11-15: 96 turns in a row, nobody watching. Record:
+`C:/mooting_runs/rounds/2026-11-15_g4b/` (`capped.log`, `out/capped/*.json`).
+
+| | |
+|---|---|
+| L1 (high) | **A seat can write its whole answer as plain text and never call `mooting_say`.** That happened on 2 of 16 claude panel turns (c4, c5), and the board recorded both as silent. The answer existed and was lost, and the turn was still spent. The supervisor could keep the CLI's final text and offer it to the chair as "said but not posted", or the prompt could end with a harder instruction. Any fix must be measured on a live run, because a prompt change is a guess until one is. |
+| L2 (medium) | **An agy seat can post and then not exit.** On r1 the panel seat posted its answer and was killed at the 300 s timeout, so the record counts a turn that did its work as failed. Exiting once the post has landed, or counting the turn by what reached the board, would make the turn count true. |
+| L3 (low) | **Cancelling a wake leaves an unretrieved `CancelledError` in the log.** In `drivers/base.py` `exited`, the `asyncio.sleep` poll is cancelled inside a gather that nobody awaits. The run is not harmed, but a traceback in an unattended log reads as a crash. |
+
 ## Not building
 
 | | |
