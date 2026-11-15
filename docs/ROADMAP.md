@@ -132,6 +132,8 @@ about.
 | G5 ✅ | **Done.** `/topic position <what you think now>` is optional and asked for rather than demanded, because most topics are opened by somebody with no prior position and a forced prompt collects noise. Where one exists, signing off offers two buttons -- it changed my mind, I already thought so -- and `/usage` reports the count over topics that were actually answered. A tap and not a text comparison: reading a position against a rationale by machine would be a guess dressed as a number. Superseded text below. |
 | ~~G5~~ | **Record whether the council changed the chair's mind.** The cheapest honest measurement available, and it needs no experiment: capture the chair's opening position when a topic is opened, compare it against the rationale they sign off with, and count the times they differ. A tool that can show how often it moved the person holding the decision has evidence rather than a claim. |
 
+| G6 | **A cursor seat can meet but cannot work a task.** Minor: four other seats can. `cursor-agent` loads an MCP server only from the `.cursor/mcp.json` of the workspace it edits, and an `--add-dir` root's file is ignored, so a worker would need the board's config written into the user's worktree, where `git add .` commits it. The wake refuses today without spawning the CLI. Worth probing: whether a setting or environment variable points cursor at another config directory without losing its login. See [Driver notes](DRIVERS.md#cursors-read-only-modes-cannot-hold-a-seat). |
+
 ## K — What a phone makes obvious ✅ done
 
 **Every item here came from somebody using it on a mobile, not from reading the
