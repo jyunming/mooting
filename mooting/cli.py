@@ -723,6 +723,7 @@ def cmd_serve(args) -> int:
             return 1
         print(f"token for {args.grant}:\n  {token}")
         print("  it may speak and sign off as that seat — treat it as a password")
+        print('  in the page from `mooting serve`, paste it under "speak as a seat"')
         board.close()
         return 0
     if args.revoke:
@@ -1005,7 +1006,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--deny", help="pairing id to refuse")
     p.set_defaults(fn=cmd_pair)
 
-    p = sub.add_parser("serve", help="serve the board over HTTP (read-only, B1)")
+    p = sub.add_parser("serve", help="serve the board over HTTP, with a page that can drive it")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=4173)
     p.add_argument("--token", help="bearer token; generated if omitted")
