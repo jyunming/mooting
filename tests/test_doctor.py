@@ -9,6 +9,7 @@ the one thing the project says cannot happen.
 from __future__ import annotations
 
 import asyncio
+import sys
 
 import pytest
 
@@ -29,7 +30,7 @@ def stand_in(board, *, post=True, ok=True, tail="", approve=False, usage=None):
     """A driver class that behaves like one CLI on one bad or good day."""
 
     class StandIn:
-        binary = "python"          # on PATH wherever the suite runs
+        binary = sys.executable    # a path `shutil.which` resolves on every runner
         stateful = False
 
         def __init__(self, path, timeout_s=180.0, extra_argv=None):
