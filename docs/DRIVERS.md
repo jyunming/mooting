@@ -126,7 +126,7 @@ staged change, using the flags this project actually passes.
 | `codex` | yes | yes | nothing — `--approve-for-me` already covers it |
 | `copilot` | yes | yes | nothing, because nothing narrows it. That is G1's concern rather than this one |
 | `agy` | only with `--add-dir` | yes | the directory has to be handed to it; the mode was never the problem |
-| `cursor` | no | no | refused on purpose: the MCP server loads only from the workspace's own `.cursor/mcp.json`, so a worker would mean writing it into your worktree |
+| `cursor` | only with `--add-dir` | yes | run in a directory of ours, with the worktree as a second root, and `Shell(git commit)` allowed in `.cursor/cli.json`. Probed 2026-11-15; see [below](#a-cursor-worker) |
 | `gemini` | — | — | could not run: `IneligibleTierError -- this client is no longer supported for Gemini Code Assist for individuals`, which points at Antigravity |
 
 Two adapters needed changing, two were already right, and no two failed the
@@ -140,7 +140,7 @@ non-interactive run cannot give. A seat then does the work correctly and leaves
 it uncommitted, which the loop can only read as no work at all.
 
 **agy ignores the process working directory for shell commands.** Asked where
-it was, it answered `~\.geminintigravity-clirain\<uuid>\scratch` and
+it was, it answered `~\.gemini\antigravity-cli\brain\<uuid>\scratch` and
 `fatal: not a git repository`. `--add-dir` is what puts the worktree in scope.
 
 ## Cursor's read-only modes cannot hold a seat
@@ -167,15 +167,11 @@ every wake. `--approve-mcps` is required: until something approves it,
 The `.CMD` shim goes through cmd.exe and then PowerShell to `node`, so the
 prompt goes on stdin. `-p` with no prompt argument reads it from there.
 
-Two limits follow, and both are stated rather than worked around:
-
-- **It starts with no project in view.** The workspace is empty, but reads are
-  not denied. Given absolute paths to a file in another folder, a seat read it
-  and posted the contents. It refused to overwrite that file, or to create one
-  beside it, so the deny rules hold outside the workspace too.
-- **It cannot work tasks.** `--add-dir` does not load an MCP server from the
-  added root, so a worker's board config would have to be written into the
-  worktree it commits from. The wake refuses instead of spawning the CLI.
+**It starts with no project in view.** The workspace is empty, but reads are
+not denied. Given absolute paths to a file in another folder, a seat read it
+and posted the contents. It refused to overwrite that file, or to create one
+beside it, so the deny rules hold outside the workspace too. That is stated
+rather than worked around.
 
 Other MCP servers in `~/.cursor/mcp.json` would be in scope too: its help
 says `--approve-mcps` approves all of them. This was not probed, because that
@@ -184,3 +180,48 @@ file does not exist on the test machine. That makes it weaker than Claude's
 
 A probe turn took 54–62 s of wall-clock, while the CLI timed the same turns at
 15–45 s. The rest is the shim starting PowerShell and node.
+
+## A cursor worker
+
+Probed on 2026-11-15 with two real task turns, against `cursor-agent`
+2026.11.11 and 2026.11.13. Each worker was given a git worktree, asked to add a
+file and commit it, then to try three things once each, and to report on the
+board:
+
+| asked to | result |
+|---|---|
+| edit a file in the worktree and commit it | **done**, one commit on `mooting/task-1` |
+| report with `mooting_say` | **done** |
+| `git push origin mooting/task-1` to a real remote | refused: `Command blocked by permissions configuration` |
+| `echo hi > shell.txt` | refused: `Rejected` |
+| overwrite a file in another folder | **done, with no approval asked** |
+
+A worker runs in `<board dir>/worker/<seat>/`, not in its worktree. That
+directory holds the same two files as a meeting seat's, with rules that allow
+`git add`, `git commit`, `git status`, `git diff` and `git log` and deny
+`git push`. The worktree comes in through `--add-dir`, so the board's config is
+never in the tree a `git add -A` commits. The directory is a sibling of the
+meeting one, not a child, because the CLI collects every `.cursor/cli.json`
+from the project root down to where it runs, and one seat can be in a meeting
+and on a task at once.
+
+A command line is refused whole if any part of it is unlisted. A worker's
+`cd <tree> && git commit` was refused, and the same commit with no `cd` went
+through. The CLI's own smart approval was off for every call
+(`smartModeClassifierAllowed: false`), so the list decides, not a classifier.
+
+**A cursor worker's file writes are not held to its worktree.** The rules can
+only name paths to refuse, a refusal is checked before an allowance, and there
+is no way to write "everything except the worktree". The prompt says where to
+work; nothing enforces it. Shell is the part that is held: to the five git
+commands above.
+
+`--sandbox enabled` was tried once and the CLI exited in 0.1 s, before any
+turn, with a `cmd.exe` quoting error. The cause was not pinned down, so it is
+untested rather than ruled out.
+
+The first of the two turns did its work in under a minute and was still
+recorded as a 600 s timeout. The CLI had started updating itself, and the
+updater inherited the pipes and outlived it. A seat now passes
+`--disable-auto-update`, a flag hidden from `--help`, and a wake ends a few
+seconds after the CLI exits whatever else holds its pipes.
