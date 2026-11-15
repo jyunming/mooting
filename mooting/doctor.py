@@ -162,7 +162,11 @@ def _no_tools_hint(kind: str, agent: str) -> str:
     `--mcp-config` when their CLI's MCP support is broken outright sends them
     debugging the wrong thing.
     """
-    if kind in {"codex", "gemini"}:
+    from .install import NEEDS_REGISTRATION
+
+    # The set that registers, not a copy of it: the copy said codex and gemini,
+    # and sent an agy seat to check a per-run flag agy does not have.
+    if kind in NEEDS_REGISTRATION:
         return (f"CLI saw no mooting tools. First: `mooting install {agent}`. "
                 f"If that is already done, check whether this CLI loads ANY MCP server "
                 f"(`{kind} mcp list`, then ask it to name a tool from another server) -- "
