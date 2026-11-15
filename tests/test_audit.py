@@ -340,25 +340,57 @@ def test_a_cursor_seat_is_contained_by_its_workspace(tmp_path):
         "the server must be bound to this seat's own name"
 
 
-def test_a_cursor_seat_refuses_a_task_rather_than_working_blind(tmp_path):
-    """Cursor only loads MCP from the workspace it edits, so a worker would
-    need our config written into the user's worktree. Until that is solved
-    the wake fails loudly, without spawning the CLI or spending quota."""
-    import asyncio
+def test_a_cursor_worker_edits_its_worktree_with_our_config_kept_out_of_it(tmp_path):
+    """The worker runs in a directory of ours and gets the worktree as a second
+    root. Written into the worktree instead, our config is one `git add -A`
+    from being committed to the user's branch."""
+    import json
 
     from mooting.drivers.base import Seat
     from mooting.drivers.spawn import CursorDriver
 
+    tree = tmp_path / "work" / "task-1"
+    tree.mkdir(parents=True)
     seat = Seat(topic_id=1, topic_slug="t", agent="Cora", kind="cursor",
-                cli_session=None, executing=True, cfg={"cwd": str(tmp_path)})
+                cli_session=None, executing=True, cfg={"cwd": str(tree)})
     driver = CursorDriver(tmp_path / "board.db")
-    driver.binary = "definitely-not-on-path-cursor"
 
-    result = asyncio.run(driver.wake(seat, "do the task"))
+    argv = driver.argv(seat, "do the task", None)
+    assert argv[argv.index("--add-dir") + 1] == str(tree), "the worktree is out of reach"
+    assert not {"--force", "--yolo"} & set(argv), argv
 
-    assert not result.ok
-    assert "cannot work tasks" in result.detail
-    assert not (tmp_path / ".cursor").exists(), "nothing may be written to the worktree"
+    ws = pathlib.Path(driver.working_dir(seat))
+    assert tree not in ws.parents and ws != tree
+    assert not (tree / ".cursor").exists(), "our config landed in the worktree"
+    rules = json.loads((ws / ".cursor" / "cli.json").read_text(encoding="utf-8"))["permissions"]
+    assert "Shell(git commit)" in rules["allow"], "a worker that cannot commit did nothing"
+    assert "Shell(git push)" in rules["deny"], "a human merges; a worker never pushes"
+    assert not any(r.startswith("Shell(*") for r in rules["allow"]), rules
+
+
+def test_a_cursor_seat_in_a_meeting_keeps_its_rules_while_it_works_a_task(tmp_path):
+    """One seat can deliberate and work at once. Sharing a directory let the
+    task's wake rewrite the meeting's `cli.json` with rules that allow edits,
+    and cursor-agent collects `cli.json` from every parent too, so the worker's
+    directory may not sit inside the meeting's either."""
+    import json
+
+    from mooting.drivers.base import Seat
+    from mooting.drivers.spawn import CursorDriver
+
+    driver = CursorDriver(tmp_path / "board.db")
+    worker = Seat(topic_id=2, topic_slug="w", agent="Cora", kind="cursor", cli_session=None,
+                  executing=True, cfg={"cwd": str(tmp_path / "work" / "task-1")})
+    member = Seat(topic_id=1, topic_slug="m", agent="Cora", kind="cursor", cli_session=None,
+                  cfg={})
+
+    meeting = pathlib.Path(driver.working_dir(member))
+    work = pathlib.Path(driver.working_dir(worker))
+
+    assert meeting not in work.parents and work not in meeting.parents and work != meeting
+    rules = json.loads((meeting / ".cursor" / "cli.json").read_text(encoding="utf-8"))
+    assert {"Write(**)", "Shell(*)"} <= set(rules["permissions"]["deny"]), \
+        "a task's wake loosened the meeting seat's rules"
 
 
 # ------------------------------------------------------- model listing
