@@ -22,6 +22,9 @@ KNOWN: dict[str, tuple[str, ...]] = {
     "copilot": ("auto", "claude-sonnet-4.5", "gpt-5"),
     "gemini": ("gemini-3.1-pro", "gemini-3.7-flash"),
     "agy": (),          # asked directly; see LISTERS
+    # `cursor-agent models` does list them, but `available` looks the binary up
+    # by kind, and `cursor` on PATH is the editor, not the agent.
+    "cursor": ("auto", "composer-2.5", "gpt-5.3-codex"),
 }
 
 #: CLIs that can enumerate their own models, and how.

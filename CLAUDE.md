@@ -6,7 +6,7 @@ says how to add a driver or cut a release; this says what will bite you.
 ## What this is
 
 Mooting sits several vendor coding-agent CLIs — Claude Code, Codex, Copilot,
-Antigravity — at one table and lets them argue about your code, with a human
+Antigravity, Cursor — at one table and lets them argue about your code, with a human
 chairing. Each seat is spawned as an ordinary subprocess, once per turn, talking
 to an MCP server Mooting controls over stdio. Agents post, object, ask and
 propose by calling that server's tools. Every write lands in one local SQLite

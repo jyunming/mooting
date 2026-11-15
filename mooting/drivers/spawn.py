@@ -1,9 +1,9 @@
-"""Spawn-per-turn adapters for the four CLIs.
+"""Spawn-per-turn adapters for every CLI a seat can run.
 
-All four are the same shape -- build argv, run to completion, let the agent post
+All of them are the same shape -- build argv, run to completion, let the agent post
 through its own Mooting MCP tools -- and differ only in flags. So they share a base
-and contribute an `argv()` each, rather than being four hand-written subprocess
-dances that drift apart.
+and contribute an `argv()` each, rather than being hand-written subprocess dances
+that drift apart.
 
 ## Session continuity is optional, and that is a feature
 
@@ -482,10 +482,85 @@ class AgyDriver(SpawnDriver):
         return super().extract_session(stdout, stderr, proposed)
 
 
+# ------------------------------------------------------------------------ Cursor
+
+class CursorDriver(SpawnDriver):
+    """Cursor's CLI (`cursor-agent`). Contained by a workspace we write, not a mode.
+
+    Cursor has two read-only modes and neither can hold a seat. Both were tried
+    on a real turn asked to post: `--mode plan` answered "I'll only inspect the
+    mooting tool schema" and `--mode ask` answered "ask mode blocks mooting_say".
+    Each exited 0 with nothing on the board.
+
+    So the seat runs in agent mode inside a scratch workspace that holds two
+    files and nothing else. `.cursor/mcp.json` hands it this seat's server, per
+    run, with no global registration. `.cursor/cli.json` allows the mooting tools
+    and denies every write and every shell command. Asked to post, write a file
+    and run `echo`, a seat posted and reported the other two "blocked by
+    permissions configuration", and neither file existed afterwards.
+
+    The deny rules hold outside the workspace as well. Handed absolute paths to
+    a file in another folder, a seat refused to overwrite it or create a file
+    beside it. **Reading is not denied**: it read that file and posted the
+    contents. So a cursor seat starts with no project in view and reads one
+    only when it is given the path.
+    """
+    binary = "cursor-agent"
+    #: The `.CMD` shim goes through cmd.exe and then PowerShell's `$args`, so a
+    #: multi-line prompt cannot survive argv. `-p` with no prompt reads stdin.
+    prompt_via_stdin = True
+    #: `--resume <chatId>` exists, but the board is the shared memory and a
+    #: fresh turn cannot drift from it. See the module docstring.
+    stateful = False
+
+    #: The mooting tools are allowed and every write and shell command denied.
+    #: `--force` is never passed: its help says it allows any command not
+    #: explicitly denied, which makes this list the only thing standing.
+    PERMISSIONS = {"allow": ["Mcp(mooting:*)"], "deny": ["Write(**)", "Shell(*)"]}
+
+    def effort_argv(self, seat: Seat) -> list[str]:
+        # No --effort; reasoning is a bracket parameter on the model name,
+        # e.g. `--model 'name[effort=high]'`, which belongs to the seat's model.
+        return []
+
+    def working_dir(self, seat: Seat) -> str:
+        sandbox = Path(self.db).parent / "sandbox" / seat.agent
+        conf = sandbox / ".cursor"
+        conf.mkdir(parents=True, exist_ok=True)
+        # Rewritten every wake: the board path is in it, and a stale file from a
+        # moved board would post somewhere else without complaint.
+        (conf / "mcp.json").write_text(
+            json.dumps(mooting_mcp_config(seat.agent, self.db), ensure_ascii=False),
+            encoding="utf-8")
+        (conf / "cli.json").write_text(
+            json.dumps({"permissions": self.PERMISSIONS}), encoding="utf-8")
+        return str(sandbox)
+
+    async def wake(self, seat: Seat, prompt: str) -> WakeResult:
+        if seat.executing:
+            # The server only loads from the workspace's own `.cursor/mcp.json`;
+            # an `--add-dir` root's file is not read. Working a task would mean
+            # writing our config into the user's worktree, where a `git add .`
+            # commits it. Refusing is better than a worker that cannot report.
+            return WakeResult.failure(
+                "cursor seats cannot work tasks yet: cursor-agent only loads an "
+                "MCP server from the workspace it edits, so the board's config "
+                "would land in your worktree. Give the task to another seat.")
+        return await super().wake(seat, prompt)
+
+    def argv(self, seat: Seat, prompt: str, session: str | None) -> list[str]:
+        # --approve-mcps: `cursor-agent mcp list` reports a workspace server as
+        # "not loaded (needs approval)" until something approves it. --trust:
+        # a workspace trust prompt would wait for a person who is not there.
+        return [self.binary, "-p", "--approve-mcps", "--trust",
+                "--output-format", "json", *self.extra_argv]
+
+
 DRIVER_CLASSES = {
     "claude": ClaudeDriver,
     "codex": CodexDriver,
     "copilot": CopilotDriver,
     "gemini": GeminiDriver,
     "agy": AgyDriver,
+    "cursor": CursorDriver,
 }

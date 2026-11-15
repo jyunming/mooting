@@ -13,7 +13,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS agents (
     name        TEXT PRIMARY KEY,           -- stable handle used in every message
-    kind        TEXT NOT NULL,              -- claude|codex|copilot|gemini|human|external
+    kind        TEXT NOT NULL,              -- claude|codex|copilot|gemini|agy|cursor|human|external
     display     TEXT,
     -- How the supervisor wakes this seat. NULL kind=human/external means "never wake,
     -- they read the board themselves". See docs/DRIVERS.md for why this is per-CLI.
