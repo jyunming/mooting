@@ -188,6 +188,31 @@ def test_successful_wake_advances_the_cursor(board):
     assert "First argument." not in prompt, "already-seen message replayed"
 
 
+@pytest.mark.parametrize("with_drivers", [True, False])
+def test_the_prompt_names_the_server_the_seat_was_actually_given(board, with_drivers):
+    """The prompt told every seat to post only through `mooting-<seat>` and warned
+    that any other server would post under somebody else's name. Claude is handed
+    its server per run as plain `mooting`, so a careful seat found no server by the
+    name it was told to use and wrote its answer as text instead: 8 of 16 replayed
+    G4b panel turns, each saying it "held back" for exactly that reason.
+    """
+    from mooting.drivers.registry import build_drivers
+    from mooting.drivers.spawn import mooting_mcp_config
+
+    topic = open_debate(board)
+    sup = Supervisor(board, build_drivers(board) if with_drivers else {})
+
+    claude, _ = sup.build_prompt(topic, "claude")
+    injected = next(iter(mooting_mcp_config("claude", board.path)["mcpServers"]))
+    assert f"**`{injected}`** MCP server" in claude
+    assert "mooting-claude" not in claude
+
+    # codex is registered globally, one server per seat, so there the seat's own
+    # name is the one that keeps it from posting as a neighbour.
+    codex, _ = sup.build_prompt(topic, "codex")
+    assert "**`mooting-codex`** MCP server" in codex
+
+
 # ------------------------------------------------------------------- encoding
 
 def test_non_ascii_text_survives_the_round_trip(board):

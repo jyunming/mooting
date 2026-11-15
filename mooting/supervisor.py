@@ -1029,6 +1029,18 @@ class Supervisor:
 
     # ----------------------------------------------------------------- prompting
 
+    def _server_for(self, agent: str) -> str:
+        """The name the seat's own CLI shows its Mooting server under.
+
+        From the driver that will wake it, or from its kind when none is wired
+        in -- the prompt is also built for display, with no drivers at all.
+        """
+        from .drivers.spawn import DRIVER_CLASSES
+
+        kind = self.store.agent(agent)["kind"]
+        driver = self.driver_for(agent, kind) or DRIVER_CLASSES.get(kind) or Driver
+        return driver.mcp_server(agent)
+
     def build_prompt(self, topic_id: int, agent: str, head: int | None = None) -> tuple[str, int]:
         """What the agent is told when woken, plus the cursor that covers it.
 
@@ -1143,6 +1155,7 @@ class Supervisor:
 
         budget = WORDS_BY_EFFORT.get(self._effort_for(topic, agent) or "",
                                      self.caps.words_per_turn)
+        server = self._server_for(agent)
         lines += [
             "## How to say it",
             "",
@@ -1157,7 +1170,7 @@ class Supervisor:
             "",
             "## What to do now",
             "",
-            f"Use the **`mooting-{agent}`** MCP server — that one, not any other "
+            f"Use the **`{server}`** MCP server — that one, not any other "
             f"`mooting-*` server you can see. It is bound to your seat, and posting "
             f"through a different one would attribute your words to another "
             f"councillor (the board will refuse it).",

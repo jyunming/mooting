@@ -37,7 +37,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from .base import Driver, Seat, WakeResult
+from .base import INJECTED_SERVER, Driver, Seat, WakeResult
 
 
 def _in_git_tree(path: Path) -> bool:
@@ -60,7 +60,7 @@ def mooting_mcp_config(agent: str, db: Path | str) -> dict:
     """
     return {
         "mcpServers": {
-            "mooting": {
+            INJECTED_SERVER: {
                 "command": sys.executable,
                 "args": ["-X", "utf8", "-m", "mooting.mcp_server",
                          "--agent", agent, "--db", str(db)],
@@ -172,6 +172,7 @@ class ClaudeDriver(SpawnDriver):
     and `--strict-mcp-config` to guarantee no other server is in scope."""
     binary = "claude"
     stateful = True
+    injects_server = True
 
     def new_session(self, seat: Seat) -> str:
         import uuid
@@ -341,6 +342,7 @@ class CopilotDriver(SpawnDriver):
     """
     binary = "copilot"
     stateful = True
+    injects_server = True
 
     _RESUME = re.compile(r"--resume=([0-9a-f-]{16,})", re.I)
 
@@ -519,6 +521,7 @@ class CursorDriver(SpawnDriver):
     file writes are not contained: see `WORK_PERMISSIONS`.
     """
     binary = "cursor-agent"
+    injects_server = True
     #: The `.CMD` shim goes through cmd.exe and then PowerShell's `$args`, so a
     #: multi-line prompt cannot survive argv. `-p` with no prompt reads stdin.
     prompt_via_stdin = True
