@@ -39,6 +39,9 @@ _TOKENS_IN = ("input_tokens", "prompt_tokens", "tokens_in", "inputTokens")
 _TOKENS_OUT = ("output_tokens", "completion_tokens", "tokens_out", "outputTokens")
 _COST = ("total_cost_usd", "cost_usd", "costUsd", "total_cost")
 
+#: The server name in a config handed to a CLI per run. One seat, one server.
+INJECTED_SERVER = "mooting"
+
 
 def _kill_tree(pid: int) -> None:
     """Kill a process and everything it started, on Windows.
@@ -198,6 +201,22 @@ class Driver(abc.ABC):
     #: exiting is already in the pipe; anything later belongs to a process it
     #: left behind, which is not the turn's to wait for.
     pipe_grace_s: float = 3.0
+
+    #: True where the CLI is handed its server per run (`mooting_mcp_config`)
+    #: rather than reading it from a global registration.
+    injects_server: bool = False
+
+    @classmethod
+    def mcp_server(cls, agent: str) -> str:
+        """The name this seat sees its Mooting server under, which the prompt repeats.
+
+        A CLI handed its server per run sees exactly one, named `mooting`. A CLI
+        that reads a global registration sees one per seat, `mooting-<seat>`, and
+        must be told which is its own. The prompt used to name `mooting-<seat>`
+        for everyone, and claude, finding no server by that name, wrote its
+        answer as text rather than risk posting under another seat's name.
+        """
+        return INJECTED_SERVER if cls.injects_server else f"mooting-{agent}"
 
     def working_dir(self, seat: Seat) -> str:
         """Where this CLI actually runs. Overridden where cwd IS the containment."""
