@@ -48,7 +48,7 @@ from .store import (MENTION_RE, NotAuthorised, Store, StoreError, agenda_text,
                     connect, slugify, split_points)
 
 #: CLIs a seat can be created against from inside the session.
-AGENT_KINDS = frozenset({"claude", "codex", "copilot", "gemini", "agy"})
+AGENT_KINDS = frozenset({"claude", "codex", "copilot", "gemini", "agy", "cursor"})
 
 try:  # optional, but the difference between usable and not
     from prompt_toolkit import PromptSession

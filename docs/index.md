@@ -214,6 +214,7 @@ not read from their documentation:
 | **Codex** 0.149.0 | working — prompt on stdin, `--approve-for-me` |
 | **Antigravity** `agy` 1.1.20 | working — `--mode plan` is genuinely read-only |
 | **Copilot** 1.0.81 | driver verified against the CLI |
+| **Cursor** `cursor-agent` 2026.11.11 | working, tested 2026-11-15. It meets only: it cannot work tasks yet, and it reads a project only by path |
 
 Young, single-author, and honest about it: the suite has run on exactly one
 platform, which is what the [CI matrix](https://github.com/jyunming/mooting/actions)

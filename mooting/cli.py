@@ -816,7 +816,7 @@ def build_parser() -> argparse.ArgumentParser:
     ag = sub.add_parser("agents", help="manage seats").add_subparsers(dest="sub", required=True)
     p = ag.add_parser("add")
     p.add_argument("name")
-    p.add_argument("kind", choices=["claude", "codex", "copilot", "gemini", "agy", "human", "external"])
+    p.add_argument("kind", choices=["claude", "codex", "copilot", "gemini", "agy", "cursor", "human", "external"])
     p.add_argument("--cwd", help="where the seat runs while deliberating; keep it "
                                  "empty, a coding CLI reads what it finds there")
     p.add_argument("--repo", help="the repository this seat works in, for work "
