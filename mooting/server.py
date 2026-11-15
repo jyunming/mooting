@@ -1,9 +1,8 @@
 """`mooting serve` — the board, over HTTP, for clients that are not a terminal.
 
-Milestone B1 of docs/REMOTE.md: read the board and say things to it. Rulings are
-deliberately **not** here yet, and neither is driving the council — those come
-once the read path has proved itself, because a ruling is the one action that
-cannot be undone and it should not be the first thing a new transport learns.
+Read the board, say things to it, drive the council and sign off. The bundled
+page at `/` does all four through the routes below and nothing else, so the
+page cannot do anything a script with the same token could not.
 
 Two design notes worth knowing before changing anything here.
 
@@ -152,9 +151,9 @@ def build_app(db: Path | str | None, token: str, *, human: str,
             return web.json_response({"error": "bad or missing token"}, status=401)
         token = supplied[len(prefix):]
 
-        # A per-seat token says who you are. The single shared token, if one was
-        # issued, says only that you may read -- it belongs to no seat, so it
-        # cannot rule and cannot post.
+        # A per-seat token says who you are. The single shared token belongs to
+        # no seat, so it cannot sign off and cannot post. It can still run, stop
+        # and retune a meeting, which spends quota -- see ROADMAP E5.
         seat = request.app[STORE].seat_for_token(token)
         shared = request.app[TOKEN]
         if seat is None and not (shared and secrets.compare_digest(token, shared)):
@@ -214,7 +213,11 @@ def build_app(db: Path | str | None, token: str, *, human: str,
         s = request.app[STORE]
         return web.json_response(
             {"topics": [_topic_json(s, t) for t in s.topics()],
-             "you": request.app[HUMAN]})
+             "you": request.app[HUMAN],
+             # Who this token speaks as, or None for the shared read token. The
+             # page needs it to say why Send and Sign off would be refused
+             # before somebody types a reason and is told 403.
+             "seat": acting(request)})
 
     async def topic_detail(request):
         s = request.app[STORE]
@@ -223,7 +226,14 @@ def build_app(db: Path | str | None, token: str, *, human: str,
         except StoreError as exc:
             return web.json_response({"error": str(exc)}, status=404)
         tid = int(t["id"])
+        # Read before the transcript. Seats post from their own processes, so a
+        # message landing between the two reads is then streamed rather than
+        # lost. The page used to resume the stream from the last *message* id,
+        # which is a different counter: every board event was replayed from
+        # that number, and the messages among them appeared twice.
+        head = s.head()
         out = _topic_json(s, t)
+        out["head"] = head
         out["messages"] = [_message_json(m)
                            for m in s.transcript(tid, limit=100, newest=True)]
         out["proposals"] = [
@@ -467,84 +477,235 @@ def serve(db, *, host: str, port: int, token: str | None, human: str,
     print(f"  url      http://{host}:{port}/?token={token}")
     print(f"  token    {token}")
     print()
-    print("  read-only page; every API call needs the token in an Authorization")
-    print("  header. The URL above carries it only so the page can pick it up --")
-    print("  it will be in your browser history, so treat it as a password.")
+    print("  this token reads, runs and stops; it cannot speak or sign off. For")
+    print("  that, `mooting serve --grant <you>` and paste that token into the page.")
+    print("  The URL above will be in your browser history: treat it as a password.")
     if host not in LOOPBACK:
         print("  WARNING: not loopback. Anyone who reaches this port is you.")
     web.run_app(app, host=host, port=port, print=None)
     return 0
 
 
-#: Deliberately one file with no build step. It is a window onto a council, not
-#: an application, and B1 is meant to prove the stream rather than a front end.
+#: Deliberately one file with no build step. It is a window onto a council and
+#: the chair's controls for it, not an application: every button is one of the
+#: routes above, so the page can do nothing a script with the same token cannot.
 PAGE = r"""<!doctype html>
-<meta charset="utf-8"><title>mooting</title>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mooting</title>
 <style>
- :root { --bg:#16222B; --fg:#F8F7F3; --dim:#8A949B; --teal:#9FB4B3; --raised:#26333C; }
+ :root { --bg:#16222B; --fg:#F8F7F3; --dim:#8A949B; --teal:#9FB4B3; --raised:#26333C;
+         --line:rgba(159,180,179,.22); --ok:#9FCB98; --no:#E3A08F; }
+ * { box-sizing:border-box; }
  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.6 "Segoe UI",system-ui,sans-serif; }
- header { padding:14px 20px; border-bottom:1px solid rgba(159,180,179,.22); }
- h1 { margin:0; font-size:1.1rem; font-weight:600; }
- #agenda { margin:6px 0 0; padding-left:20px; color:var(--dim); font-size:14px; }
- main { padding:16px 20px; max-width:900px; }
- .msg { margin:0 0 14px; padding:8px 12px; background:var(--raised); border-radius:4px; }
+ header, main { padding:14px 16px; max-width:900px; }
+ header { border-bottom:1px solid var(--line); }
+ .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+ h1 { margin:0; font-size:1.1rem; font-weight:600; flex:1 1 auto; }
+ h2 { font-size:.95rem; margin:20px 0 8px; color:var(--teal); font-weight:600; }
+ #agenda { margin:6px 0 8px; padding-left:20px; color:var(--dim); font-size:14px; }
+ .msg, .prop { margin:0 0 12px; padding:8px 12px; background:var(--raised); border-radius:4px; }
  .who { font-weight:600; color:var(--teal); }
  .kind { color:var(--dim); font-size:12px; margin-left:6px; }
  pre { white-space:pre-wrap; word-wrap:break-word; margin:6px 0 0; font:13px/1.55 Consolas,monospace; }
- #state { color:var(--dim); font-size:13px; padding:0 20px 20px; }
+ .note, #state { color:var(--dim); font-size:13px; }
+ button, select, input, textarea { font:inherit; color:var(--fg); background:var(--raised);
+   border:1px solid var(--line); border-radius:4px; padding:4px 10px; }
+ button { cursor:pointer; }
+ button:disabled, textarea:disabled { opacity:.45; cursor:not-allowed; }
+ button.ok { border-color:var(--ok); color:var(--ok); }
+ button.no { border-color:var(--no); color:var(--no); }
+ textarea, input[type=text], input[type=password] { width:100%; }
+ form, details { margin:14px 0; }
+ summary { cursor:pointer; color:var(--teal); }
+ .stances { font-size:13px; color:var(--dim); margin-top:6px; }
+ .signoff { margin-top:8px; }
+ #flash { min-height:1.4em; font-size:13px; color:var(--no); }
 </style>
-<header><h1 id="title">connecting…</h1><ul id="agenda"></ul></header>
-<main id="log"></main>
-<div id="state"></div>
+<header>
+  <div class="row"><h1 id="title">connecting…</h1><select id="topic" aria-label="meeting"></select></div>
+  <ul id="agenda"></ul>
+  <div class="row"><span id="state"></span>
+    <button id="run">Run the council</button><button id="stop">Stop</button></div>
+  <p class="note">Run wakes every seat in turn; each turn spends that CLI's own quota, up to the meeting's caps.</p>
+</header>
+<main>
+  <div id="flash" role="status"></div>
+  <section id="log"></section>
+  <h2>Proposals</h2>
+  <section id="plist"><p class="note">none yet</p></section>
+  <form id="sayform">
+    <textarea id="body" rows="3" placeholder="say something to the council"></textarea>
+    <div class="row" style="margin-top:6px"><button id="send">Send</button>
+      <span class="note" id="sayhint"></span></div>
+  </form>
+  <details id="settings"><summary>Meeting settings</summary>
+    <p class="note">Agenda, one point per line.</p>
+    <textarea id="agendaedit" rows="4"></textarea>
+    <div class="row" style="margin-top:6px">
+      <label>effort <select id="effort"><option>low</option><option>medium</option><option>high</option></select></label>
+      <label>rounds <input id="rounds" type="number" min="1" style="width:5em"></label>
+      <button id="save">Save</button></div>
+  </details>
+  <details id="identity"><summary id="whoami">…</summary>
+    <p class="note">A token from <code>mooting serve --grant &lt;you&gt;</code> speaks and signs off as
+      that seat. It is kept in this tab only and never put in the address bar.</p>
+    <div class="row"><input id="tok" type="password" autocomplete="off" placeholder="paste a seat token">
+      <button id="usetok">Use it</button><button id="forget">Forget it</button></div>
+  </details>
+</main>
 <script>
-const token = new URLSearchParams(location.search).get("token") || "";
-const auth = { headers: { Authorization: "Bearer " + token } };
-const log = document.getElementById("log");
-let slug = null;
+"use strict";
+// Every string that came from the board -- a message, a proposal, a seat's
+// name -- goes in through textContent and nothing else. A seat writes those
+// strings, and once this page holds a seat token a script hidden in one would
+// sign off as the chair.
+const $ = id => document.getElementById(id);
+const KEY = "mooting-seat-token";
+const shared = new URLSearchParams(location.search).get("token") || "";
+function saved() { try { return sessionStorage.getItem(KEY) || ""; } catch (e) { return ""; } }
+let seatToken = saved();
+// The meeting this tab was looking at, so a reload does not drop the chair
+// into whichever topic happens to be newest.
+function lastSlug() { try { return sessionStorage.getItem("mooting-topic"); } catch (e) { return null; } }
+let seat = null, slug = lastSlug(), detail = null, abort = null;
+const seen = new Set();
 
-function add(author, kind, body) {
-  const d = document.createElement("div");
-  d.className = "msg";
-  d.innerHTML = '<span class="who"></span><span class="kind"></span><pre></pre>';
-  d.querySelector(".who").textContent = author;
-  d.querySelector(".kind").textContent = kind === "say" ? "" : kind;
-  d.querySelector("pre").textContent = body;
-  log.appendChild(d);
+function token() { return seatToken || shared; }
+async function api(method, path, body) {
+  const headers = { Authorization: "Bearer " + token() };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  let r;
+  try {
+    r = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  } catch (e) { return { ok: false, status: 0, data: { error: "the server did not answer" } }; }
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  return { ok: r.ok, status: r.status, data };
+}
+function flash(text) { $("flash").textContent = text || ""; }
+function el(tag, cls, text) {
+  const d = document.createElement(tag);
+  if (cls) d.className = cls;
+  if (text !== undefined) d.textContent = text;
+  return d;
+}
+const path = s => "/api/topics/" + encodeURIComponent(s);
+
+function addMessage(m) {
+  if (seen.has(m.id)) return;
+  seen.add(m.id);
+  const d = el("div", "msg");
+  d.appendChild(el("span", "who", m.author));
+  d.appendChild(el("span", "kind", m.kind === "say" ? "" : m.kind));
+  d.appendChild(el("pre", "", m.body));
+  $("log").appendChild(d);
   window.scrollTo(0, document.body.scrollHeight);
 }
 
-async function boot() {
-  const r = await fetch("/api/topics", auth);
-  if (!r.ok) { document.getElementById("title").textContent =
-    "bad or missing token — open the URL printed by `mooting serve`"; return; }
-  const { topics } = await r.json();
-  const live = topics.find(t => t.status !== "resolved") || topics[0];
-  if (!live) { document.getElementById("title").textContent = "no topics yet"; return; }
-  slug = live.slug;
-  const detail = await (await fetch("/api/topics/" + slug, auth)).json();
-  document.getElementById("title").textContent = detail.title + "  (" + detail.slug + ")";
-  const ul = document.getElementById("agenda");
-  detail.agenda.forEach(p => { const li = document.createElement("li");
-                               li.textContent = p; ul.appendChild(li); });
-  let last = 0;
-  detail.messages.forEach(m => { add(m.author, m.kind, m.body); last = m.id; });
-  follow(detail);
+function canAct() { return seat !== null; }
+function renderIdentity() {
+  $("whoami").textContent = canAct()
+    ? "speaking as " + seat
+    : "watching with the shared token: you can read, run and stop. Open this to speak and sign off.";
+  $("body").disabled = $("send").disabled = !canAct();
+  $("sayhint").textContent = canAct() ? "" : "needs a seat token, below";
+  $("forget").disabled = !seatToken;
 }
 
-function follow(detail) {
-  document.getElementById("state").textContent =
-    "round " + (detail.round + 1) + "/" + detail.max_rounds + " · following…";
+function renderSide(d) {
+  $("title").textContent = d.title + "  (" + d.slug + ")";
+  const ul = $("agenda"); ul.replaceChildren();
+  d.agenda.forEach(p => ul.appendChild(el("li", "", p)));
+  $("state").textContent = d.status + " · round " + Math.min(d.round + 1, d.max_rounds) + "/" + d.max_rounds;
+  if (!$("settings").open) {
+    $("agendaedit").value = d.agenda.join("\n");
+    $("effort").value = d.effort || "low";
+    $("rounds").value = d.max_rounds;
+  }
+  renderProposals(d.proposals);
+}
+
+async function renderProposals(list) {
+  const box = $("plist");
+  const open = list.filter(p => p.status === "open");
+  const rest = list.filter(p => !open.includes(p));
+  box.replaceChildren();
+  if (!list.length) { box.appendChild(el("p", "note", "none yet")); return; }
+  for (const p of open) box.appendChild(await proposalCard(p));
+  rest.forEach(p => box.appendChild(el("p", "note", "#" + p.id + " " + p.title + " — " + p.status)));
+}
+
+async function proposalCard(p) {
+  const d = el("div", "prop");
+  d.appendChild(el("span", "who", "#" + p.id + " " + p.title));
+  d.appendChild(el("span", "kind", "by " + p.author + " · " + p.status));
+  d.appendChild(el("pre", "", p.body));
+  const full = await api("GET", "/api/proposals/" + encodeURIComponent(p.id));
+  if (full.ok && full.data.votes && full.data.votes.length) {
+    const s = el("div", "stances");
+    full.data.votes.forEach(v => s.appendChild(el("div", "", v.agent + ": " + v.stance + (v.rationale ? " — " + v.rationale : ""))));
+    d.appendChild(s);
+  }
+  const area = el("div", "signoff");
+  const start = el("button", "", "Sign off…");
+  start.disabled = !canAct();
+  if (!canAct()) start.title = "needs a seat token";
+  area.appendChild(start);
+  start.onclick = () => {
+    area.replaceChildren();
+    const why = el("input"); why.type = "text"; why.placeholder = "why (the seats read this)";
+    const yes = el("button", "ok", "Approve"), no = el("button", "no", "Reject"), back = el("button", "", "Cancel");
+    const row = el("div", "row"); row.style.marginTop = "6px";
+    [yes, no, back].forEach(b => row.appendChild(b));
+    area.appendChild(why); area.appendChild(row);
+    why.focus();
+    const decide = async approve => {
+      yes.disabled = no.disabled = true;
+      const r = await api("POST", "/api/proposals/" + encodeURIComponent(p.id) + "/decide",
+                          { approve, why: why.value });
+      if (!r.ok) { flash(r.data.error || ("refused: " + r.status)); yes.disabled = no.disabled = false; return; }
+      flash("");
+      refresh();
+    };
+    yes.onclick = () => decide(true);
+    no.onclick = () => decide(false);
+    back.onclick = () => refresh();
+  };
+  d.appendChild(area);
+  return d;
+}
+
+async function refresh() {
+  if (!slug) return;
+  const r = await api("GET", path(slug));
+  if (r.ok) { detail = r.data; renderSide(detail); }
+}
+let pending = null;
+function refreshSoon() { clearTimeout(pending); pending = setTimeout(refresh, 300); }
+
+async function open(s) {
+  if (abort) abort.abort();
+  slug = s; seen.clear(); $("log").replaceChildren(); flash("");
+  try { sessionStorage.setItem("mooting-topic", s); } catch (e) {}
+  const r = await api("GET", path(s));
+  if (!r.ok) { flash(r.data.error || "could not open " + s); return; }
+  detail = r.data;
+  renderSide(detail);
+  detail.messages.forEach(addMessage);
+  follow(s, detail.head);
+}
+
+function follow(s, cursor) {
   // Not EventSource: it cannot send headers, and the token belongs in one.
-  // The automatic reconnect it would have given us is a few lines here, because
-  // the board's event ids are the cursor -- we resume from the last one seen.
-  let cursor = detail.messages.length
-      ? detail.messages[detail.messages.length - 1].id : 0;
-  (async function stream() {
-    for (;;) {
+  // The board's event ids are the cursor, so a reconnect resumes from the last
+  // one seen and misses nothing.
+  const ctl = new AbortController(); abort = ctl;
+  (async () => {
+    while (!ctl.signal.aborted) {
       try {
-        const r = await fetch("/api/stream?slug=" + slug + "&since=" + cursor, auth);
-        const reader = r.body.getReader();
-        const dec = new TextDecoder();
+        const r = await fetch("/api/stream?slug=" + encodeURIComponent(s) + "&since=" + cursor,
+                              { headers: { Authorization: "Bearer " + token() }, signal: ctl.signal });
+        const reader = r.body.getReader(), dec = new TextDecoder();
         let buf = "";
         for (;;) {
           const { done, value } = await reader.read();
@@ -553,19 +714,83 @@ function follow(detail) {
           let cut;
           while ((cut = buf.indexOf("\n\n")) >= 0) {
             const frame = buf.slice(0, cut); buf = buf.slice(cut + 2);
-            const id = /^id: (\d+)$/m.exec(frame);
-            const data = /^data: (.*)$/m.exec(frame);
+            const id = /^id: (\d+)$/m.exec(frame), data = /^data: (.*)$/m.exec(frame);
             if (id) cursor = parseInt(id[1], 10);
             if (!data) continue;
             const e = JSON.parse(data[1]);
-            if (e.message) add(e.message.author, e.message.kind, e.message.body);
+            if (e.message) addMessage(e.message);
+            else refreshSoon();       // a proposal, a vote, a sign-off, a status change
           }
         }
-      } catch (err) { /* fall through to the wait */ }
-      document.getElementById("state").textContent = "reconnecting…";
+      } catch (err) { if (ctl.signal.aborted) return; }
+      $("state").textContent = "reconnecting…";
       await new Promise(r => setTimeout(r, 2000));
     }
   })();
+}
+
+$("sayform").onsubmit = async ev => {
+  ev.preventDefault();
+  const text = $("body").value.trim();
+  if (!text) return;
+  $("send").disabled = true;
+  const r = await api("POST", path(slug) + "/messages", { body: text });
+  $("send").disabled = !canAct();
+  if (!r.ok) { flash(r.data.error || ("refused: " + r.status)); return; }
+  $("body").value = ""; flash("");
+};
+$("run").onclick = async () => {
+  const r = await api("POST", path(slug) + "/run");
+  flash(r.ok ? "" : (r.data.error || ("refused: " + r.status)));
+  if (r.ok) $("state").textContent = "running…";
+};
+$("stop").onclick = async () => {
+  const r = await api("POST", path(slug) + "/stop");
+  flash(r.ok ? (r.data.stopping ? "" : "nothing was running") : (r.data.error || ("refused: " + r.status)));
+};
+$("save").onclick = async () => {
+  const agenda = $("agendaedit").value.split("\n").map(x => x.trim()).filter(Boolean);
+  const r = await api("PATCH", path(slug),
+                      { agenda, effort: $("effort").value, rounds: parseInt($("rounds").value, 10) });
+  if (!r.ok) { flash(r.data.error || ("refused: " + r.status)); return; }
+  flash(""); $("settings").open = false; detail = Object.assign(detail, r.data); renderSide(detail);
+};
+$("usetok").onclick = async () => {
+  const t = $("tok").value.trim();
+  if (!t) return;
+  const before = seatToken; seatToken = t;
+  const r = await api("GET", "/api/topics");
+  if (!r.ok || !r.data.seat) {
+    seatToken = before; flash("that token was not accepted as a seat's");
+    return;
+  }
+  try { sessionStorage.setItem(KEY, t); } catch (e) {}
+  $("tok").value = ""; $("identity").open = false; flash("");
+  seat = r.data.seat; renderIdentity(); open(slug);
+};
+$("forget").onclick = () => {
+  try { sessionStorage.removeItem(KEY); } catch (e) {}
+  seatToken = ""; boot();
+};
+$("topic").onchange = () => open($("topic").value);
+
+async function boot() {
+  const r = await api("GET", "/api/topics");
+  if (!r.ok && seatToken) {           // a revoked seat token: fall back to the shared one
+    try { sessionStorage.removeItem(KEY); } catch (e) {}
+    seatToken = ""; return boot();
+  }
+  if (!r.ok) { $("title").textContent = "bad or missing token — open the URL printed by `mooting serve`"; return; }
+  seat = r.data.seat || null;
+  renderIdentity();
+  const topics = r.data.topics;
+  const sel = $("topic"); sel.replaceChildren();
+  topics.forEach(t => { const o = el("option", "", t.slug + " — " + t.status); o.value = t.slug; sel.appendChild(o); });
+  const live = topics.find(t => t.slug === slug) || topics.find(t => t.status === "open")
+            || topics.find(t => t.status !== "resolved") || topics[0];
+  if (!live) { $("title").textContent = "no topics yet"; return; }
+  sel.value = live.slug;
+  open(live.slug);
 }
 boot();
 </script>
