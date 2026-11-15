@@ -138,7 +138,7 @@ about.
 | G6 ✅ | **Done, with a gap the owner accepted on 2026-11-15.** A cursor worker runs from `<board dir>/worker/<seat>/` with the worktree added by `--add-dir`; two live workers committed and reported, and were refused `git push` and unlisted commands. Its file writes are not held to the worktree: both also overwrote a file in another folder with no approval asked, because cursor's rules cannot say "everything but the worktree". Copilot workers are held by neither. `--sandbox enabled` failed to launch once and is untested. PR #11. See [Driver notes](DRIVERS.md#a-cursor-worker). |
 | G7 ✅ | **Done; the probe found something worse than it was looking for.** On a board kept inside a git repo, a cursor worker could not reach the board at all: the CLI took the git root as its project, did not load our `.cursor/mcp.json`, and reported `MCP server does not exist: mooting`. The repo's `.cursor/cli.json` allowing `Shell(echo)` did not get `echo` through. Now a board in a work tree runs its cursor seats from `~/.mooting/cursor/<hash>/`, and the same live probe posted with `echo` still refused. Two turns. Test: `test_a_cursor_seat_on_a_board_inside_a_repo_runs_from_outside_it` (red before, green after). |
 
-## K — What a phone makes obvious ✅ done
+## K — What a phone makes obvious
 
 **Every item here came from somebody using it on a mobile, not from reading the
 code.** That is the same source as the five Telegram bugs in `CLAUDE.md`, and it
@@ -161,7 +161,8 @@ is slow, so offer buttons wherever there is a fixed set of answers.*
 | K5 ✅ | **Done.** One line in `/help`. Superseded text below. |
 | ~~K5~~ | **`/proposals <id>` is not in the help.** The event pump starts at `store.head()` and never replays, so re-reading a proposal that has scrolled away is only possible through a form nothing advertises — the trap `CLAUDE.md` names, left half-closed. |
 
-## Not building
+## No
+| K6 | **High. The wake buttons do nothing.** Bare `/nudge` in a chat offers one button per seat under "Which seat should wake?", built with `set_callback("nudge", name)`; `parse_set` accepts `wake` and not `nudge`, so a tap decodes to `None` and no seat is woken -- with no reply. Seen with `parse_set(set_callback("nudge", "Santa"))` → `None` on `7c245f1`. Found by a small-model trial review for G4b, not by use. `command_for("wake", ...)` is tested; the button that should reach it is not. |t building
 
 | | |
 |---|---|

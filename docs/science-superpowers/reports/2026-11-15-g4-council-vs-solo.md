@@ -58,3 +58,11 @@ Harder seeds, so one seat misses some. Independent first rounds. Several solo
 seats from different vendors, so "council" is compared with "the best single
 vendor" and not only with claude. That would be a new registration, not an edit
 of this one.
+
+## Found later (2026-11-15, while preparing G4b)
+
+The seats were registered with no working folder, so claude and agy ran from
+where `run.py` was started, the repository root, and loaded its `CLAUDE.md`. That
+file describes none of G4's five seeds, so the result is unlikely to move; it is
+still not the clean room the design assumed. G4b gives every seat its own empty
+folder and checks it before the freeze.
