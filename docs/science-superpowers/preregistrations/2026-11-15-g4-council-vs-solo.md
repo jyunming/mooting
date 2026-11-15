@@ -1,6 +1,6 @@
 # Pre-registration: G4 — does a three-seat council find more seeded defects than one seat?
 
-**Frozen at commit:** the first commit of this file (see `prereg.sh audit`).
+**Frozen at commit:** c8ceee01c8583277206ef846609f3b12d3809256
 **Roadmap:** `docs/ROADMAP.md` G4. **Owner approval:** 2026-11-15, two rounds, 35 turns.
 
 ## Material
