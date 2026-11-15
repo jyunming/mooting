@@ -130,6 +130,53 @@ def test_a_cancelled_wake_kills_the_child_process():
     # loop complaining about a live transport is the observable part.
 
 
+@pytest.mark.skipif(os.name != "nt", reason="the shim chain is a Windows thing")
+def test_a_timed_out_wake_kills_the_cli_behind_the_shim_not_just_the_shim(tmp_path):
+    """On Windows every vendor CLI starts as a `.CMD` shim: cmd.exe, then
+    PowerShell or node, and the CLI under that. Killing the process we started
+    killed the shim and left the CLI running, still spending quota, with nobody
+    reading what it said."""
+    import subprocess
+    import sys
+
+    from mooting.drivers.base import Driver
+
+    class Shim(Driver):
+        binary = "python"
+
+        async def wake(self, seat, prompt):      # pragma: no cover - unused
+            return None
+
+    pid_file = tmp_path / "cli.pid"
+    shim = ("import subprocess, sys, time\n"
+            "cli = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],\n"
+            "                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,\n"
+            "                       stderr=subprocess.DEVNULL)\n"
+            f"open({str(pid_file)!r}, 'w').write(str(cli.pid))\n"
+            "time.sleep(60)\n")
+
+    async def go():
+        with pytest.raises(asyncio.TimeoutError):
+            await Shim()._run([sys.executable, "-c", shim], cwd=".", timeout=4)
+
+    asyncio.run(go())
+    cli = int(pid_file.read_text())
+
+    def alive(pid):
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                             capture_output=True, text=True).stdout
+        return str(pid) in out
+
+    try:
+        for _ in range(20):                       # taskkill returns before the exit lands
+            if not alive(cli):
+                break
+            asyncio.run(asyncio.sleep(0.1))
+        assert not alive(cli), "the shim died and the CLI behind it kept running"
+    finally:
+        subprocess.run(["taskkill", "/F", "/PID", str(cli)], capture_output=True)
+
+
 def test_a_wake_ends_when_the_cli_does_even_if_its_child_holds_the_pipe():
     """cursor-agent updated itself 30 s into a live task, and the helper it
     started inherited stdout and outlived it. Waiting for the pipe to close

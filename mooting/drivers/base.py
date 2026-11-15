@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import abc
 import asyncio
+import contextlib
 import os
 import subprocess
 import sys
@@ -37,6 +38,22 @@ from typing import Any
 _TOKENS_IN = ("input_tokens", "prompt_tokens", "tokens_in", "inputTokens")
 _TOKENS_OUT = ("output_tokens", "completion_tokens", "tokens_out", "outputTokens")
 _COST = ("total_cost_usd", "cost_usd", "costUsd", "total_cost")
+
+
+def _kill_tree(pid: int) -> None:
+    """Kill a process and everything it started, on Windows.
+
+    Every vendor CLI there starts as a `.CMD` shim, so the process we hold is
+    cmd.exe and the CLI is two levels under it. Killing the shim alone left the
+    CLI running and spending quota after its turn had been given up. POSIX
+    needs nothing here: the CLIs run directly, not through a shim.
+    """
+    if sys.platform != "win32":
+        return
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)],
+                       capture_output=True, timeout=10,
+                       creationflags=subprocess.CREATE_NO_WINDOW)
 
 
 def _first(blob: dict, keys) -> object | None:
@@ -306,8 +323,13 @@ class Driver(abc.ABC):
             # and arrives as a cancellation. Catching only TimeoutError meant the
             # child was never killed: the council moved on and left a CLI running,
             # burning quota, for every timed-out turn.
-            proc.kill()
-            await proc.wait()
+            _kill_tree(proc.pid)
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            # Bounded: on 3.11 `wait()` also waits for the pipes, and a process
+            # the kill missed would hold this handler open in place of the turn.
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(proc.wait(), timeout=5)
             raise
         for r in readers:
             r.cancel()
