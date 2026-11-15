@@ -130,6 +130,46 @@ def test_a_cancelled_wake_kills_the_child_process():
     # loop complaining about a live transport is the observable part.
 
 
+def test_a_wake_ends_when_the_cli_does_even_if_its_child_holds_the_pipe():
+    """cursor-agent updated itself 30 s into a live task, and the helper it
+    started inherited stdout and outlived it. Waiting for the pipe to close
+    then waited for the helper: the work was done, posted and committed, and
+    the wake still sat at its 600 s limit and was recorded as a failure."""
+    import signal
+    import sys
+    import time
+
+    from mooting.drivers.base import Driver
+
+    class Cli(Driver):
+        binary = "python"
+
+        async def wake(self, seat, prompt):      # pragma: no cover - unused
+            return None
+
+    cli = ("import subprocess, sys\n"
+           "sys.stdin.read()\n"
+           "g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'],\n"
+           "                     stdin=subprocess.DEVNULL, stdout=sys.stdout, stderr=sys.stderr)\n"
+           "print('worked', g.pid, flush=True)\n")
+    d = Cli()
+    d.pipe_grace_s = 1.0
+    t0 = time.monotonic()
+    code, out, _ = asyncio.run(d._run([sys.executable, "-c", cli], cwd=".",
+                                      stdin="the prompt", timeout=25))
+    took = time.monotonic() - t0
+    helper = int(out.split()[-1])
+    try:
+        assert out.startswith("worked"), out
+        assert code == 0
+        assert took < 15, f"waited {took:.0f}s for a pipe the CLI had already let go of"
+    finally:
+        try:
+            os.kill(helper, signal.SIGTERM)
+        except OSError:
+            pass
+
+
 # ------------------------------------------------------------------- setup
 
 def test_setup_seats_what_it_finds_and_wires_it_in_order(tmp_path, monkeypatch):
