@@ -1,6 +1,6 @@
 # Pre-registration: G4b — does a council beat the best single vendor on code review?
 
-**Frozen at commit:** stamped by `prereg.sh freeze`
+**Frozen at commit:** b3c9adb3731a064134df663ef3474ab479c4dfd7
 **Follows:** `2026-11-15-g4-council-vs-solo.md` (null, 5/5 vs 5/5: the seeds were too easy)
 **Harness:** `experiments/g4b/run.py` · **blinding:** `experiments/g4b/blind.py` · **analysis:** `experiments/g4b/analyze.py`
 
