@@ -680,7 +680,11 @@ class ChatHost:
             if not names:
                 return await self.say(chat_id, "Nobody here to choose from.")
             head = "Who chairs this meeting?" if want_people else "Which seat should wake?"
-            rows = [[Button(n, set_callback(which, n))] for n in names]
+            # The command is `/nudge`, the callback verb is `wake`: `parse_set` and
+            # `command_for` only know `wake`, and a button built as `set:nudge:x`
+            # decoded to nothing, so tapping a seat woke nobody and said nothing.
+            what = "wake" if which == "nudge" else which
+            rows = [[Button(n, set_callback(what, n))] for n in names]
         try:
             await self.t.send(str(chat_id), head, buttons=rows)
         except Exception as exc:
