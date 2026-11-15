@@ -97,6 +97,24 @@ needed remotely yet -- said plainly rather than listed as though they answered.
 send it as a query string — it ends up in logs). Every decision carries the seat
 whose token made it.
 
+**The page at that URL drives the meeting, not just shows it.** It has a
+meeting picker, Run and Stop, a box to speak in, the agenda, effort and rounds,
+and an inline sign-off with a reason for each open proposal. Every control is
+one of the routes above, so it can do nothing a script holding the same token
+could not.
+
+What it can do depends on the token:
+
+| token | read and follow | run, stop, settings | speak and sign off |
+|---|---|---|---|
+| the one `mooting serve` prints | yes | yes | no |
+| one from `--grant <you>`, pasted under *speak as a seat* | yes | yes | yes |
+
+A pasted token stays in that browser tab, never in the address bar, and
+*Forget it* drops it. Everything a seat wrote is put on the page as plain text,
+because the page holds a token that can sign off and a seat's message is not
+trusted to run in it.
+
 ### Telegram — `mooting telegram`
 
 A council in a Telegram chat, with buttons for sign-off and the same commands

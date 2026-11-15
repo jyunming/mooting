@@ -122,6 +122,72 @@ async def test_topic_detail_returns_the_transcript(client):
 
 
 @pytest.mark.asyncio
+async def test_the_page_resumes_from_an_event_id_not_a_message_id(client, board):
+    """The page resumed the stream from the last *message* id. Events and
+    messages are separate counters, so every event after that number was
+    replayed and the messages among them were shown twice."""
+    tid = int(board.topic("reno")["id"])
+    for n in range(3):
+        board.set_brief(tid, f"- point {n}", "jeremy")     # events, no messages
+    detail = await (await client.get("/api/topics/reno", headers=auth())).json()
+    assert detail["head"] == board.head()
+    assert detail["head"] > detail["messages"][-1]["id"], \
+        "the fixture must make the two counters differ, or this proves nothing"
+
+    later = board.post(tid, "santa", "after the page loaded", count_turn=False)
+    r = await client.get(f"/api/events?slug=reno&since={detail['head']}", headers=auth())
+    ids = [e["payload"].get("message_id") for e in (await r.json())["events"]
+           if e["kind"] == "message"]
+    assert ids == [later], "resuming from head replays nothing the page already has"
+
+
+@pytest.mark.asyncio
+async def test_the_page_is_told_whether_its_token_can_speak(client, board):
+    """The shared token reads and seat tokens act. The page has to know which
+    it holds before somebody writes a sign-off reason and is told 403."""
+    shared = await (await client.get("/api/topics", headers=auth())).json()
+    assert shared["seat"] is None
+
+    token = board.grant_token("jeremy")
+    mine = await (await client.get("/api/topics", headers=auth(token))).json()
+    assert mine["seat"] == "jeremy"
+
+
+def test_the_page_puts_board_text_in_as_text_only():
+    """Every message and proposal on the board was written by a seat, and the
+    page holds a token that can sign off. One string inserted as HTML would let
+    a seat run script in it and approve its own proposal as the chair."""
+    from mooting.server import PAGE
+
+    script = PAGE[PAGE.index("<script>"):]
+    for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write",
+                 "eval(", "new Function"):
+        assert sink not in script, f"the page uses {sink}"
+    assert "?token=" not in script.replace('get("token")', ""), \
+        "a seat token must never be put in a URL"
+
+
+def test_the_page_calls_only_routes_the_server_has(tmp_path, board):
+    """The page is a client of the routes, not a second API. A path it calls
+    that the router does not have is a button that only ever fails."""
+    import re
+
+    from mooting.server import PAGE
+
+    app = build_app(tmp_path / "board.db", TOKEN, human="jeremy", supervisor=no_spawn)
+    try:
+        routes = {r.resource.canonical for r in app.router.routes()}
+    finally:
+        app[STORE].close()
+    called = set(re.findall(r'"(/api/[a-z/]+)', PAGE))
+    assert called, "found no API calls in the page; the pattern is stale"
+    templated = {re.sub(r"\{[^}]+\}", "", r) for r in routes}
+    for path in called:
+        assert any(t.startswith(path.rstrip("/")) for t in templated), \
+            f"the page calls {path}, which the server does not route"
+
+
+@pytest.mark.asyncio
 async def test_an_unknown_topic_is_404_not_500(client):
     r = await client.get("/api/topics/nope", headers=auth())
     assert r.status == 404
