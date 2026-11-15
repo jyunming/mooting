@@ -39,6 +39,15 @@ from pathlib import Path
 
 from .base import Driver, Seat, WakeResult
 
+
+def _in_git_tree(path: Path) -> bool:
+    """True if `path`, or the nearest existing directory above it, is inside a
+    git work tree. Read from the file system, so no `git` binary is needed."""
+    for p in (path, *path.parents):
+        if (p / ".git").exists():
+            return True
+    return False
+
 #: Emitted by `codex exec --json` and friends; also matches Claude's session id.
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 
@@ -545,6 +554,29 @@ class CursorDriver(SpawnDriver):
         # e.g. `--model 'name[effort=high]'`, which belongs to the seat's model.
         return []
 
+    def _base(self) -> Path:
+        """Where this board's cursor directories go: beside it, unless that is
+        inside a git work tree.
+
+        cursor-agent takes the git root as its project when it runs inside
+        one, and then does not load our `.cursor/mcp.json`. A live worker on a
+        board kept in a repo's `.mooting/` was told "MCP server does not exist:
+        mooting" and could not post. So such a board's seats run from a
+        directory under `~/.mooting/cursor/` named for the board, and if that
+        is in a work tree too, from the temp directory.
+        """
+        import hashlib
+        import tempfile
+
+        beside = Path(self.db).resolve().parent
+        if not _in_git_tree(beside):
+            return beside
+        name = hashlib.sha1(str(beside).encode("utf-8")).hexdigest()[:12]
+        for parent in (Path.home() / ".mooting" / "cursor", Path(tempfile.gettempdir()) / "mooting-cursor"):
+            if not _in_git_tree(parent):
+                return parent / name
+        return beside           # nowhere outside a repo; `mooting doctor` will show a mute seat
+
     def working_dir(self, seat: Seat) -> str:
         # A worker gets a directory of its own. One seat can sit in a meeting
         # and work a task at once, and sharing a directory would let the task's
@@ -553,7 +585,7 @@ class CursorDriver(SpawnDriver):
         # collects every `.cursor/cli.json` from the project root down to where
         # it runs, so a child would inherit its parent's.
         home = "worker" if seat.executing else "sandbox"
-        sandbox = Path(self.db).parent / home / seat.agent
+        sandbox = self._base() / home / seat.agent
         conf = sandbox / ".cursor"
         conf.mkdir(parents=True, exist_ok=True)
         # Rewritten every wake: the board path is in it, and a stale file from a

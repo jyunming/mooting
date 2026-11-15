@@ -205,6 +205,15 @@ meeting one, not a child, because the CLI collects every `.cursor/cli.json`
 from the project root down to where it runs, and one seat can be in a meeting
 and on a task at once.
 
+**A cursor seat must not run inside a git work tree.** Inside one, the CLI takes
+the git root as its project and does not load our `.cursor/mcp.json`. A worker on
+a board kept in a repo's `.mooting/` was told `MCP server does not exist:
+mooting`, and the only servers it saw were the owner's own Cursor plugins. So when
+the board sits in a work tree, its cursor directories move to
+`~/.mooting/cursor/<hash of the board's folder>/`. The same probe then posted,
+and `echo` was still refused, although the repo's own `.cursor/cli.json` allowed
+it. Probed 2026-11-15, two turns.
+
 A command line is refused whole if any part of it is unlisted. A worker's
 `cd <tree> && git commit` was refused, and the same commit with no `cd` went
 through. The CLI's own smart approval was off for every call
