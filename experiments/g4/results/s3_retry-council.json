@@ -1,0 +1,123 @@
+{
+ "seed": "s3_retry",
+ "arm": "council",
+ "stopped": "rounds_exhausted",
+ "messages": [
+  {
+   "id": 25,
+   "author": "chair",
+   "kind": "system",
+   "body": "Review the Python code below for bugs. For each bug, name the function, an input that triggers it, and what goes wrong. If you find none, say so. Leave style alone.\n\n```python\nimport time\n\n\ndef retry(fn, attempts: int = 3, base_delay: float = 0.5,\n          retry_on: tuple = (ConnectionError, TimeoutError)):\n    \"\"\"Call fn() until it succeeds, up to `attempts` times.\n\n    Waits base_delay, then twice that, and so on between attempts. Errors not\n    in `retry_on` propagate at once. If every attempt fails, the last error is\n    raised.\n    \"\"\"\n    if attempts < 1:\n        raise ValueError(\"attempts must be at least 1\")\n    last = None\n    for n in range(attempts):\n        try:\n            return fn()\n        except retry_on as exc:\n            last = exc\n            if n < attempts - 1:\n                time.sleep(base_delay * 2 ** n)\n    return last\n```\n"
+  },
+  {
+   "id": 26,
+   "author": "g4claude",
+   "kind": "say",
+   "body": "One bug, in retry: the final line `return last` returns the exception object instead of raising it. Input: fn = lambda: (_ for _ in ()).throw(ConnectionError()), attempts=3. All three attempts fail, and the caller gets a ConnectionError instance back as if it were a success value, with no error raised. The docstring promises \"the last error is raised.\" Fix: `raise last`. The backoff (0.5, 1.0) and the attempts<1 guard are correct. I'd withdraw only if callers are documented to type-check the return value."
+  },
+  {
+   "id": 27,
+   "author": "g4codex",
+   "kind": "say",
+   "body": "`retry` incorrectly returns the last exception when all attempts fail. For example, `retry(lambda: (_ for _ in ()).throw(ConnectionError('offline')), attempts=1)` returns a `ConnectionError` object instead of raising it, so callers can mistake failure for success. Raise the last exception after exhaustion."
+  },
+  {
+   "id": 28,
+   "author": "g4agy",
+   "kind": "say",
+   "body": "I agree with @g4claude that `retry` has one bug: `return last` returns the exception instance instead of raising it (`raise last`) when all attempts fail (e.g. `retry(lambda: (_ for _ in ()).throw(ConnectionError()), attempts=1)`)."
+  },
+  {
+   "id": 29,
+   "author": "mooting",
+   "kind": "system",
+   "body": "--- round 2 of 2 ---"
+  },
+  {
+   "id": 30,
+   "author": "g4claude",
+   "kind": "say",
+   "body": "Agreed, @g4agy: all three seats find the same single bug in retry (`return last` should be `raise last`), and I have nothing further to add."
+  },
+  {
+   "id": 31,
+   "author": "g4codex",
+   "kind": "system",
+   "body": "I agree with the identified bug and have nothing further to add."
+  },
+  {
+   "id": 32,
+   "author": "g4agy",
+   "kind": "system",
+   "body": "Unanimous agreement on the single bug (`return last` instead of `raise last`); nothing to add."
+  },
+  {
+   "id": 33,
+   "author": "mooting",
+   "kind": "system",
+   "body": "paused: rounds exhausted -- needs a human to extend or rule"
+  }
+ ],
+ "wakes": [
+  {
+   "agent": "g4agy",
+   "outcome": "ok",
+   "detail": "",
+   "tokens_in": 23980,
+   "tokens_out": 298,
+   "cost_usd": null,
+   "started_at": "2026-11-15 15:11:53",
+   "ended_at": "2026-11-15 15:12:29"
+  },
+  {
+   "agent": "g4claude",
+   "outcome": "ok",
+   "detail": "",
+   "tokens_in": 8,
+   "tokens_out": 641,
+   "cost_usd": 0.213883,
+   "started_at": "2026-11-15 15:11:53",
+   "ended_at": "2026-11-15 15:12:28"
+  },
+  {
+   "agent": "g4codex",
+   "outcome": "ok",
+   "detail": "",
+   "tokens_in": null,
+   "tokens_out": null,
+   "cost_usd": null,
+   "started_at": "2026-11-15 15:11:53",
+   "ended_at": "2026-11-15 15:12:21"
+  },
+  {
+   "agent": "g4claude",
+   "outcome": "ok",
+   "detail": "",
+   "tokens_in": 6,
+   "tokens_out": 262,
+   "cost_usd": 0.2515488,
+   "started_at": "2026-11-15 15:12:29",
+   "ended_at": "2026-11-15 15:12:46"
+  },
+  {
+   "agent": "g4agy",
+   "outcome": "ok",
+   "detail": "",
+   "tokens_in": 24109,
+   "tokens_out": 324,
+   "cost_usd": null,
+   "started_at": "2026-11-15 15:12:29",
+   "ended_at": "2026-11-15 15:13:08"
+  },
+  {
+   "agent": "g4codex",
+   "outcome": "ok",
+   "detail": "",
+   "tokens_in": null,
+   "tokens_out": null,
+   "cost_usd": null,
+   "started_at": "2026-11-15 15:12:29",
+   "ended_at": "2026-11-15 15:13:08"
+  }
+ ]
+}

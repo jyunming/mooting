@@ -1,0 +1,37 @@
+{
+ "seed": "s3_retry",
+ "arm": "solo",
+ "stopped": "rounds_exhausted",
+ "messages": [
+  {
+   "id": 34,
+   "author": "chair",
+   "kind": "system",
+   "body": "Review the Python code below for bugs. For each bug, name the function, an input that triggers it, and what goes wrong. If you find none, say so. Leave style alone.\n\n```python\nimport time\n\n\ndef retry(fn, attempts: int = 3, base_delay: float = 0.5,\n          retry_on: tuple = (ConnectionError, TimeoutError)):\n    \"\"\"Call fn() until it succeeds, up to `attempts` times.\n\n    Waits base_delay, then twice that, and so on between attempts. Errors not\n    in `retry_on` propagate at once. If every attempt fails, the last error is\n    raised.\n    \"\"\"\n    if attempts < 1:\n        raise ValueError(\"attempts must be at least 1\")\n    last = None\n    for n in range(attempts):\n        try:\n            return fn()\n        except retry_on as exc:\n            last = exc\n            if n < attempts - 1:\n                time.sleep(base_delay * 2 ** n)\n    return last\n```\n"
+  },
+  {
+   "id": 35,
+   "author": "g4solo",
+   "kind": "say",
+   "body": "One bug in `retry`: when every attempt fails it does `return last` instead of `raise last`. Input: `retry(lambda: (_ for _ in ()).throw(ConnectionError()), attempts=2, base_delay=0)` returns the ConnectionError object instead of raising it, so the caller treats the failure as a success. Fix: `raise last`. Everything else matches the docstring: the delays are 0.5, 1.0, ..., and errors outside `retry_on` propagate. I would withdraw this only if returning the error were the documented contract, and the docstring says the opposite."
+  },
+  {
+   "id": 36,
+   "author": "mooting",
+   "kind": "system",
+   "body": "paused: rounds exhausted -- needs a human to extend or rule"
+  }
+ ],
+ "wakes": [
+  {
+   "agent": "g4solo",
+   "outcome": "ok",
+   "detail": "",
+   "tokens_in": 8,
+   "tokens_out": 806,
+   "cost_usd": 0.22273859999999998,
+   "started_at": "2026-11-15 15:13:08",
+   "ended_at": "2026-11-15 15:13:41"
+  }
+ ]
+}
