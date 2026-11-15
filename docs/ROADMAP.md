@@ -117,7 +117,8 @@ about.
 |---|---|
 | F1 ✅ | **Done, and it found a leak.** `tests/test_mcp_server.py` calls every tool the way a CLI does. An agent seated on one meeting could read any other by slug, list every meeting on the board, and open a proposal or vote on one in another room -- `post` checked for a seat and `propose` and `vote` did not. Every topic an agent names must now be one it sits at, `Store.propose` and `Store.vote` refuse an unseated agent as a second line, and a closed meeting takes no new proposal. |
 | F2 ✅ | **Done.** The loopback refusal in `web.py` runs before the web extra is imported and has a test. The command handed to textual-serve's shell is quoted by the platform's own rules, not only when an argument holds a space. |
-| F3 | `cli.py` (43%), `doctor.py` (39%) and `install.py` (28%) are the rest. `doctor`'s static checks need no real turn and can run against `FakeDriver`. |
+| F3 ✅ | **Done, and it found a wrong hint.** `cli.py` 42% → 75%, `doctor.py` 39% → 84%, `install.py` 28% → 100%. The CLI tests drive `cli.main` the way a person types it and lead with the identity checks: an agent seat cannot sign off, resume a meeting or grant itself rounds through the shell. `doctor`'s verdicts are tested against a stand-in CLI that posts, stays mute, fails, or approves its own proposal. `install` runs for real with only the binary lookup and the subprocess replaced. The bug: a seat that saw no tools was told to run `mooting install` only for codex and gemini, so an agy seat was sent to check a per-run flag agy does not have. Superseded text below. |
+| ~~F3~~ | `cli.py` (43%), `doctor.py` (39%) and `install.py` (28%) are the rest. `doctor`'s static checks need no real turn and can run against `FakeDriver`. |
 
 ## G — Worth taking from elsewhere
 
