@@ -378,3 +378,23 @@ def test_telegram_falls_back_to_plain_text_rather_than_losing_a_message(db, no_t
         assert bot.calls == [("bold and code", None, None)]
     finally:
         store.close()
+
+
+def test_every_chooser_button_decodes_to_what_it_offers(host):
+    """K6. `/nudge` offered a button per seat built as `set:nudge:<seat>`, and
+    `parse_set` only knows `wake`, so a tap decoded to nothing and no seat woke --
+    with no reply, which is how this surface fails. Every chooser, every button."""
+    from mooting.telegram import parse_set
+
+    paired(host)
+    run(host.route(msg("/topic new do the wake buttons work")))
+    for bare in ("/nudge", "/chair", "/effort", "/rounds", "/team"):
+        before = len(host.t.sent)
+        run(host.route(msg(bare)))
+        buttons = [b for _, _, rows in host.t.sent[before:] if rows for row in rows for b in row]
+        assert buttons, f"{bare} offered no buttons"
+        for b in buttons:
+            assert parse_set(b.data) is not None, f"{bare}: button {b.text!r} sends {b.data!r}, which decodes to nothing"
+    wake = [b for _, _, rows in host.t.sent if rows for row in rows for b in row
+            if b.data.startswith("set:wake:") or b.data.startswith("set:nudge:")]
+    assert {parse_set(b.data)[0] for b in wake} == {"wake"}
