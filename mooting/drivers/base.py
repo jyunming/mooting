@@ -177,6 +177,10 @@ class Driver(abc.ABC):
     #: Wall-clock ceiling for one turn. A CLI that hangs must not hold a topic
     #: hostage -- on timeout the supervisor records the wake and moves on.
     timeout_s: float = 300.0
+    #: How long to keep reading after the CLI exits. Output it wrote before
+    #: exiting is already in the pipe; anything later belongs to a process it
+    #: left behind, which is not the turn's to wait for.
+    pipe_grace_s: float = 3.0
 
     def working_dir(self, seat: Seat) -> str:
         """Where this CLI actually runs. Overridden where cwd IS the containment."""
@@ -260,11 +264,42 @@ class Driver(abc.ABC):
             stderr=asyncio.subprocess.PIPE,
         )
         payload = stdin.encode("utf-8") if stdin is not None else None
+        out, err = bytearray(), bytearray()
+
+        async def drain(stream, into: bytearray) -> None:
+            while chunk := await stream.read(65536):
+                into.extend(chunk)
+
+        async def feed() -> None:
+            if payload is None:
+                return
+            try:
+                proc.stdin.write(payload)
+                await proc.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError):
+                pass                       # it stopped reading; what it says still counts
+            proc.stdin.close()
+
+        async def exited() -> None:
+            # Polled, not `proc.wait()`: on 3.11 that also waits for every pipe
+            # to close, which is the very thing that can take forever.
+            while proc.returncode is None:
+                await asyncio.sleep(0.1)
+
+        readers = [asyncio.ensure_future(drain(proc.stdout, out)),
+                   asyncio.ensure_future(drain(proc.stderr, err))]
         try:
-            out, err = await asyncio.wait_for(
-                proc.communicate(payload), timeout=timeout or self.timeout_s
-            )
+            await asyncio.wait_for(asyncio.gather(feed(), exited()),
+                                   timeout=timeout or self.timeout_s)
+            # The CLI has exited, but a process it started can still hold its
+            # pipes. cursor-agent's self-updater did, and `communicate()` then
+            # waited for the updater: a task done and reported at 52 s was
+            # recorded as a 600 s timeout. What was written before the exit is
+            # all there is to read, so drain briefly and stop.
+            await asyncio.wait(readers, timeout=self.pipe_grace_s)
         except (asyncio.TimeoutError, asyncio.CancelledError):
+            for r in readers:
+                r.cancel()
             # CancelledError matters as much as TimeoutError here. The supervisor
             # wraps this call in its own wait_for with the *same* deadline, and
             # its timer is armed first, so in practice the outer one always wins
@@ -274,8 +309,15 @@ class Driver(abc.ABC):
             proc.kill()
             await proc.wait()
             raise
+        for r in readers:
+            r.cancel()
+        # Let go of pipes a leftover process still holds. There is no public
+        # way to; left open, they outlive the event loop and warn when it closes.
+        transport = getattr(proc, "_transport", None)
+        if transport is not None:
+            transport.close()
         return (
             proc.returncode or 0,
-            out.decode("utf-8", errors="replace"),
-            err.decode("utf-8", errors="replace"),
+            bytes(out).decode("utf-8", errors="replace"),
+            bytes(err).decode("utf-8", errors="replace"),
         )
