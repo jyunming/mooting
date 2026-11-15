@@ -10,6 +10,7 @@ upgrade rather than trusting this file.
 | Codex | 0.149.0 | `codex exec` | yes, but see below | **stdin (`-`)** | no — `mooting install` | — |
 | Copilot | 1.0.81 | `-p` + `--allow-all-tools` | `-r/--resume=<id>` | argv | `--additional-mcp-config` | `--deny-tool` |
 | Antigravity | agy 1.1.20 | `-p/--print` | `--conversation <id>` | argv | no — `mooting install` | `--mode plan` |
+| Cursor | cursor-agent 2026.11.11 | `-p/--print` | not used | **stdin** | yes — `.cursor/mcp.json` in a scratch workspace | `.cursor/cli.json` deny rules |
 
 ## Four traps, each of which looks like something else
 
@@ -80,7 +81,9 @@ said. `stateful = False` is a supported mode, not a degraded one.
 v0 seats deliberate; they do not edit files. Each adapter asks its CLI for the
 narrowest surface it offers, and they are not equally strong — Claude's
 `--strict-mcp-config` plus an allowlist is tightest; Antigravity's `plan` mode is genuinely read-only; Copilot must be given `--allow-all-tools`
-for `-p` at all, so it is narrowed by denial instead. `mooting doctor` verifies
+for `-p` at all, so it is narrowed by denial instead; Cursor's
+read-only modes refuse MCP calls, so it runs in agent mode and is narrowed by
+permission rules in a workspace with nothing in it. `mooting doctor` verifies
 reachability empirically rather than trusting that a flag did what its name says.
 
 ## Machine-local quirks belong in the seat, not the driver
@@ -103,6 +106,7 @@ nothing is unmeasured, not free.
 | `codex` | no — `--json` silently defeats `--approve-for-me`, so it is deliberately not passed |
 | `copilot` | no structured output requested |
 | `gemini` | no structured output requested |
+| `cursor` | tokens yes, cost no — `--output-format json` carries `usage.inputTokens` / `outputTokens` |
 
 `mooting doctor` answers it for your machine rather than from this table: it
 already spends real turns on each seat, and now says what they reported.
@@ -113,7 +117,7 @@ A work seat has to reach the git worktree it is given and commit to it. Both
 are things a vendor decides, and neither is visible from the flag names, so
 this table says what was probed rather than what the documentation implies.
 
-All five were probed on 2026-09-06, each against a real repository with a
+The first five were probed on 2026-09-06, each against a real repository with a
 staged change, using the flags this project actually passes.
 
 | seat | reaches the worktree | can commit | what it took |
@@ -122,6 +126,7 @@ staged change, using the flags this project actually passes.
 | `codex` | yes | yes | nothing — `--approve-for-me` already covers it |
 | `copilot` | yes | yes | nothing, because nothing narrows it. That is G1's concern rather than this one |
 | `agy` | only with `--add-dir` | yes | the directory has to be handed to it; the mode was never the problem |
+| `cursor` | no | no | refused on purpose: the MCP server loads only from the workspace's own `.cursor/mcp.json`, so a worker would mean writing it into your worktree |
 | `gemini` | — | — | could not run: `IneligibleTierError -- this client is no longer supported for Gemini Code Assist for individuals`, which points at Antigravity |
 
 Two adapters needed changing, two were already right, and no two failed the
@@ -137,3 +142,45 @@ it uncommitted, which the loop can only read as no work at all.
 **agy ignores the process working directory for shell commands.** Asked where
 it was, it answered `~\.geminintigravity-clirain\<uuid>\scratch` and
 `fatal: not a git repository`. `--add-dir` is what puts the worktree in scope.
+
+## Cursor's read-only modes cannot hold a seat
+
+Probed on 2026-11-15 against `cursor-agent` 2026.11.11. Each run was one real
+turn, asked to post to the board, write a file and run `echo`:
+
+| flags | posted | wrote | ran shell |
+|---|---|---|---|
+| `--mode plan` | no — "I'll only inspect the mooting tool schema" | no | no |
+| `--mode ask` | no — "ask mode blocks `mooting_say`" | no | no |
+| agent mode + `.cursor/cli.json` denying `Write(**)` and `Shell(*)` | **yes** | no | no |
+
+All three exited 0. The first two would pass any check that only reads the
+return code.
+
+So a cursor seat runs in agent mode, inside `<board dir>/sandbox/<seat>/`. That
+directory holds `.cursor/mcp.json`, which binds the server to this seat's name,
+and `.cursor/cli.json` with the deny rules, and nothing else. It is rewritten
+every wake. `--approve-mcps` is required: until something approves it,
+`cursor-agent mcp list` shows the server as `not loaded (needs approval)`.
+`--force` is never passed.
+
+The `.CMD` shim goes through cmd.exe and then PowerShell to `node`, so the
+prompt goes on stdin. `-p` with no prompt argument reads it from there.
+
+Two limits follow, and both are stated rather than worked around:
+
+- **It starts with no project in view.** The workspace is empty, but reads are
+  not denied. Given absolute paths to a file in another folder, a seat read it
+  and posted the contents. It refused to overwrite that file, or to create one
+  beside it, so the deny rules hold outside the workspace too.
+- **It cannot work tasks.** `--add-dir` does not load an MCP server from the
+  added root, so a worker's board config would have to be written into the
+  worktree it commits from. The wake refuses instead of spawning the CLI.
+
+Other MCP servers in `~/.cursor/mcp.json` would be in scope too: its help
+says `--approve-mcps` approves all of them. This was not probed, because that
+file does not exist on the test machine. That makes it weaker than Claude's
+`--strict-mcp-config`.
+
+A probe turn took 54–62 s of wall-clock, while the CLI timed the same turns at
+15–45 s. The rest is the shim starting PowerShell and node.

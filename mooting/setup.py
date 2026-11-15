@@ -24,7 +24,7 @@ from .store import Store, StoreError, connect, default_db_path
 #: Offered in the order most people would want them seated. Gemini's driver
 #: works and `mooting agents add <name> gemini` still seats it -- it is left out
 #: here because it is not being recommended yet, not because it is broken.
-CANDIDATES = ("claude", "codex", "copilot", "agy")
+CANDIDATES = ("claude", "codex", "copilot", "agy", "cursor")
 
 
 def _found() -> list[tuple[str, str]]:
@@ -87,7 +87,7 @@ def run(db: Path | str | None, *, assume_yes: bool = False) -> int:
     found = _found()
     if not found:
         print("  No agent CLIs found on PATH.")
-        print("  Install at least one — claude, codex, copilot or agy — and run this again.")
+        print("  Install at least one — claude, codex, copilot, agy or cursor-agent — and run this again.")
         return 1
 
     print("  Found on your PATH:")

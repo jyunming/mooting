@@ -270,6 +270,57 @@ def test_agy_plan_mode_and_codex_approval_flags_survive(tmp_path):
     assert "plan" in agy, f"agy lost its read-only mode: {agy}"
 
 
+def test_a_cursor_seat_is_contained_by_its_workspace(tmp_path):
+    """Cursor's read-only modes refuse MCP calls too -- plan and ask each exited
+    0 with nothing on the board -- so its containment is a scratch workspace
+    whose `cli.json` denies writes and shell. Lose that file, or pass `--force`,
+    and an agent-mode seat can edit and run anything."""
+    import json
+
+    from mooting.drivers.base import Seat
+    from mooting.drivers.spawn import CursorDriver
+
+    board = tmp_path / "board.db"
+    seat = Seat(topic_id=1, topic_slug="t", agent="Cora", kind="cursor",
+                cli_session=None, cfg={"cwd": str(tmp_path / "project")})
+    driver = CursorDriver(board)
+
+    argv = driver.argv(seat, "a\nmulti-line\nprompt", None)
+    assert "a\nmulti-line\nprompt" not in argv, "the .CMD shim cannot carry it"
+    assert driver.prompt_via_stdin
+    assert "--approve-mcps" in argv, f"the server would never load: {argv}"
+    assert not {"--force", "--yolo", "--mode", "--plan"} & set(argv), argv
+
+    ws = pathlib.Path(driver.working_dir(seat))
+    assert ws != tmp_path / "project", "the seat must not run in the project"
+    rules = json.loads((ws / ".cursor" / "cli.json").read_text(encoding="utf-8"))
+    assert {"Write(**)", "Shell(*)"} <= set(rules["permissions"]["deny"])
+    server = json.loads((ws / ".cursor" / "mcp.json").read_text(encoding="utf-8"))
+    assert server["mcpServers"]["mooting"]["args"][-3:] == ["Cora", "--db", str(board)], \
+        "the server must be bound to this seat's own name"
+
+
+def test_a_cursor_seat_refuses_a_task_rather_than_working_blind(tmp_path):
+    """Cursor only loads MCP from the workspace it edits, so a worker would
+    need our config written into the user's worktree. Until that is solved
+    the wake fails loudly, without spawning the CLI or spending quota."""
+    import asyncio
+
+    from mooting.drivers.base import Seat
+    from mooting.drivers.spawn import CursorDriver
+
+    seat = Seat(topic_id=1, topic_slug="t", agent="Cora", kind="cursor",
+                cli_session=None, executing=True, cfg={"cwd": str(tmp_path)})
+    driver = CursorDriver(tmp_path / "board.db")
+    driver.binary = "definitely-not-on-path-cursor"
+
+    result = asyncio.run(driver.wake(seat, "do the task"))
+
+    assert not result.ok
+    assert "cannot work tasks" in result.detail
+    assert not (tmp_path / ".cursor").exists(), "nothing may be written to the worktree"
+
+
 # ------------------------------------------------------- model listing
 
 def test_model_list_parsing_survives_real_cli_output():
