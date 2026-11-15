@@ -621,17 +621,31 @@ function renderSide(d) {
     $("agendaedit").value = d.agenda.join("\n");
     $("effort").value = d.effort || "low";
     $("rounds").value = d.max_rounds;
+    baseline = { agenda: $("agendaedit").value, effort: $("effort").value, rounds: $("rounds").value };
   }
   renderProposals(d.proposals);
 }
 
+// Every board event refreshes this list, and a council that is running sends
+// one every few seconds. Rebuilding it while the chair is typing a reason threw
+// the reason away, so an open sign-off holds the list still until it is sent
+// or cancelled.
+let signing = false;
+// Each render awaits the votes of every open proposal. Two refreshes close
+// together could both finish and append twice, so only the newest one lands.
+let renderSeq = 0;
 async function renderProposals(list) {
-  const box = $("plist");
+  if (signing) return;
+  const mine = ++renderSeq;
   const open = list.filter(p => p.status === "open");
   const rest = list.filter(p => !open.includes(p));
+  const cards = [];
+  for (const p of open) cards.push(await proposalCard(p));
+  if (mine !== renderSeq || signing) return;
+  const box = $("plist");
   box.replaceChildren();
   if (!list.length) { box.appendChild(el("p", "note", "none yet")); return; }
-  for (const p of open) box.appendChild(await proposalCard(p));
+  cards.forEach(c => box.appendChild(c));
   rest.forEach(p => box.appendChild(el("p", "note", "#" + p.id + " " + p.title + " — " + p.status)));
 }
 
@@ -652,6 +666,7 @@ async function proposalCard(p) {
   if (!canAct()) start.title = "needs a seat token";
   area.appendChild(start);
   start.onclick = () => {
+    signing = true;
     area.replaceChildren();
     const why = el("input"); why.type = "text"; why.placeholder = "why (the seats read this)";
     const yes = el("button", "ok", "Approve"), no = el("button", "no", "Reject"), back = el("button", "", "Cancel");
@@ -665,11 +680,12 @@ async function proposalCard(p) {
                           { approve, why: why.value });
       if (!r.ok) { flash(r.data.error || ("refused: " + r.status)); yes.disabled = no.disabled = false; return; }
       flash("");
+      signing = false;
       refresh();
     };
     yes.onclick = () => decide(true);
     no.onclick = () => decide(false);
-    back.onclick = () => refresh();
+    back.onclick = () => { signing = false; refresh(); };
   };
   d.appendChild(area);
   return d;
@@ -687,7 +703,9 @@ async function open(s) {
   if (abort) abort.abort();
   slug = s; seen.clear(); $("log").replaceChildren(); flash("");
   try { sessionStorage.setItem("mooting-topic", s); } catch (e) {}
+  signing = false;
   const r = await api("GET", path(s));
+  if (slug !== s) return;           // another meeting was picked while this loaded
   if (!r.ok) { flash(r.data.error || "could not open " + s); return; }
   detail = r.data;
   renderSide(detail);
@@ -748,10 +766,18 @@ $("stop").onclick = async () => {
   const r = await api("POST", path(slug) + "/stop");
   flash(r.ok ? (r.data.stopping ? "" : "nothing was running") : (r.data.error || ("refused: " + r.status)));
 };
+// What the form showed when it was filled. Save sends only the fields that
+// differ from it: sending all three rewrote a prose brief as bullet points when
+// only the effort was changed, and set the rounds again to the same number.
+let baseline = null;
 $("save").onclick = async () => {
-  const agenda = $("agendaedit").value.split("\n").map(x => x.trim()).filter(Boolean);
-  const r = await api("PATCH", path(slug),
-                      { agenda, effort: $("effort").value, rounds: parseInt($("rounds").value, 10) });
+  const patch = {};
+  if (!baseline || $("agendaedit").value !== baseline.agenda)
+    patch.agenda = $("agendaedit").value.split("\n").map(x => x.trim()).filter(Boolean);
+  if (!baseline || $("effort").value !== baseline.effort) patch.effort = $("effort").value;
+  if (!baseline || $("rounds").value !== baseline.rounds) patch.rounds = parseInt($("rounds").value, 10);
+  if (!Object.keys(patch).length) { flash("nothing changed"); return; }
+  const r = await api("PATCH", path(slug), patch);
   if (!r.ok) { flash(r.data.error || ("refused: " + r.status)); return; }
   flash(""); $("settings").open = false; detail = Object.assign(detail, r.data); renderSide(detail);
 };
