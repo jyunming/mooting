@@ -152,8 +152,8 @@ def build_app(db: Path | str | None, token: str, *, human: str,
         token = supplied[len(prefix):]
 
         # A per-seat token says who you are. The single shared token belongs to
-        # no seat, so it cannot sign off and cannot post. It can still run, stop
-        # and retune a meeting, which spends quota -- see ROADMAP E5.
+        # no seat, so it may only read: everything that acts needs a seat, and
+        # each route that acts asks for one (`need_seat`).
         seat = request.app[STORE].seat_for_token(token)
         shared = request.app[TOKEN]
         if seat is None and not (shared and secrets.compare_digest(token, shared)):
@@ -164,6 +164,22 @@ def build_app(db: Path | str | None, token: str, *, human: str,
     def acting(request):
         """The seat this request acts as, or None for the shared read token."""
         return request.get(SEAT)
+
+    def need_seat(request, doing: str):
+        """A refusal for the shared token, or None when a seat is acting.
+
+        Run spends every seat's quota, and the shared token is the one in the
+        URL `mooting serve` prints: anyone handed that link could start a
+        council on the owner's subscriptions. Stopping and retuning are cheap,
+        but they change what a meeting does, and a meeting is a person's to
+        change. So anything that acts needs a token that names somebody.
+        """
+        if acting(request):
+            return None
+        return web.json_response(
+            {"error": f"this token may read but not {doing}; that needs a token "
+                      f"issued to a seat (mooting serve --grant <seat>)"},
+            status=403)
 
     async def decide(request):
         """Sign off on a proposal, over HTTP.
@@ -337,12 +353,15 @@ def build_app(db: Path | str | None, token: str, *, human: str,
         topic runs for at least one round, turns follow rounds -- are enforced in
         one place rather than re-stated here.
         """
+        refused = need_seat(request, "change a meeting")
+        if refused:
+            return refused
         s = request.app[STORE]
         try:
             t = s.topic(request.match_info["slug"])
         except StoreError as exc:
             return web.json_response({"error": str(exc)}, status=404)
-        tid, who = int(t["id"]), request.app[HUMAN]
+        tid, who = int(t["id"]), acting(request)
         patch = await request.json()
         try:
             if "agenda" in patch:
@@ -361,6 +380,8 @@ def build_app(db: Path | str | None, token: str, *, human: str,
                 s.set_rounds(tid, int(patch["rounds"]), who)
         except (StoreError, ValueError) as exc:
             return web.json_response({"error": str(exc)}, status=400)
+        s.audit(who, "patch", {k: patch[k] for k in ("agenda", "effort", "rounds")
+                               if k in patch}, topic_id=tid)
         return web.json_response(_topic_json(s, s.topic(tid)))
 
     async def proposals(request):
@@ -394,6 +415,9 @@ def build_app(db: Path | str | None, token: str, *, human: str,
         on one board and every seat is woken twice. So the server keeps one task
         per topic and refuses to start a second.
         """
+        refused = need_seat(request, "run a meeting")
+        if refused:
+            return refused
         s = request.app[STORE]
         try:
             t = s.topic(request.match_info["slug"])
@@ -427,9 +451,13 @@ def build_app(db: Path | str | None, token: str, *, human: str,
                 s.release_drive(tid, SESSION)
 
         running[tid] = asyncio.create_task(drive())
+        s.audit(acting(request), "run", topic_id=tid)
         return web.json_response({"running": t["slug"]})
 
     async def stop_topic(request):
+        refused = need_seat(request, "stop a meeting")
+        if refused:
+            return refused
         s = request.app[STORE]
         try:
             t = s.topic(request.match_info["slug"])
@@ -440,6 +468,7 @@ def build_app(db: Path | str | None, token: str, *, human: str,
         if task is None or task.done():
             return web.json_response({"running": None})
         task.cancel()
+        s.audit(acting(request), "stop", topic_id=tid)
         return web.json_response({"stopping": t["slug"]})
 
     async def index(request):
@@ -477,8 +506,8 @@ def serve(db, *, host: str, port: int, token: str | None, human: str,
     print(f"  url      http://{host}:{port}/?token={token}")
     print(f"  token    {token}")
     print()
-    print("  this token reads, runs and stops; it cannot speak or sign off. For")
-    print("  that, `mooting serve --grant <you>` and paste that token into the page.")
+    print("  this token only reads. To run a meeting, speak or sign off,")
+    print("  `mooting serve --grant <you>` and paste that token into the page.")
     print("  The URL above will be in your browser history: treat it as a password.")
     if host not in LOOPBACK:
         print("  WARNING: not loopback. Anyone who reaches this port is you.")
@@ -547,8 +576,8 @@ PAGE = r"""<!doctype html>
       <button id="save">Save</button></div>
   </details>
   <details id="identity"><summary id="whoami">…</summary>
-    <p class="note">A token from <code>mooting serve --grant &lt;you&gt;</code> speaks and signs off as
-      that seat. It is kept in this tab only and never put in the address bar.</p>
+    <p class="note">A token from <code>mooting serve --grant &lt;you&gt;</code> runs meetings, speaks
+      and signs off as that seat. It is kept in this tab only and never put in the address bar.</p>
     <div class="row"><input id="tok" type="password" autocomplete="off" placeholder="paste a seat token">
       <button id="usetok">Use it</button><button id="forget">Forget it</button></div>
   </details>
@@ -606,8 +635,14 @@ function canAct() { return seat !== null; }
 function renderIdentity() {
   $("whoami").textContent = canAct()
     ? "speaking as " + seat
-    : "watching with the shared token: you can read, run and stop. Open this to speak and sign off.";
+    : "watching with the shared token: you can read. Open this to run, speak and sign off.";
   $("body").disabled = $("send").disabled = !canAct();
+  // The server refuses all three for the shared token; a button that only
+  // ever answers 403 says so before it is pressed.
+  for (const id of ["run", "stop", "save"]) {
+    $(id).disabled = !canAct();
+    $(id).title = canAct() ? "" : "needs a seat token";
+  }
   $("sayhint").textContent = canAct() ? "" : "needs a seat token, below";
   $("forget").disabled = !seatToken;
 }

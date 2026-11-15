@@ -145,7 +145,7 @@ mooting attach <topic> <file> [--note W]    # feed a document to a council
 mooting attach <topic>                     # list them; --rm <id> removes one
 mooting serve [--port 4173] [--token T]    # the board over HTTP; loopback only
 mooting serve --web                        # the whole session, in a browser
-mooting serve --grant <seat>               # a token that may speak and sign off as it
+mooting serve --grant <seat>               # a token that may run, speak and sign off as it
 mooting serve --revoke <seat>              # withdraw it
 mooting telegram --token <bot> --chat <id> # run a council in a Telegram chat
 mooting telegram                           #   the token is remembered after

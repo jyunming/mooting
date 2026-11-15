@@ -191,7 +191,7 @@ def test_a_token_is_issued_only_to_a_person(run, council):
     assert code == 1, "a token on an agent seat would be a way to sign off as one"
 
     code, out = run("serve", "--grant", "jeremy")
-    assert code == 0 and "may speak and sign off" in out
+    assert code == 0 and "may run meetings, speak and sign off" in out
     assert council.token_holders() == ["jeremy"]
 
     assert "revoked" in run("serve", "--revoke", "jeremy")[1]
