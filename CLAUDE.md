@@ -153,7 +153,7 @@ Rules, in order of how much they matter:
 
 ```bash
 pip install -e ".[dev]"
-python -X utf8 -m pytest -q        # 494 tests, ~50s on Linux
+python -X utf8 -m pytest -q        # 524 tests, ~60s on Windows
 python -X utf8 tools/build_site.py # landing page + docs, fails on dead links
 ```
 
@@ -183,9 +183,11 @@ do. It costs metered quota, so do not add a third turn without a reason as good.
 
 ## Open questions
 
-- The repo's git *history* still contains a committed working board with real
-  councils in it. Removing it means rewriting and force-pushing public history —
-  a decision for the owner, not something to do unprompted.
+- The committed working boards (`.mooting/board.db`, `.concord/`) were removed
+  from git history on 2026-11-15, at the owner's word, and `main` and the three
+  release tags were force-pushed. GitHub still serves the old commits by hash,
+  because each pull request keeps a ref to its history that only GitHub Support
+  can purge. Until they do, treat that content as still public.
 - `mentions.asking` is backfilled on older boards by whether the body opens with
   `@target`, which is a guess. It stays a guess -- the information was never
   recorded -- but every row it touches is now marked `asking_inferred`, and
