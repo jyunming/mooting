@@ -130,6 +130,40 @@ def test_a_cancelled_wake_kills_the_child_process():
     # loop complaining about a live transport is the observable part.
 
 
+def test_a_cancelled_wake_leaves_no_traceback_in_the_log():
+    """A timed-out agy turn on the G4b run left "_GatheringFuture exception was
+    never retrieved" and a CancelledError traceback in an unattended log, which
+    reads as a crash. The run was fine: the gather inside `_run` was cancelled and
+    nobody read its result."""
+    import gc
+    import sys
+
+    from mooting.drivers.base import Driver
+
+    class Sleeper(Driver):
+        binary = "python"
+
+        async def wake(self, seat, prompt):      # pragma: no cover - unused
+            return None
+
+    complaints: list = []
+
+    async def go():
+        asyncio.get_running_loop().set_exception_handler(
+            lambda loop, ctx: complaints.append(ctx.get("message")))
+        # The supervisor's own deadline is what cancels a turn in practice.
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                Sleeper()._run([sys.executable, "-c", "import time; time.sleep(60)"],
+                               cwd=".", timeout=60),
+                timeout=1.0)
+        gc.collect()
+        await asyncio.sleep(0)
+
+    asyncio.run(go())
+    assert not complaints, complaints
+
+
 @pytest.mark.skipif(os.name != "nt", reason="the shim chain is a Windows thing")
 def test_a_timed_out_wake_kills_the_cli_behind_the_shim_not_just_the_shim(tmp_path):
     """On Windows every vendor CLI starts as a `.CMD` shim: cmd.exe, then

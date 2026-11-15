@@ -324,9 +324,14 @@ class Driver(abc.ABC):
 
         readers = [asyncio.ensure_future(drain(proc.stdout, out)),
                    asyncio.ensure_future(drain(proc.stderr, err))]
+        turn = asyncio.gather(feed(), exited())
+        # A cancelled turn leaves this gather holding a CancelledError that
+        # nobody reads, and asyncio prints it as "exception was never retrieved"
+        # with a traceback. In an unattended log that reads as a crash. Reading
+        # it here, whenever it finishes, is all it takes.
+        turn.add_done_callback(lambda f: f.cancelled() or f.exception())
         try:
-            await asyncio.wait_for(asyncio.gather(feed(), exited()),
-                                   timeout=timeout or self.timeout_s)
+            await asyncio.wait_for(turn, timeout=timeout or self.timeout_s)
             # The CLI has exited, but a process it started can still hold its
             # pipes. cursor-agent's self-updater did, and `communicate()` then
             # waited for the updater: a task done and reported at 52 s was
