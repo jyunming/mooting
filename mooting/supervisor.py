@@ -431,12 +431,26 @@ class Supervisor:
                 log.exception("driver %s raised for %s", driver.kind, agent)
                 result = WakeResult.failure(f"{type(exc).__name__}: {exc}")
 
-            self.store.finish_wake(wake_id, "ok" if result.ok else "error",
-                               result.detail, result.usage)
-
             spoke = self.store.q1(
                 "SELECT COUNT(*) c FROM messages WHERE topic_id = ? AND author = ?",
                 (topic_id, agent))["c"] > before
+
+            if not result.ok and spoke:
+                # It posted, and then its CLI timed out or failed on the way out.
+                # Found on G4b: an agy seat posted at 278 s, was stopped at 300 s,
+                # and the board said "wake failed" and kept the cursor back while
+                # the council had already read its answer. The turn is judged by
+                # what reached the board; the CLI's trouble stays in the detail.
+                self.store.post(
+                    topic_id, "mooting",
+                    f"{agent} posted, but its CLI did not finish cleanly "
+                    f"({result.detail}). The post stands.",
+                    kind="system", count_turn=False)
+                result = WakeResult(ok=True, detail=f"posted, then {result.detail}",
+                                    tail=result.tail, usage=result.usage)
+
+            self.store.finish_wake(wake_id, "ok" if result.ok else "error",
+                               result.detail, result.usage)
 
             if result.ok and not spoke:
                 # The CLI ran and exited clean while the seat said nothing. That is
