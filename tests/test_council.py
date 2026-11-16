@@ -188,6 +188,44 @@ def test_successful_wake_advances_the_cursor(board):
     assert "First argument." not in prompt, "already-seen message replayed"
 
 
+def test_a_seat_that_posted_and_then_ran_out_of_time_is_counted_by_its_post(board):
+    """On G4b an agy seat took 278 s to post and was stopped at 300 s, inside its
+    usual 9-30 s between posting and exiting. The board then said "wake failed",
+    kept the cursor back and marked the turn failed, though the post was there
+    and the council had read it. What reached the board is what the turn did."""
+    from mooting.drivers.base import Driver, WakeResult
+
+    class PostsThenHangs(Driver):
+        kind = "fake"
+        timeout_s = 0.5
+
+        async def wake(self, seat, prompt):
+            board.post(seat.topic_id, seat.agent, "Real: the cache is never cleared.")
+            await asyncio.sleep(5)
+            return WakeResult(ok=True)           # pragma: no cover - never reached
+
+    topic = open_debate(board)
+    board.post(topic, "claude", "First argument.")
+    asyncio.run(Supervisor(board, {"codex": PostsThenHangs()}).wake_seat(topic, "codex"))
+
+    seat = board.seat(topic, "codex")
+    assert seat["state"] == "idle"
+    assert seat["last_seen"] > 0, "it answered this prompt; replaying it would ask again"
+    wake = board.q1("SELECT outcome, detail FROM wakes WHERE agent = 'codex'")
+    assert wake["outcome"] == "ok" and "timed out" in wake["detail"]
+    notes = [m["body"] for m in board.transcript(topic, limit=None) if m["author"] == "mooting"]
+    assert not any("wake failed" in n for n in notes), notes
+    assert any("posted" in n and "timed out" in n for n in notes), notes
+
+
+def test_a_seat_that_failed_without_posting_is_still_a_failed_wake(board):
+    topic = open_debate(board)
+    driver = FakeDriver(board, fail_agents={"codex"})
+    asyncio.run(Supervisor(board, {"codex": driver}).wake_seat(topic, "codex"))
+    assert board.seat(topic, "codex")["state"] == "failed"
+    assert board.q1("SELECT outcome FROM wakes WHERE agent = 'codex'")["outcome"] == "error"
+
+
 @pytest.mark.parametrize("with_drivers", [True, False])
 def test_the_prompt_names_the_server_the_seat_was_actually_given(board, with_drivers):
     """The prompt told every seat to post only through `mooting-<seat>` and warned
